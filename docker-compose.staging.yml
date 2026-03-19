@@ -1,0 +1,61 @@
+# Staging overlay — use alongside docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
+#
+# Runs on offset ports (8001/3001) with isolated volumes so prod and staging
+# coexist on the same host without conflicts.
+
+name: youtube-model-feeder-staging
+
+services:
+  postgres:
+    container_name: staging_postgres
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - staging_postgres_data:/var/lib/postgresql/data
+
+  redis:
+    container_name: staging_redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - staging_redis_data:/data
+
+  api:
+    container_name: staging_api
+    ports:
+      - "8001:8000"
+    environment:
+      ENVIRONMENT: staging
+    volumes:
+      - staging_app_data:/data
+
+  celery_worker:
+    container_name: staging_celery_worker
+    environment:
+      ENVIRONMENT: staging
+    volumes:
+      - staging_app_data:/data
+
+  web:
+    container_name: staging_web
+    build:
+      args:
+        NEXT_PUBLIC_API_URL: http://${LXC_HOST:-localhost}:8001/api
+    ports:
+      - "3001:3000"
+    environment:
+      NODE_ENV: staging
+
+  pgadmin:
+    container_name: staging_pgadmin
+    ports:
+      - "5051:80"
+
+volumes:
+  staging_postgres_data:
+    driver: local
+  staging_redis_data:
+    driver: local
+  staging_app_data:
+    driver: local

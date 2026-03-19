@@ -1,0 +1,32 @@
+# RepoSec configuration
+# See: https://github.com/DevOpsCelstn/reposec
+
+# Minimum severity to report: critical, high, medium, low
+severity_threshold: low
+
+# Glob patterns for paths to exclude from scanning
+exclude_paths:
+  - ".git/**"
+  - ".venv/**"
+  - ".venv312/**"
+  - ".pytest_cache/**"
+  - ".next/**"
+  - "frontend/.next/**"
+  - "frontend/node_modules/**"
+  - "vendor/**"
+  - "node_modules/**"
+  - "dist/**"
+  - "build/**"
+  - "e2e-report*/**"
+  - "e2e-results/**"
+  - "data/**"
+  - "**/fixtures/**"
+  - "**/__snapshots__/**"
+
+# Rule IDs to disable
+disable_rules: []
+  # - SHELL-008
+  # - JS-007
+
+# Additional directories containing custom rule modules
+custom_rules_dirs: []

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Backend tests (using project venv)
+echo "[pre-commit] Running backend tests..."
+PYTHONPATH="$REPO_ROOT/backend" "$REPO_ROOT/.venv/bin/python" -m pytest "$REPO_ROOT/tests/" -q --tb=short --ignore="$REPO_ROOT/tests/test_lxc_deploy.py"
+
+# Frontend tests
+echo "[pre-commit] Running frontend tests..."
+(cd "$REPO_ROOT/frontend" && npm test -- --reporter=dot)

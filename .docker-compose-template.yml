@@ -1,0 +1,51 @@
+"""
+Docker Compose Configuration
+
+Purpose:
+    Orchestrate multi-container development environment.
+
+TODO - docker-compose.yml Contents:
+    1. Backend service:
+       - Image or build context
+       - Port mapping (8000:8000)
+       - Environment variables
+       - Volume mounts
+       - Depends on database
+    2. Frontend service:
+       - Image or build context
+       - Port mapping (3000:3000)
+       - Environment variables
+       - Volume mounts
+       - Depends on backend
+    3. PostgreSQL service:
+       - Image and version
+       - Port mapping (5432:5432)
+       - Environment variables (POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB)
+       - Volume for data persistence
+       - Health check
+    4. Redis service:
+       - Image and version
+       - Port mapping (6379:6379)
+       - Persistence configuration
+       - Health check
+    5. Celery Worker service:
+       - Image (same as backend)
+       - Command: celery worker
+       - Environment variables
+       - Depends on Redis and database
+    6. Networks:
+       - Define custom network for service communication
+    7. Volumes:
+       - Database volume
+       - Cache volume
+       - Application volumes
+    8. Environment:
+       - Development-specific overrides
+       - Debugging options
+    9. Logging:
+       - Log driver configuration
+       - Log options
+    10. Build:
+        - Build arguments
+        - Cache settings
+"""

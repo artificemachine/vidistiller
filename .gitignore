@@ -1,0 +1,150 @@
+
+# serena
+.serena/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual Environments
+venv/
+ENV/
+env/
+.venv/
+.venv*/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+.env.local
+
+# Environment Files
+.env
+.env.*.local
+.env.production.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Node.js / Frontend
+node_modules/
+.next/
+.npm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+jest-coverage/
+.nyc_output/
+coverage/
+
+# Build outputs
+dist/
+build/
+.turbo/
+
+# Temporary files
+.tmp/
+temp/
+tmp/
+
+# Cache
+.cache/
+*.cache
+
+# Docker
+docker-compose.override.yml
+.dockerignore
+
+# Local development
+.vscode/settings.json
+.DS_Store
+
+# Model files (large LLM models)
+ollama_data/
+*.bin
+*.pt
+*.pth
+
+# Video/Media files (if downloaded)
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.flv
+
+# PDF exports
+exports/
+*.pdf
+
+# Runtime data (videos, snapshots, etc.)
+data/
+
+# Screenshot/snapshot cache
+snapshots/cache/
+
+# E2E test artifacts
+e2e/.auth/
+e2e/node_modules
+e2e-results/
+e2e-report/
+
+# IDE extensions
+.pylance/
+
+# E2E testing
+e2e-report/
+e2e-report */
+e2e-results/
+e2e/.auth/
+e2e/node_modules/
+
+# pencil-sync
+.pencil-sync-state.json
+
+# AI assistant context files (may contain private paths/instructions)
+CLAUDE.md
+AGENTS.md
+
+# codex-pii-guard:start
+.env
+.env.local
+.env.*.local
+*.log
+*.session
+*.transcript
+.git_new/
+!.env.example
+# codex-pii-guard:end
+
+# Security scan output
+shipguard.txt

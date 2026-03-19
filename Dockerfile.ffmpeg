@@ -1,0 +1,6 @@
+# FFmpeg CUDA Docker configuration
+# Uses NVIDIA CUDA 12.2.0 runtime image for GPU acceleration
+# Installs FFmpeg for video processing with CUDA support
+# Includes Python 3.12 for snapshot extraction service
+# Reserves GPU resources for containerized execution
+# Exposes service on port for inter-service communication

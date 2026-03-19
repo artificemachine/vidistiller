@@ -1,0 +1,56 @@
+"""
+Gitignore Configuration
+
+Purpose:
+    Specify files and directories to exclude from version control.
+
+TODO - Gitignore Contents:
+    1. Python:
+       - __pycache__/
+       - *.py[cod]
+       - *$py.class
+       - *.egg-info/
+       - dist/
+       - build/
+       - .eggs/
+    2. Virtual Environments:
+       - venv/
+       - ENV/
+       - env/
+    3. IDE:
+       - .vscode/
+       - .idea/
+       - *.swp
+       - *.swo
+       - *~
+    4. OS:
+       - .DS_Store
+       - Thumbs.db
+       - .env.local
+    5. Environment Files:
+       - .env
+       - .env.*.local
+       - .env.production.local
+    6. Logs:
+       - logs/
+       - *.log
+    7. Database:
+       - *.db
+       - *.sqlite
+    8. Node.js:
+       - node_modules/
+       - .next/
+       - .npm
+    9. Testing:
+       - .coverage
+       - htmlcov/
+       - .pytest_cache/
+       - jest-coverage/
+    10. Build outputs:
+        - dist/
+        - build/
+        - .turbo/
+    11. Temporary files:
+        - .tmp/
+        - temp/
+"""

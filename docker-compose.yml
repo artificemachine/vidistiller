@@ -1,0 +1,334 @@
+# Pin the Compose project name so volumes/networks survive directory renames.
+name: youtube-model-feeder
+
+# "services:" is the top-level key that defines all the containers Docker Compose will manage.
+# Each child key (postgres, redis, api, etc.) becomes a separate container you can start/stop together.
+services:
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # PostgreSQL — relational database
+    # Stores jobs, videos, transcripts, snapshots, and documents persistently.
+    # Uses the Alpine variant for a smaller image footprint.
+    # ──────────────────────────────────────────────────────────────────────────
+    postgres:
+      # "image:" tells Docker which pre-built image to pull from Docker Hub.
+      # "postgres:15-alpine" = PostgreSQL version 15 on a lightweight Alpine Linux base.
+      image: postgres:15-alpine
+      restart: unless-stopped
+      logging:
+        driver: json-file
+        options:
+          max-size: "20m"
+          max-file: "5"
+
+      # "container_name:" gives the running container a fixed, human-readable name
+      # so you can reference it easily (e.g. `docker logs tutorial_postgres`).
+      container_name: tutorial_postgres
+
+      # "environment:" passes environment variables INTO the container at runtime.
+      # The PostgreSQL image reads these to create the initial database and user.
+      # ${VAR} syntax pulls values from your .env file so secrets stay out of this file.
+      environment:
+        POSTGRES_USER: ${DB_USER}           # Database username created on first run
+        POSTGRES_PASSWORD: ${DB_PASSWORD}   # Password for that user
+        POSTGRES_DB: ${DB_NAME}             # Name of the default database to create
+
+      # "ports:" maps a port on your HOST machine to a port INSIDE the container.
+      # Format: "HOST_PORT:CONTAINER_PORT"
+      # This lets tools on your laptop (pgAdmin, psql, DBeaver) connect to the database.
+      ports:
+        - "127.0.0.1:${DB_PORT}:5432"   # Bind to loopback only — DB must not be reachable externally
+
+      # "volumes:" mounts storage so data survives container restarts.
+      # "postgres_data" is a named volume (defined at the bottom of this file).
+      # It maps to the directory where PostgreSQL stores its files inside the container.
+      # Without this, all data would be lost every time the container stops.
+      volumes:
+        - postgres_data:/var/lib/postgresql/data
+
+      # "healthcheck:" tells Docker how to verify this container is truly ready,
+      # not just running. Other services use this to wait before starting (see depends_on).
+      healthcheck:
+        # "test:" the command Docker runs inside the container to check health.
+        # pg_isready is a PostgreSQL utility that returns 0 (success) when the DB accepts connections.
+        test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+        # "interval:" how often Docker runs the health check (every 10 seconds).
+        interval: 10s
+        # "timeout:" if the check command doesn't respond within this time, it counts as a failure.
+        timeout: 5s
+        # "retries:" how many consecutive failures before Docker marks the container as "unhealthy".
+        retries: 5
+
+      # "networks:" connects this container to a virtual network so it can talk to other services
+      # by name (e.g. the api container can reach postgres using the hostname "postgres").
+      networks:
+        - tutorial_network
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Redis — in-memory key-value store
+    # Used for two things:
+    #   1. Caching (session data, rate-limit counters, temporary results)
+    #   2. Message broker for Celery (delivers tasks to the worker)
+    # ──────────────────────────────────────────────────────────────────────────
+    redis:
+      image: redis:7-alpine
+      restart: unless-stopped
+      container_name: tutorial_redis
+      logging:
+        driver: json-file
+        options:
+          max-size: "20m"
+          max-file: "5"
+
+      ports:
+        - "${REDIS_PORT}:6379"   # 6379 is Redis's default port
+
+      # Persist Redis data to disk so cached values survive restarts.
+      volumes:
+        - redis_data:/data
+
+      healthcheck:
+        # "redis-cli ping" returns "PONG" when Redis is ready.
+        test: ["CMD", "redis-cli", "ping"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+
+      networks:
+        - tutorial_network
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # API — FastAPI backend (Python)
+    # The main REST API that handles HTTP requests, orchestrates services,
+    # and exposes interactive docs at /docs (Swagger UI).
+    # ──────────────────────────────────────────────────────────────────────────
+    api:
+      # "build:" tells Docker to BUILD an image from a Dockerfile instead of pulling one.
+      # "context:" is the directory sent to the Docker daemon (the "build context").
+      # "dockerfile:" is the name of the Dockerfile inside that directory.
+      logging:
+        driver: json-file
+        options:
+          max-size: "20m"
+          max-file: "5"
+      build:
+        context: ./backend
+        dockerfile: Dockerfile
+
+      container_name: tutorial_api
+      restart: unless-stopped
+
+      # All the env vars the FastAPI app reads at startup.
+      # These configure database connections, external services, auth, logging, etc.
+      environment:
+        DATABASE_URL: ${DATABASE_URL}         # Full connection string for PostgreSQL
+        REDIS_URL: ${REDIS_URL}               # Full connection string for Redis
+        OLLAMA_URL: ${OLLAMA_URL}               # URL of the Ollama LLM service
+        OLLAMA_MODEL: ${OLLAMA_MODEL}         # Ollama model name (e.g. qwen3:8b)
+        JWT_SECRET_KEY: ${JWT_SECRET_KEY}     # Secret used to sign authentication tokens
+        API_HOST: 0.0.0.0                     # Listen on all interfaces (required inside Docker)
+        API_PORT: ${API_PORT}                 # Port the FastAPI server binds to
+        CORS_ORIGINS: ${CORS_ORIGINS}         # Allowed frontend origins for cross-origin requests
+        LOG_LEVEL: ${LOG_LEVEL}               # e.g. "debug", "info", "warning"
+        ENVIRONMENT: ${ENVIRONMENT}           # e.g. "development", "production"
+        SENTRY_DSN: ${SENTRY_DSN:-}
+        SENTRY_ENABLED: ${SENTRY_ENABLED:-false}
+        SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+        SENTRY_ENVIRONMENT: ${ENVIRONMENT}
+        DATA_DIR: /data                        # Where snapshots and videos are stored
+        FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY}  # Fernet key for encrypting LLM API keys at rest
+
+      ports:
+        - "${API_PORT}:8000"
+
+      # "depends_on:" controls startup ORDER and, with "condition: service_healthy",
+      # ensures this container waits until postgres and redis pass their health checks.
+      # Without this, the API might start before the database is ready and crash.
+      depends_on:
+        postgres:
+          condition: service_healthy
+        redis:
+          condition: service_healthy
+
+      # Bind-mount the local source code into the container.
+      # Changes you make on your laptop are instantly visible inside the container,
+      # enabling hot-reload during development (no rebuild needed).
+      volumes:
+        - ./backend:/app              # Backend source code
+        - ./services:/services        # Shared service modules (youtube, transcript, etc.)
+        - app_data:/data              # Persistent storage for snapshots and videos
+        - ./alembic.ini:/app/alembic.ini  # Alembic config (in WORKDIR so alembic finds it)
+        - ./migrations:/app/migrations    # Alembic migration scripts
+
+      # Allow containers to reach host services (e.g. Ollama) via host.docker.internal
+      extra_hosts:
+        - "host.docker.internal:host-gateway"
+
+      healthcheck:
+        # curl the /health endpoint; returns 0 if the API responds with HTTP 200.
+        test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+
+      networks:
+        - tutorial_network
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Celery Worker — background task processor
+    # Picks up long-running jobs from the Redis queue and executes them:
+    #   - YouTube video downloads
+    #   - Audio transcription via Ollama
+    #   - Snapshot extraction with FFmpeg
+    #   - LLM-powered document generation
+    # Uses the SAME Docker image as the api but overrides the startup command.
+    # ──────────────────────────────────────────────────────────────────────────
+    celery_worker:
+      logging:
+        driver: json-file
+        options:
+          max-size: "20m"
+          max-file: "5"
+      build:
+        context: ./backend
+        dockerfile: Dockerfile
+
+      container_name: tutorial_celery_worker
+      restart: unless-stopped
+
+      # "command:" overrides the default CMD in the Dockerfile.
+      # Instead of starting the FastAPI server, this container runs a Celery worker process.
+      command: celery -A app.tasks worker --loglevel=${LOG_LEVEL:-info}
+
+      environment:
+        DATABASE_URL: ${DATABASE_URL}
+        REDIS_URL: ${REDIS_URL}
+        OLLAMA_URL: ${OLLAMA_URL}
+        OLLAMA_MODEL: ${OLLAMA_MODEL}
+        JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+        ENVIRONMENT: ${ENVIRONMENT}
+        LOG_LEVEL: ${LOG_LEVEL}
+        SENTRY_DSN: ${SENTRY_DSN:-}
+        SENTRY_ENABLED: ${SENTRY_ENABLED:-false}
+        SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+        SENTRY_ENVIRONMENT: ${ENVIRONMENT}
+        DATA_DIR: /data
+        FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY}  # Fernet key for encrypting LLM API keys at rest
+
+      extra_hosts:
+        - "host.docker.internal:host-gateway"
+
+      mem_limit: 4g
+      cpus: '2.0'
+
+      healthcheck:
+        test: ["CMD-SHELL", "celery -A app.tasks inspect ping --timeout 5 -d celery@$$HOSTNAME || exit 1"]
+        interval: 30s
+        timeout: 15s
+        start_period: 40s
+        retries: 3
+
+      # Simple depends_on (without condition) just ensures postgres and redis START first,
+      # but does NOT wait for them to be healthy. Celery retries on its own if the broker isn't ready.
+      depends_on:
+        - postgres
+        - redis
+
+      volumes:
+        - ./backend:/app
+        - ./services:/services
+        - app_data:/data              # Shared persistent storage for snapshots and videos
+        - ./alembic.ini:/app/alembic.ini  # Alembic config (in WORKDIR so alembic finds it)
+        - ./migrations:/app/migrations    # Alembic migration scripts
+
+      networks:
+        - tutorial_network
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Web — Next.js frontend (React + TypeScript)
+    # Serves the UI where users submit YouTube URLs and view generated docs.
+    # ──────────────────────────────────────────────────────────────────────────
+    web:
+      logging:
+        driver: json-file
+        options:
+          max-size: "20m"
+          max-file: "5"
+      build:
+        context: ./frontend
+        dockerfile: Dockerfile
+        args:
+          NEXT_PUBLIC_API_URL: http://${LXC_HOST:-localhost}:${API_PORT}/api
+          NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+
+      container_name: tutorial_web
+      restart: unless-stopped
+
+      environment:
+        NODE_ENV: ${ENVIRONMENT}
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+
+      ports:
+        - "${FRONTEND_PORT}:3000"   # 3000 is Next.js's default dev server port
+
+      healthcheck:
+        test: ["CMD-SHELL", "curl -sf http://localhost:3000 || exit 1"]
+        interval: 30s
+        timeout: 10s
+        retries: 3
+        start_period: 30s
+
+      # Wait for the API to be healthy so the frontend doesn't make requests to a dead backend.
+      depends_on:
+        api:
+          condition: service_healthy
+
+      networks:
+        - tutorial_network
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # pgAdmin — web-based database administration tool
+    # Provides a GUI to browse tables, run queries, and debug data.
+    # Only needed during development; would not be deployed to production.
+    # ──────────────────────────────────────────────────────────────────────────
+    pgadmin:
+      image: dpage/pgadmin4:8.14
+      restart: unless-stopped
+
+      container_name: tutorial_pgadmin
+
+      # pgAdmin reads these on first launch to create the admin login.
+      environment:
+        PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}        # Email used to log in to the pgAdmin UI
+        PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}  # Password for that login
+
+      ports:
+        - "${PGADMIN_PORT}:80"   # pgAdmin serves its UI on port 80 inside the container
+
+      depends_on:
+        - postgres
+
+      networks:
+        - tutorial_network
+
+# "volumes:" declares named volumes that persist data outside of containers.
+# They live in Docker's storage area on the host and survive container removal.
+# You can list them with `docker volume ls` and inspect with `docker volume inspect <name>`.
+volumes:
+  postgres_data:    # Stores PostgreSQL database files
+    driver: local   # "local" = stored on the host filesystem (the default and most common driver)
+  redis_data:       # Stores Redis persistence files (RDB snapshots / AOF logs)
+    driver: local
+  app_data:         # Persistent storage for snapshots and videos (mounted at /data)
+    driver: local
+
+# "networks:" declares custom Docker networks.
+# By default, Compose creates one network per project, but declaring it explicitly
+# gives you a fixed name and lets you control the driver.
+networks:
+  tutorial_network:
+    # "bridge" is the default network driver. It creates an isolated virtual network
+    # on the host. Containers on the same bridge network can reach each other by service name
+    # (e.g. the api container can connect to "postgres:5432") but are isolated from
+    # containers in other projects.
+    driver: bridge

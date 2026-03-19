@@ -1,0 +1,156 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main, staging]
+  workflow_dispatch:
+
+jobs:
+  # ── 1. Backend tests (cloud runner) ────────────────────────────────────────
+  test-backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt pytest
+
+      - name: Download NLTK data
+        run: python -c "import nltk; nltk.download('punkt_tab', quiet=True)"
+
+      - name: Run tests
+        run: PYTHONPATH=backend pytest tests/ -q
+
+  # ── 2. Frontend tests (cloud runner) ───────────────────────────────────────
+  test-frontend:
+    name: Frontend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: cd frontend && npm install
+
+      - name: Run tests
+        run: cd frontend && npm test -- --run
+
+  # ── 3. Security gate (cloud runner) ────────────────────────────────────────
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - name: Install ShipGuard
+        run: pip install shipguard
+
+      - name: Run SAST scan
+        run: |
+          shipguard scan . --format json > shipguard.json
+          python3 - << 'EOF'
+          import json, sys
+          data = json.load(open("shipguard.json"))
+          findings = data.get("findings", [])
+          blockers = [f for f in findings if f.get("severity") in ("critical", "high")]
+          if blockers:
+              for b in blockers:
+                  print(f"BLOCKER: [{b['severity'].upper()}] {b['rule_id']} — {b['file']}:{b.get('line', '?')}: {b['message']}")
+              sys.exit(1)
+          print(f"Security gate passed. {len(findings)} findings, 0 blockers.")
+          EOF
+
+  # ── 4. Deploy to production (self-hosted runner on LXC) ────────────────────
+  #
+  # Runs directly on the LXC — no SSH tunnel needed. The runner has direct
+  # access to Docker and the project directory.
+  deploy-production:
+    name: Deploy → production
+    runs-on: [self-hosted, linux, youtube-model-feeder-prod]
+    needs: [test-backend, test-frontend, security]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+
+    steps:
+      - name: Pull latest code
+        run: |
+          cd "${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder}"
+          git fetch origin main
+          git reset --hard origin/main
+
+      - name: Enable Sentry if DSN is configured
+        if: env.SENTRY_DSN != ''
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: |
+          cd "${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder}"
+          sed -i "s|^SENTRY_DSN=.*|SENTRY_DSN=${SENTRY_DSN}|" .env
+          sed -i "s|^SENTRY_ENABLED=.*|SENTRY_ENABLED=true|" .env
+          grep -q "^NEXT_PUBLIC_SENTRY_DSN=" .env \
+            && sed -i "s|^NEXT_PUBLIC_SENTRY_DSN=.*|NEXT_PUBLIC_SENTRY_DSN=${SENTRY_DSN}|" .env \
+            || echo "NEXT_PUBLIC_SENTRY_DSN=${SENTRY_DSN}" >> .env
+
+      - name: Build and deploy
+        run: |
+          cd "${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder}"
+          docker compose build --pull
+          docker compose up -d
+
+      - name: Run migrations
+        run: |
+          cd "${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder}"
+          sleep 8
+          docker compose exec -T api alembic upgrade head
+
+      - name: Health check
+        run: |
+          sleep 12
+          curl -sf http://localhost:8000/health || { echo "API health check failed"; exit 1; }
+          echo "Deploy successful — $(git -C ${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder} rev-parse --short HEAD)"
+
+  # ── 5. Deploy to staging (self-hosted runner on staging LXC) ───────────────
+  deploy-staging:
+    name: Deploy → staging
+    runs-on: [self-hosted, linux, youtube-model-feeder-staging]
+    needs: [test-backend, test-frontend]
+    if: github.ref == 'refs/heads/staging'
+    environment: staging
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+
+    steps:
+      - name: Pull latest code
+        run: |
+          cd "${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder}"
+          git fetch origin staging
+          git reset --hard origin/staging
+
+      - name: Build and deploy staging
+        run: |
+          cd "${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder}"
+          docker compose -f docker-compose.yml -f docker-compose.staging.yml build --pull
+          docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
+
+      - name: Run migrations
+        run: |
+          cd "${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder}"
+          sleep 8
+          docker compose -f docker-compose.yml -f docker-compose.staging.yml exec -T api alembic upgrade head
+
+      - name: Health check
+        run: |
+          sleep 12
+          curl -sf http://localhost:8001/health || { echo "Staging health check failed"; exit 1; }
+          echo "Staging deploy successful."
