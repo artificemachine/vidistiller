@@ -24,3 +24,8 @@ All notable changes to this project will be documented in this file.
 
 ### Chore
 - Bump version to 0.1.1
+
+## [Unreleased] — 2026-03-26 (security patch)
+
+### Security
+- .gitignore: add *.key, *.pem, *.p12, *.pfx, *.crt, *.cer (fixes SC-004 shipguard finding)

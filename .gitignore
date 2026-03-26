@@ -152,3 +152,11 @@ shipguard.txt
 .superharness/heartbeat.yaml
 .superharness/watcher.heartbeat
 .superreins.archived/
+
+# Key and certificate files (SC-004)
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
