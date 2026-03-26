@@ -91,3 +91,6 @@ Append-only activity log. Never edit previous entries.
 - 2026-03-08T16:10:00Z — claude-code — modified: docker-compose.yml
 - 2026-03-08T16:10:05Z — claude-code — modified: docker-compose.yml
 2026-03-26T11:00:00Z — claude-code — migrated: .superreins → .superharness
+2026-03-26T11:58:05Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-03-26T12:04:33Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-03-26T12:05:12Z session-stop: snapshot written to session-progress.md (branch: main)
