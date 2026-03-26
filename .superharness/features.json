@@ -1,0 +1,54 @@
+{
+  "features": [
+    {
+      "id": "project-builds",
+      "category": "core",
+      "description": "Project builds without errors",
+      "steps": [
+        "Run the build command",
+        "Verify no errors in output"
+      ],
+      "passes": false
+    },
+    {
+      "id": "tests-pass",
+      "category": "core",
+      "description": "All tests pass",
+      "steps": [
+        "Run the test suite",
+        "Verify all tests green"
+      ],
+      "passes": false
+    },
+    {
+      "id": "cli-entry-point",
+      "category": "cli",
+      "description": "CLI entry point works",
+      "steps": [
+        "Run the CLI with --help or --version",
+        "Verify output"
+      ],
+      "passes": false
+    },
+    {
+      "id": "docker-build",
+      "category": "infra",
+      "description": "Docker image builds successfully",
+      "steps": [
+        "Run docker build",
+        "Verify image created"
+      ],
+      "passes": false
+    },
+    {
+      "id": "pip-install",
+      "category": "integration",
+      "description": "Package installs via pip",
+      "steps": [
+        "Run pip install -e .",
+        "Verify import works"
+      ],
+      "passes": false
+    }
+  ]
+}

@@ -6,6 +6,6 @@
 #     why: "rationale"
 #     alternatives: ["alt1", "alt2"]
 #     date: YYYY-MM-DD
-#     by: claude-code | codex-cli | maxime
+#     by: claude-code | codex-cli | owner
 #     status: accepted | superseded | deprecated
 decisions: []
