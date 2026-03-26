@@ -14,3 +14,13 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Retroactive CHANGELOG scaffold added to bring project into compliance
 
+
+## [0.1.1] — 2026-03-26
+
+### Added
+- CLAUDE.md: ⛔ DO NOT DELETE protection note — clarifies cleanup-old-viddocs scope
+- .project-hooks/pre-commit: resilient hook (skips gracefully when .venv/node_modules absent)
+- .gitignore: removed incorrect CLAUDE.md/AGENTS.md exclusion — these files should be tracked
+
+### Chore
+- Bump version to 0.1.1
