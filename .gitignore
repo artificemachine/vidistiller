@@ -131,9 +131,8 @@ e2e/node_modules/
 # pencil-sync
 .pencil-sync-state.json
 
-# AI assistant context files (may contain private paths/instructions)
-CLAUDE.md
-AGENTS.md
+# AI assistant context files — tracked intentionally (DO NOT re-add to .gitignore)
+# CLAUDE.md and AGENTS.md are part of the standard project scaffold
 
 # codex-pii-guard:start
 .env
