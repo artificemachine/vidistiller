@@ -1,3 +1,6 @@
+# Ledger — youtube-model-feeder
+
+Append-only activity log. Never edit previous entries.
 # Ledger — VidDocs
 
 Append-only activity log. Never edit previous entries.
@@ -87,3 +90,4 @@ Append-only activity log. Never edit previous entries.
 - 2026-03-08T16:09:52Z — claude-code — modified: docker-compose.yml
 - 2026-03-08T16:10:00Z — claude-code — modified: docker-compose.yml
 - 2026-03-08T16:10:05Z — claude-code — modified: docker-compose.yml
+2026-03-26T11:00:00Z — claude-code — migrated: .superreins → .superharness
