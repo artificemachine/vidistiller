@@ -1,6 +1,0 @@
-# Backend Docker configuration for FastAPI application
-# Uses Python 3.12 slim image with UV package manager
-# Installs system dependencies for FFmpeg, database drivers, and development tools
-# Exposes port 8000 for API communication
-# Includes health check endpoint
-# Runs uvicorn ASGI server with hot reload support
