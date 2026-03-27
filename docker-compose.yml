@@ -112,8 +112,8 @@ services:
           max-size: "20m"
           max-file: "5"
       build:
-        context: ./backend
-        dockerfile: Dockerfile
+        context: .
+        dockerfile: backend/Dockerfile
 
       container_name: tutorial_api
       restart: unless-stopped
@@ -190,8 +190,8 @@ services:
           max-size: "20m"
           max-file: "5"
       build:
-        context: ./backend
-        dockerfile: Dockerfile
+        context: .
+        dockerfile: backend/Dockerfile
 
       container_name: tutorial_celery_worker
       restart: unless-stopped
