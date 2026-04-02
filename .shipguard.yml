@@ -1,6 +1,15 @@
 # ShipGuard configuration for youtube-model-feeder
 # Reviewed 2026-04-02
 
+# Accepted CVEs (no upstream fix available as of 2026-04-02)
+# CVE-2024-23342: ecdsa>=0 — timing side-channel (CVSS 7.4, AC:High).
+#   Transitive dep of python-jose; no patched version exists. Fix: migrate to
+#   PyJWT (tracked as separate task). Risk accepted: AC:High makes exploitation
+#   difficult in practice.
+# CVE-2026-27135: nghttp2 OS package (Debian trixie 1.64.0-1.1) — no fix
+#   available from Debian. Transitive dep of libcurl/curl (healthcheck). Risk
+#   accepted: waiting on upstream patch.
+
 exclude_paths:
   - "node_modules/**"
   - ".next/**"
