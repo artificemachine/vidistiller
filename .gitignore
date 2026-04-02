@@ -83,7 +83,6 @@ tmp/
 
 # Docker
 docker-compose.override.yml
-.dockerignore
 
 # Local development
 .vscode/settings.json
@@ -160,3 +159,12 @@ shipguard.txt
 *.pfx
 *.crt
 *.cer
+
+# Stale superreins protocol dir (superseded by .superharness)
+.superreins/
+
+# Old root-level Dockerfile (removed in refactor — backend/Dockerfile is canonical)
+Dockerfile.backend
+
+# TypeScript incremental build artifact
+frontend/tsconfig.tsbuildinfo

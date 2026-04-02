@@ -1,0 +1,23 @@
+# Environment files (SC-004)
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+
+# Next.js build output
+.next/
+out/
+
+# TypeScript incremental build artifact
+tsconfig.tsbuildinfo
+
+# Dependencies
+node_modules/
+
+# Testing
+coverage/

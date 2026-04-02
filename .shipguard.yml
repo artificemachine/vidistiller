@@ -1,0 +1,20 @@
+# ShipGuard configuration for youtube-model-feeder
+# Reviewed 2026-04-02
+
+exclude_paths:
+  - "node_modules/**"
+  - ".next/**"
+  - ".venv/**"
+  - ".venv312/**"
+  - "backend/data/**"
+  - "e2e-report*/**"
+  - "e2e-results/**"
+
+disable_rules:
+  # SC-003: npm install without lockfile — flagging GitHub Actions CI steps;
+  # Dockerfiles use `npm ci` (frozen). CI uses npm install for test setup only.
+  - SC-003
+  # JS-006: innerHTML — in features_to_add/ scratch files, not production code
+  - JS-006
+  # PY-012: NamedTempFile delete=False — in test/utility code with manual cleanup
+  - PY-012
