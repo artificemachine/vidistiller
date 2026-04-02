@@ -160,3 +160,4 @@ shipguard.txt
 *.pfx
 *.crt
 *.cer
+.serena/

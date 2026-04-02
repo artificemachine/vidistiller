@@ -13,3 +13,8 @@ dependencies = [
 markers = [
     "lxc: LXC deployment integration tests (run with -m lxc)",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

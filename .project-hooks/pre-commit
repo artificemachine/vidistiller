@@ -6,7 +6,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 # Backend tests (using project venv)
 if [ -f "$REPO_ROOT/.venv/bin/python" ]; then
     echo "[pre-commit] Running backend tests..."
-    PYTHONPATH="$REPO_ROOT/backend" "$REPO_ROOT/.venv/bin/python" -m pytest "$REPO_ROOT/tests/" -q --tb=short --ignore="$REPO_ROOT/tests/test_lxc_deploy.py"
+    PYTHONPATH="$REPO_ROOT/backend" "$REPO_ROOT/.venv/bin/python" -m pytest "$REPO_ROOT/tests/" -q --tb=short --ignore="$REPO_ROOT/tests/test_lxc_deploy.py" || [ $? -eq 5 ]
 else
     echo "[pre-commit] ⚠️  .venv not found — skipping backend tests (run: python3 -m venv .venv && pip install -e .)"
 fi
