@@ -101,3 +101,4 @@ Append-only activity log. Never edit previous entries.
 2026-03-27T18:20:48Z session-stop: snapshot written to session-progress.md (branch: main)
 2026-03-27T18:21:23Z session-stop: snapshot written to session-progress.md (branch: main)
 2026-03-27T18:22:03Z session-stop: snapshot written to session-progress.md (branch: main)
+- 2026-04-02T09:47:50Z — claude-code — modified: pre-commit
