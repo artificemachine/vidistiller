@@ -1,5 +1,5 @@
 def main():
-    print("Hello from youtube-model-feeder!")
+    print("Hello from vidistiller!")
 
 
 if __name__ == "__main__":

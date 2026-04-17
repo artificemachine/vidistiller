@@ -6,7 +6,7 @@ export const config = {
     timeout: 30000,
   },
   app: {
-    name: 'VidDocs',
-    version: '1.0.0',
+    name: 'Vidistiller',
+    version: '1.1.0',
   },
 };

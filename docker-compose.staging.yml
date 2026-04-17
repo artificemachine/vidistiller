@@ -4,7 +4,7 @@
 # Runs on offset ports (8001/3001) with isolated volumes so prod and staging
 # coexist on the same host without conflicts.
 
-name: youtube-model-feeder-staging
+name: vidistiller-staging
 
 services:
   postgres:

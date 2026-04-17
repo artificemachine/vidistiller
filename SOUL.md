@@ -1,4 +1,4 @@
-# Soul — youtube-model-feeder
+# Soul — vidistiller
 
 ## Operating Constraints
 

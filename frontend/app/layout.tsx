@@ -9,15 +9,15 @@ import AuthProvider from '@/components/AuthProvider';
 import NavAuthButton from '@/components/NavAuthButton';
 
 export const metadata: Metadata = {
-  title: 'YouTube Model Feeder',
-  description: 'Turn YouTube videos into structured documentation',
+  title: 'Vidistiller',
+  description: 'Turn any video into structured documentation',
 };
 
 const themeInitScript = `
 (function() {
   try {
     var mode = localStorage.getItem('theme') || 'dark';
-    var themeId = localStorage.getItem('youtube-model-feeder-theme') || 'lunaris';
+    var themeId = localStorage.getItem('vidistiller-theme') || 'lunaris';
     if (mode === 'dark') document.documentElement.classList.add('dark');
     document.documentElement.setAttribute('data-theme', themeId);
   } catch(e) {}
@@ -46,7 +46,7 @@ export default function RootLayout({
                 <div className="flex justify-between h-20">
                   <div className="flex items-center">
                     <h1 className="text-2xl font-bold text-text-dark dark:text-text-light">
-                      youtube-model-feeder
+                      vidistiller
                     </h1>
                   </div>
                   <div className="flex items-center space-x-4">

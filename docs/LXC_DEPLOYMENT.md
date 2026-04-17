@@ -1,7 +1,7 @@
 # LXC Container Deployment Guide
 
 ## Target Environment
-- **Host:** youtube-model-feeder-lxc
+- **Host:** vidistiller-lxc
 - **IP Address:** `<OLLAMA_IP>`
 - **Container Type:** LXC (Linux Container)
 - **Application:** YouTube Tutorial to Documentation Converter
@@ -48,7 +48,7 @@
 ```bash
 # Create Ubuntu 22.04 LXC container
 pct create <CTID> local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst \
-  --hostname youtube-model-feeder-lxc \
+  --hostname vidistiller-lxc \
   --cores 8 \
   --memory 16384 \
   --swap 4096 \
@@ -85,7 +85,7 @@ useradd -m -s /bin/bash appuser
 usermod -aG sudo appuser
 
 # Set hostname
-hostnamectl set-hostname youtube-model-feeder-lxc
+hostnamectl set-hostname vidistiller-lxc
 ```
 
 ---
@@ -202,8 +202,8 @@ mkdir -p /home/appuser/apps
 cd /home/appuser/apps
 
 # Clone repository
-git clone https://github.com/celstnblacc/youtube-model-feeder.git
-cd youtube-model-feeder
+git clone https://github.com/celstnblacc/vidistiller.git
+cd vidistiller
 
 # Check current branch
 git branch
@@ -374,7 +374,7 @@ Create a systemd service to automatically start the application on boot:
 
 ```bash
 # Create systemd service file (as root)
-sudo vim /etc/systemd/system/youtube-model-feeder.service
+sudo vim /etc/systemd/system/vidistiller.service
 ```
 
 **Service file content:**
@@ -388,7 +388,7 @@ After=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=/home/appuser/apps/youtube-model-feeder
+WorkingDirectory=/home/appuser/apps/vidistiller
 ExecStart=/usr/bin/docker compose up -d
 ExecStop=/usr/bin/docker compose down
 User=appuser
@@ -405,13 +405,13 @@ WantedBy=multi-user.target
 sudo systemctl daemon-reload
 
 # Enable service
-sudo systemctl enable youtube-model-feeder.service
+sudo systemctl enable vidistiller.service
 
 # Start service
-sudo systemctl start youtube-model-feeder.service
+sudo systemctl start vidistiller.service
 
 # Check status
-sudo systemctl status youtube-model-feeder.service
+sudo systemctl status vidistiller.service
 ```
 
 ### 2. Nginx Reverse Proxy (Optional but Recommended)
@@ -423,7 +423,7 @@ Install Nginx to handle SSL/TLS and provide a reverse proxy:
 sudo apt install -y nginx
 
 # Create Nginx configuration
-sudo vim /etc/nginx/sites-available/youtube-model-feeder
+sudo vim /etc/nginx/sites-available/vidistiller
 ```
 
 **Nginx configuration:**
@@ -472,7 +472,7 @@ server {
 
 ```bash
 # Enable site
-sudo ln -s /etc/nginx/sites-available/youtube-model-feeder \
+sudo ln -s /etc/nginx/sites-available/vidistiller \
             /etc/nginx/sites-enabled/
 
 # Remove default site
@@ -570,7 +570,7 @@ docker compose logs -f postgres
 docker compose logs --tail=100 api
 
 # Save logs to file
-docker compose logs > /var/log/youtube-model-feeder.log
+docker compose logs > /var/log/vidistiller.log
 ```
 
 ### 3. Resource Monitoring
@@ -595,7 +595,7 @@ htop
 Create a health check script:
 
 ```bash
-vim /home/appuser/apps/youtube-model-feeder/scripts/health-check-production.sh
+vim /home/appuser/apps/vidistiller/scripts/health-check-production.sh
 ```
 
 ```bash
@@ -617,7 +617,7 @@ fi
 
 # Check containers
 echo "2. Container Status:"
-cd /home/appuser/apps/youtube-model-feeder
+cd /home/appuser/apps/vidistiller
 CONTAINERS=$(docker compose ps --services --filter "status=running" | wc -l)
 echo "   Running containers: $CONTAINERS/6"
 
@@ -676,13 +676,13 @@ echo "=== Health Check Complete ==="
 Make executable and set up cron:
 
 ```bash
-chmod +x /home/appuser/apps/youtube-model-feeder/scripts/health-check-production.sh
+chmod +x /home/appuser/apps/vidistiller/scripts/health-check-production.sh
 
 # Add to crontab (runs every 5 minutes)
 crontab -e
 
 # Add this line:
-*/5 * * * * /home/appuser/apps/youtube-model-feeder/scripts/health-check-production.sh >> /var/log/health-check.log 2>&1
+*/5 * * * * /home/appuser/apps/vidistiller/scripts/health-check-production.sh >> /var/log/health-check.log 2>&1
 ```
 
 ---
@@ -807,7 +807,7 @@ docker inspect <container_name> | grep -A 10 Health
 
 ```bash
 # Pull latest code
-cd /home/appuser/apps/youtube-model-feeder
+cd /home/appuser/apps/vidistiller
 git pull origin main
 
 # Rebuild containers
@@ -869,11 +869,11 @@ crontab -e
 
 ```bash
 # Create logrotate configuration
-sudo vim /etc/logrotate.d/youtube-model-feeder
+sudo vim /etc/logrotate.d/vidistiller
 ```
 
 ```
-/var/log/youtube-model-feeder.log {
+/var/log/vidistiller.log {
     daily
     rotate 14
     compress
@@ -954,7 +954,7 @@ Use this checklist when deploying:
 
 ```bash
 # Start application
-cd /home/appuser/apps/youtube-model-feeder
+cd /home/appuser/apps/vidistiller
 docker compose up -d
 
 # Stop application
@@ -992,7 +992,7 @@ docker system prune -a
 - **Application Docs:** `/docs` directory in repository
 - **API Documentation:** http://<OLLAMA_IP>:8000/docs (Swagger UI)
 - **Alternative API Docs:** http://<OLLAMA_IP>:8000/redoc
-- **Repository:** https://github.com/celstnblacc/youtube-model-feeder
+- **Repository:** https://github.com/celstnblacc/vidistiller
 - **Docker Docs:** https://docs.docker.com
 - **FastAPI Docs:** https://fastapi.tiangolo.com
 - **Next.js Docs:** https://nextjs.org/docs
@@ -1001,4 +1001,4 @@ docker system prune -a
 
 **Deployment Guide Version:** 1.0
 **Last Updated:** February 12, 2026
-**Target Container:** youtube-model-feeder-lxc
+**Target Container:** vidistiller-lxc

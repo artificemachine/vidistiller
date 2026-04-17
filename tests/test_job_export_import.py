@@ -113,7 +113,7 @@ def _seed_job(db: Session, *, with_snapshot_file: bool = True, user_id: int = No
     job = ProcessingJob(
         job_id="aaaa-bbbb-cccc",
         status=ProcessingStatus.COMPLETED,
-        youtube_url="https://www.youtube.com/watch?v=test12345",
+        video_url="https://www.youtube.com/watch?v=test12345",
         user_id=user_id,
     )
     db.add(job)
@@ -196,7 +196,7 @@ class TestExportJob:
 
         assert data["export_version"] == "1.0"
         assert data["job"]["job_id"] == job.job_id
-        assert data["job"]["youtube_url"] == job.youtube_url
+        assert data["job"]["video_url"] == job.video_url
         assert len(data["videos"]) == 1
         assert len(data["transcripts"]) == 1
         assert len(data["snapshots"]) == 1
@@ -256,7 +256,7 @@ def _make_export_payload(**overrides) -> dict:
         "job": {
             "job_id": "old-uuid",
             "status": "completed",
-            "youtube_url": "https://www.youtube.com/watch?v=importtest1",
+            "video_url": "https://www.youtube.com/watch?v=importtest1",
             "created_at": "2026-01-01T00:00:00",
             "updated_at": "2026-01-01T00:00:00",
         },

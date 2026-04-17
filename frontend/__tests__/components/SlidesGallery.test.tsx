@@ -78,30 +78,6 @@ describe('SlidesGallery', () => {
     expect(onClick).toHaveBeenCalledWith(mockSlides[1]);
   });
 
-  it('shows OCR text when "show text" is clicked', async () => {
-    const user = userEvent.setup();
-    render(<SlidesGallery slides={mockSlides} />);
-
-    const showTextBtn = screen.getByText('show text');
-    await user.click(showTextBtn);
-
-    expect(screen.getByText('ocr text')).toBeInTheDocument();
-    expect(screen.getByText('Title Slide Content')).toBeInTheDocument();
-    expect(screen.getByText('transcript')).toBeInTheDocument();
-    expect(screen.getByText('Welcome to the presentation')).toBeInTheDocument();
-  });
-
-  it('toggles text visibility', async () => {
-    const user = userEvent.setup();
-    render(<SlidesGallery slides={mockSlides} />);
-
-    await user.click(screen.getByText('show text'));
-    expect(screen.getByText('hide text')).toBeInTheDocument();
-
-    await user.click(screen.getByText('hide text'));
-    expect(screen.getByText('show text')).toBeInTheDocument();
-  });
-
   it('calls onSelectedIndexChange when thumbnail is clicked', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();

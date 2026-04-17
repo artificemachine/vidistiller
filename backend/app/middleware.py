@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import Response
 
-logger = logging.getLogger("youtube-model-feeder.access")
+logger = logging.getLogger("vidistiller.access")
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):

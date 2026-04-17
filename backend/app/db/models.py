@@ -69,7 +69,8 @@ class ProcessingJob(Base):
     job_id: str = Column(String(36), unique=True, default=lambda: str(uuid4()), nullable=False)
     status: ProcessingStatus = Column(Enum(ProcessingStatus, values_callable=lambda x: [e.value for e in x]), default=ProcessingStatus.PENDING, nullable=False)
     error_message: Optional[str] = Column(String(1024), nullable=True)
-    youtube_url: Optional[str] = Column(String(512), nullable=True)
+    video_url: Optional[str] = Column(String(512), nullable=True)
+    source_type: Optional[str] = Column(String(20), nullable=True)
     video_file_path: Optional[str] = Column(String(512), nullable=True)  # path to downloaded MP4
     celery_task_id: Optional[str] = Column(String(255), nullable=True)
     summarize_status: Optional[str] = Column(String(20), nullable=True)
@@ -152,8 +153,9 @@ class Video(Base):
 
     id: int = Column(Integer, primary_key=True)
     job_id: int = Column(Integer, ForeignKey("processing_jobs.id"), nullable=False)
-    url: str = Column(String(255), nullable=False)
-    video_id: str = Column(String(20), nullable=False)
+    url: str = Column(String(512), nullable=False)
+    video_id: str = Column(String(100), nullable=False)
+    source_type: Optional[str] = Column(String(20), nullable=True)
     title: str = Column(String(512), nullable=False)
     description: Optional[str] = Column(Text, nullable=True)
     duration: Optional[int] = Column(Integer, nullable=True)  # seconds

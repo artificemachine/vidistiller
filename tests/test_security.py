@@ -65,7 +65,7 @@ class TestImportPayloadValidation:
     def test_import_rejects_unsupported_version(self, client: TestClient, test_db: Session, test_user, auth_headers):
         resp = client.post("/api/jobs/import", json={
             "export_version": "99.0",
-            "job": {"job_id": "x", "status": "completed", "youtube_url": "https://youtube.com/watch?v=abc12345678"},
+            "job": {"job_id": "x", "status": "completed", "video_url": "https://youtube.com/watch?v=abc12345678"},
         }, headers=auth_headers)
         assert resp.status_code == 422
 
@@ -112,7 +112,7 @@ class TestAuthRequiredOnOperationalRoutes:
 
     def test_create_job_requires_auth(self, client: TestClient, test_db: Session, mock_celery):
         resp = client.post("/api/jobs", json={
-            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         })
         assert resp.status_code == 401
 

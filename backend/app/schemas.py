@@ -56,6 +56,7 @@ class DocumentFormatEnum(str, Enum):
 class TranscriptSourceEnum(str, Enum):
     """Source of transcript extraction."""
     YOUTUBE_CAPTIONS = "youtube_captions"
+    YT_DLP_CAPTIONS = "yt_dlp_captions"
     WHISPER_API = "whisper_api"
     WHISPER_LOCAL = "whisper_local"
 
@@ -96,13 +97,14 @@ class JobLogResponse(BaseSchema):
 
 class VideoBase(BaseSchema):
     """Base video fields shared across schemas."""
-    url: str = Field(..., description="YouTube video URL")
-    video_id: str = Field(..., min_length=1, max_length=20, description="YouTube video ID")
+    url: str = Field(..., description="Video source URL")
+    video_id: str = Field(..., min_length=1, max_length=100, description="Platform-native video ID")
+    source_type: Optional[str] = Field(None, description="Source platform (youtube, vimeo, twitch, etc.)")
     title: str = Field(..., min_length=1, max_length=512, description="Video title")
     description: Optional[str] = Field(None, description="Video description")
     duration: Optional[int] = Field(None, ge=0, description="Video duration in seconds")
     thumbnail_url: Optional[str] = Field(None, max_length=512, description="Thumbnail image URL")
-    channel_name: Optional[str] = Field(None, max_length=255, description="YouTube channel name")
+    channel_name: Optional[str] = Field(None, max_length=255, description="Channel or uploader name")
     upload_date: Optional[datetime] = Field(None, description="Video upload date")
     view_count: Optional[int] = Field(None, ge=0, description="Number of views")
 
@@ -354,11 +356,11 @@ class DocumentResponse(DocumentBase):
 
 class JobCreate(BaseModel):
     """Schema for creating a new processing job."""
-    youtube_url: str = Field(
+    video_url: str = Field(
         ...,
         min_length=10,
-        max_length=255,
-        description="YouTube video URL to process"
+        max_length=512,
+        description="Video URL to process (YouTube, Vimeo, Twitch, Twitter/X, TikTok, Reddit, Rumble, or direct MP4)"
     )
     output_format: DocumentFormatEnum = Field(
         default=DocumentFormatEnum.MARKDOWN,
@@ -373,31 +375,23 @@ class JobCreate(BaseModel):
         description="Enable presentation/slide-aware processing mode"
     )
 
-    @field_validator("youtube_url")
+    @field_validator("video_url")
     @classmethod
-    def validate_youtube_url(cls, v: str) -> str:
-        """Validate that the URL is a valid YouTube URL."""
-        youtube_patterns = [
-            r'^https?://(www\.)?youtube\.com/watch\?v=[\w-]{11}',
-            r'^https?://(www\.)?youtu\.be/[\w-]{11}',
-            r'^https?://(www\.)?youtube\.com/embed/[\w-]{11}',
-            r'^https?://(www\.)?youtube\.com/v/[\w-]{11}',
-        ]
-
-        for pattern in youtube_patterns:
-            if re.match(pattern, v):
-                return v
-
-        raise ValueError(
-            "Invalid YouTube URL. Supported formats: "
-            "youtube.com/watch?v=VIDEO_ID, youtu.be/VIDEO_ID, "
-            "youtube.com/embed/VIDEO_ID"
-        )
+    def validate_video_url(cls, v: str) -> str:
+        """Accept any well-formed HTTP/HTTPS URL."""
+        from urllib.parse import urlparse
+        v = v.strip()
+        if not re.match(r'^https?://', v, re.IGNORECASE):
+            raise ValueError("URL must start with http:// or https://")
+        parsed = urlparse(v)
+        if not parsed.netloc or '.' not in parsed.netloc:
+            raise ValueError("Invalid URL: missing or malformed host")
+        return v
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
                 "output_format": "markdown",
                 "extract_snapshots": True
             }
@@ -412,7 +406,8 @@ class JobStatusResponse(BaseSchema):
     error_message: Optional[str] = Field(None, description="Error message if failed")
     summarize_status: Optional[str] = Field(None, description="Summarization status (processing/completed/failed)")
     processing_mode: Optional[str] = Field(None, description="Processing mode (standard or slide_aware)")
-    youtube_url: Optional[str] = Field(None, description="Original YouTube URL")
+    video_url: Optional[str] = Field(None, description="Original video URL")
+    source_type: Optional[str] = Field(None, description="Source platform (youtube, vimeo, twitch, etc.)")
     video_title: Optional[str] = Field(None, description="Video title")
     user_id: Optional[int] = Field(None, description="Owner user ID")
     created_at: datetime = Field(..., description="Job creation timestamp")
@@ -426,7 +421,8 @@ class JobStatusResponse(BaseSchema):
                 "status": "processing",
                 "error_message": None,
                 "summarize_status": None,
-                "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "source_type": "youtube",
                 "video_title": "Sample Tutorial Video",
                 "user_id": 1,
                 "created_at": "2024-01-20T14:30:00",
@@ -444,7 +440,8 @@ class JobResponse(BaseSchema):
     error_message: Optional[str] = Field(None, description="Error message if failed")
     summarize_status: Optional[str] = Field(None, description="Summarization status (processing/completed/failed)")
     processing_mode: Optional[str] = Field(None, description="Processing mode (standard or slide_aware)")
-    youtube_url: Optional[str] = Field(None, description="Original YouTube URL")
+    video_url: Optional[str] = Field(None, description="Original video URL")
+    source_type: Optional[str] = Field(None, description="Source platform (youtube, vimeo, twitch, etc.)")
     user_id: Optional[int] = Field(None, description="Owner user ID")
     created_at: datetime = Field(..., description="Job creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
@@ -729,7 +726,7 @@ class ValidationErrorResponse(BaseModel):
             "example": {
                 "detail": [
                     {
-                        "loc": ["body", "youtube_url"],
+                        "loc": ["body", "video_url"],
                         "msg": "Invalid YouTube URL",
                         "type": "value_error"
                     }

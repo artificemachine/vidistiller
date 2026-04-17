@@ -1,4 +1,4 @@
-name: youtube-model-feeder-e2e
+name: vidistiller-e2e
 
 # Full stack for E2E testing. Requires E2E_DATABASE_URL env var.
 # Usage: E2E_DATABASE_URL=<your-db-url> docker compose -f docker-compose.e2e.yml up

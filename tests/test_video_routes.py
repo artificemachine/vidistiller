@@ -119,9 +119,9 @@ class TestVideoRoutesInputValidation:
         assert resp.status_code == 422
 
     @patch("app.routes.videos.youtube_service")
-    def test_non_youtube_url_rejected(self, mock_yt, client: TestClient, test_db: Session):
-        mock_yt.get_video_metadata.side_effect = ValidationException("Invalid YouTube URL")
+    def test_unsupported_url_rejected(self, mock_yt, client: TestClient, test_db: Session):
+        mock_yt.get_video_metadata.side_effect = ValidationException("Unsupported URL")
         resp = client.post("/api/videos/metadata", json={
-            "url": "https://example.com/not-youtube",
+            "url": "https://example.com/not-supported",
         })
         assert resp.status_code == 422

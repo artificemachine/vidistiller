@@ -1,5 +1,5 @@
-# youtube-model-feeder — Design Specification & Component Library
-**Project:** YouTube Tutorial to Markdown Converter
+# vidistiller — Design Specification & Component Library
+**Project:** Vidistiller — Video to Markdown Converter
 **Created:** 2026-02-28
 **Design System:** Multi-Theme (Monokai default, Lunaris, Nord)
 **Version:** 1.0
@@ -24,7 +24,7 @@
 
 ## Overview
 
-This design specification covers the complete UI/UX design for **youtube-model-feeder**, a web application that converts YouTube tutorials into searchable markdown documents with snapshots and AI-powered summaries.
+This design specification covers the complete UI/UX design for **vidistiller**, a web application that converts YouTube tutorials into searchable markdown documents with snapshots and AI-powered summaries.
 
 **Key Features:**
 - YouTube video processing (transcript extraction, snapshot generation)
@@ -488,10 +488,10 @@ const Button: React.FC<ButtonProps> = ({ variant, size, ...props }) => {
 ### 2. File Structure
 
 ```
-youtube-model-feeder/
+vidistiller/
 ├── public/
 │   └── design-system/
-│       ├── new_youtube-model-feeder_ui.pen (Pencil file - Lunaris design)
+│       ├── new_vidistiller_ui.pen (Pencil file - Lunaris design)
 │       ├── DESIGN_SPEC.md (This document)
 │       └── assets/
 │           ├── screenshots/ (Export PNG/SVG)
@@ -577,7 +577,7 @@ module.exports = {
 **Option 1: Pencil Native**
 ```bash
 # Design file already created and committed:
-# Location: new_youtube-model-feeder_ui.pen (project root)
+# Location: new_vidistiller_ui.pen (project root)
 # Status: Ready to use - Lunaris design system applied
 ```
 

@@ -157,7 +157,7 @@ class TestSaveTranscript:
         job = ProcessingJob(
             job_id="save-test-1",
             status=ProcessingStatus.PENDING,
-            youtube_url="https://www.youtube.com/watch?v=test12345ab",
+            video_url="https://www.youtube.com/watch?v=test12345ab",
         )
         test_db.add(job)
         test_db.commit()
@@ -175,7 +175,7 @@ class TestSaveTranscript:
         job = ProcessingJob(
             job_id="save-test-2",
             status=ProcessingStatus.PENDING,
-            youtube_url="https://www.youtube.com/watch?v=test12345ac",
+            video_url="https://www.youtube.com/watch?v=test12345ac",
         )
         test_db.add(job)
         test_db.commit()

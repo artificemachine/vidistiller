@@ -1,6 +1,8 @@
-# YouTube Tutorial to Documentation Converter
+# Vidistiller
 
-Convert YouTube tutorials into structured documentation with automatic transcription, snapshot extraction, and LLM-powered content generation.
+**Turn any video into structured documentation.**
+
+Vidistiller is a local-first, source-agnostic video-to-documentation engine. Paste a URL from YouTube, Vimeo, Twitch, X, Reddit, Rumble, or any direct MP4 link — Vidistiller distills the video down to what matters: the spoken words, the slides, the structure. Hours of watching become minutes of reading.
 
 ---
 
@@ -130,11 +132,11 @@ This type of video typically produces 20–40 well-defined slides with OCR text 
 
 ## <span style="color: pink;">🎨 Design System — Multi-Theme</span>
 
-The youtube-model-feeder UI supports three palettes switchable at runtime: **Monokai** (default, dark), **Lunaris**, and **Nord**. The active palette is persisted to `localStorage` as `youtube-model-feeder-theme`.
+The Vidistiller UI supports three palettes switchable at runtime: **Monokai** (default, dark), **Lunaris**, and **Nord**. The active palette is persisted to `localStorage` as `vidistiller-theme`.
 
 ### Design Files & Documentation
 
-- **Design File:** [`new_youtube-model-feeder_ui.pen`](./new_youtube-model-feeder_ui.pen) — Complete Pencil design with all screens and Monokai colors
+- **Design File:** [`new_vidistiller_ui.pen`](./new_vidistiller_ui.pen) — Complete Pencil design with all screens and Monokai colors
 - **Design Specification:** [`DESIGN_SPEC.md`](./DESIGN_SPEC.md) — Full design system details, colors, typography, and spacing
 - **Implementation Guide:** [`DESIGN_EXPORT_GUIDE.md`](./DESIGN_EXPORT_GUIDE.md) — Code implementation patterns for React/Tailwind
 - **Quick Reference:** [`DESIGN_README.md`](./DESIGN_README.md) — 5-minute overview of the design system
@@ -160,7 +162,7 @@ The youtube-model-feeder UI supports three palettes switchable at runtime: **Mon
 
 To view or edit the design:
 ```bash
-open new_youtube-model-feeder_ui.pen
+open new_vidistiller_ui.pen
 ```
 
 The design includes:
@@ -342,7 +344,7 @@ To address all issues (including breaking changes), run:
 
 Run `npm audit` for details.
 
-> youtube-model-feeder@1.0.0 dev
+> vidistiller@1.0.0 dev
 > next dev
 
   ▲ Next.js 14.2.35

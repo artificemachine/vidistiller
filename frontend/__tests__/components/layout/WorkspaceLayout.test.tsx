@@ -174,7 +174,7 @@ describe('WorkspaceLayout', () => {
 
   it('zoom − clamps at minimum 10', async () => {
     const user = userEvent.setup();
-    vi.stubGlobal('localStorage', createLocalStorageMock({ 'youtube-model-feeder-workspace-state': '{"playerZoom":10}' }));
+    vi.stubGlobal('localStorage', createLocalStorageMock({ 'vidistiller-workspace-state': '{"playerZoom":10}' }));
     renderWithProviders(
       <WorkspaceLayout sidebar={<div>S</div>} main={() => <div>M</div>} bottom={<div>B</div>} />
     );
@@ -186,7 +186,7 @@ describe('WorkspaceLayout', () => {
 
   it('zoom + clamps at maximum 100', async () => {
     const user = userEvent.setup();
-    vi.stubGlobal('localStorage', createLocalStorageMock({ 'youtube-model-feeder-workspace-state': '{"playerZoom":100}' }));
+    vi.stubGlobal('localStorage', createLocalStorageMock({ 'vidistiller-workspace-state': '{"playerZoom":100}' }));
     renderWithProviders(
       <WorkspaceLayout sidebar={<div>S</div>} main={() => <div>M</div>} bottom={<div>B</div>} />
     );
@@ -205,12 +205,12 @@ describe('WorkspaceLayout', () => {
     // Wait for hydration, then interact
     await vi.waitFor(() => expect(screen.getByRole('slider')).toHaveAttribute('value', '40'));
     await user.click(screen.getByTitle('zoom in'));
-    const state = JSON.parse(lsMock.getItem('youtube-model-feeder-workspace-state') || '{}');
+    const state = JSON.parse(lsMock.getItem('vidistiller-workspace-state') || '{}');
     expect(state.playerZoom).toBe(41);
   });
 
   it('restores zoom from localStorage on mount', async () => {
-    vi.stubGlobal('localStorage', createLocalStorageMock({ 'youtube-model-feeder-workspace-state': '{"playerZoom":75}' }));
+    vi.stubGlobal('localStorage', createLocalStorageMock({ 'vidistiller-workspace-state': '{"playerZoom":75}' }));
     renderWithProviders(
       <WorkspaceLayout sidebar={<div>S</div>} main={() => <div>M</div>} bottom={<div>B</div>} />
     );

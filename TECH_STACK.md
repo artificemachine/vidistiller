@@ -1,4 +1,4 @@
-# Technology Stack — youtube-model-feeder
+# Technology Stack — vidistiller
 
 ## Overview
 This project uses a modern microservices architecture with containerized services orchestrated via Docker Compose.

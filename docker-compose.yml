@@ -1,5 +1,5 @@
 # Pin the Compose project name so volumes/networks survive directory renames.
-name: youtube-model-feeder
+name: vidistiller
 
 # "services:" is the top-level key that defines all the containers Docker Compose will manage.
 # Each child key (postgres, redis, api, etc.) becomes a separate container you can start/stop together.

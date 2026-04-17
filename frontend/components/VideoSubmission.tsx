@@ -23,7 +23,7 @@ export default function VideoSubmission({ onSuccess }: VideoSubmissionProps) {
       const response = await fetch(`${apiUrl}/jobs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ youtube_url: url }),
+        body: JSON.stringify({ video_url: url }),
       });
 
       if (!response.ok) {
@@ -49,12 +49,12 @@ export default function VideoSubmission({ onSuccess }: VideoSubmissionProps) {
   return (
     <form onSubmit={handleSubmit} className="w-full max-w-md mx-auto p-6">
       <div className="mb-4">
-        <label className="block text-gray-700 mb-2">youtube url</label>
+        <label className="block text-gray-700 mb-2">video url</label>
         <input
           type="url"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://youtube.com/watch?v=..."
+          placeholder="YouTube, Vimeo, Twitch, X.com, TikTok, Reddit, Rumble or direct .mp4..."
           className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           required
         />

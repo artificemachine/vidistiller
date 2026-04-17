@@ -125,7 +125,7 @@ describe('ThemeProvider', () => {
       expect(DEFAULT_THEME).toBe('lunaris');
     });
 
-    it('defaults themeId to lunaris when no youtube-model-feeder-theme in localStorage', async () => {
+    it('defaults themeId to lunaris when no vidistiller-theme in localStorage', async () => {
       render(
         <ThemeProvider>
           <ThemeConsumer />
@@ -135,9 +135,9 @@ describe('ThemeProvider', () => {
       expect(screen.getByTestId('themeId').textContent).toBe('lunaris');
     });
 
-    it('reads stored youtube-model-feeder-theme from localStorage', async () => {
+    it('reads stored vidistiller-theme from localStorage', async () => {
       vi.stubGlobal('localStorage', {
-        getItem: vi.fn((key: string) => key === 'youtube-model-feeder-theme' ? 'nord' : null),
+        getItem: vi.fn((key: string) => key === 'vidistiller-theme' ? 'nord' : null),
         setItem: vi.fn(),
       });
       render(
@@ -179,7 +179,7 @@ describe('ThemeProvider', () => {
       );
       await act(() => Promise.resolve());
       await user.click(screen.getByText('Set Monokai'));
-      expect(setItemMock).toHaveBeenCalledWith('youtube-model-feeder-theme', 'monokai');
+      expect(setItemMock).toHaveBeenCalledWith('vidistiller-theme', 'monokai');
     });
 
     it('setThemeId can switch between palettes', async () => {

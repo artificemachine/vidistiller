@@ -91,8 +91,8 @@ _configure_logging(settings)
 _init_sentry(settings)
 
 app = FastAPI(
-    title="VidDocs API",
-    description="Turn YouTube videos into structured documentation",
+    title="Vidistiller API",
+    description="Turn any video into structured documentation",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -259,7 +259,7 @@ app.include_router(api_router, prefix="/api")
 async def root():
     """API information endpoint."""
     return {
-        "name": "VidDocs API",
+        "name": "Vidistiller API",
         "version": "1.0.0",
         "docs_url": "/docs",
         "docs_alt": "/redoc",

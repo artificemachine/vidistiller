@@ -131,7 +131,7 @@ describe('authStore', () => {
       expect(mockAxiosPost).toHaveBeenCalledWith(
         expect.stringContaining('/auth/refresh'),
         {},
-        { headers: { Authorization: 'Bearer valid-refresh' } }
+        { headers: { Authorization: 'Bearer valid-refresh' }, withCredentials: true }
       );
       // Access token is stored in memory via setAccessToken, not localStorage
       expect(mockSetAccessToken).toHaveBeenCalledWith('new-access-token');

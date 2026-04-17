@@ -291,7 +291,7 @@ class TestAssembleOutput:
         ]
         result = LLMService._assemble_output(
             sections, ["Summary"],
-            title="My Video", youtube_url="https://www.youtube.com/watch?v=abc",
+            title="My Video", video_url="https://www.youtube.com/watch?v=abc",
         )
         assert result.startswith("# My Video")
         assert "Source: https://www.youtube.com/watch?v=abc" in result
@@ -422,7 +422,7 @@ class TestTwoPassPipeline:
         result = service.summarize_transcript_sections(
             SAMPLE_TRANSCRIPT,
             title="My Tutorial",
-            youtube_url="https://www.youtube.com/watch?v=test123",
+            video_url="https://www.youtube.com/watch?v=test123",
         )
 
         assert result.startswith("# My Tutorial")

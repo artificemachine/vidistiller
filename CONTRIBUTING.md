@@ -1,4 +1,4 @@
-# Contributing to youtube-model-feeder
+# Contributing to vidistiller
 
 Thanks for your interest in contributing! Here's how to get started.
 
@@ -11,8 +11,8 @@ Thanks for your interest in contributing! Here's how to get started.
 ## Setup
 
 ```bash
-git clone https://github.com/celstnblacc/youtube-model-feeder.git
-cd youtube-model-feeder
+git clone https://github.com/celstnblacc/vidistiller.git
+cd vidistiller
 cp .env.example .env  # edit with your settings
 docker compose up -d
 ```
