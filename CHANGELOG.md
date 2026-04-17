@@ -43,3 +43,4 @@ All notable changes to this project will be documented in this file.
 - 2026-04-17: deploy Phase 5 Vidistiller rename to LXC (viddocs web rebuild + restart); fix VidDocs_UI_UX_Audit_Report.md header and inline references to Vidistiller
 - 2026-04-17: update CLAUDE.md header from youtube-model-feeder to Vidistiller (rename cleanup)
 - 2026-04-17: update README.md — multi-source video support, multi-provider LLM, VideoService rename, v1.1.0 version string
+- 2026-04-17: chore: replace Apache 2.0 LICENSE with MIT (copyright celstnblacc)
