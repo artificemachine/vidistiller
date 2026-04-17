@@ -32,6 +32,22 @@
     owner: vidistiller
     group: vidistiller
 
+- name: Copy Alembic migrations directory to VM
+  copy:
+    src: "{{ playbook_dir }}/../../migrations/"
+    dest: "{{ vidistiller_dir }}/migrations/"
+    owner: vidistiller
+    group: vidistiller
+    mode: preserve
+
+- name: Deploy alembic.ini
+  template:
+    src: alembic.ini.j2
+    dest: "{{ vidistiller_dir }}/alembic.ini"
+    mode: "0644"
+    owner: vidistiller
+    group: vidistiller
+
 - name: Deploy docker-compose.yml
   template:
     src: docker-compose.yml.j2
@@ -75,7 +91,7 @@
 - name: Run alembic migrations
   command: >
     docker compose -f {{ vidistiller_dir }}/docker-compose.yml
-    exec -T backend alembic upgrade head
+    exec -T backend python -m alembic upgrade head
   changed_when: true
 
 - name: Wait for API to be healthy

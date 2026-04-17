@@ -32,12 +32,13 @@
       - qemu-guest-agent
     state: present
 
-- name: Enable and start QEMU guest agent
+- name: Enable QEMU guest agent (start may fail if Proxmox agent socket is disabled)
   systemd:
     name: qemu-guest-agent
     state: started
     enabled: true
     daemon_reload: true
+  ignore_errors: true
 
 - name: Set timezone
   timezone:

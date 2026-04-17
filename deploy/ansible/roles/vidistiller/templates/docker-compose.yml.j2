@@ -73,6 +73,8 @@ services:
     container_name: vidistiller-backend
     image: {{ backend_image }}
     restart: unless-stopped
+    # python -m uvicorn respects PYTHONPATH=/app/deps (pip --target install)
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     security_opt:
       - no-new-privileges:true
     environment:
@@ -90,6 +92,8 @@ services:
       - "{{ ansible_host }}:{{ api_port }}:8000"
     volumes:
       - {{ vidistiller_dir }}/app-data:/data
+      - {{ vidistiller_dir }}/alembic.ini:/app/alembic.ini:ro
+      - {{ vidistiller_dir }}/migrations:/app/migrations:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -113,7 +117,7 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
-    command: celery -A app.tasks worker --loglevel=info --concurrency=2
+    command: ["python", "-m", "celery", "-A", "app.tasks", "worker", "--loglevel=info", "--concurrency=2"]
     environment:
       DATABASE_URL: "postgresql://{{ db_user }}:${DB_PASSWORD}@postgres:5432/{{ db_name }}"
       REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379/0"
@@ -124,6 +128,8 @@ services:
       ENVIRONMENT: production
     volumes:
       - {{ vidistiller_dir }}/app-data:/data
+      - {{ vidistiller_dir }}/alembic.ini:/app/alembic.ini:ro
+      - {{ vidistiller_dir }}/migrations:/app/migrations:ro
     depends_on:
       postgres:
         condition: service_healthy
