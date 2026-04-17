@@ -46,3 +46,4 @@ All notable changes to this project will be documented in this file.
 - 2026-04-17: chore: replace Apache 2.0 LICENSE with MIT (copyright celstnblacc)
 - 2026-04-17: feat: add deploy/ — Terraform + Ansible for LXC→VM migration to node-antares (10.255.181.20)
 - 2026-04-17: fix: ansible provisioning fixes — python -m commands, alembic.ini template, migrations copy, image tag format, qemu-guest-agent ignore_errors
+- 2026-04-17: feat: update hero copy, add register password validation, fix migrate-db.yml, fix pgadmin email in vault

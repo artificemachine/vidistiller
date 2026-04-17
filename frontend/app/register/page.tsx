@@ -21,8 +21,18 @@ export default function RegisterPage() {
     e.preventDefault();
     setError('');
 
+    if (password.length < 8) {
+      setError('password must be at least 8 characters');
+      return;
+    }
+
+    if (!/[A-Z]/.test(password)) {
+      setError('password must contain at least one uppercase letter');
+      return;
+    }
+
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
+      setError('passwords do not match');
       return;
     }
 
@@ -50,7 +60,7 @@ export default function RegisterPage() {
       router.push('/');
     } catch (err: any) {
       const detail = err.response?.data?.detail;
-      let msg = err.response?.data?.message || 'Registration failed';
+      let msg = err.response?.data?.message || 'registration failed — please try again';
       if (Array.isArray(detail)) {
         msg = detail.map((d: any) => d.msg || String(d)).join('. ');
       } else if (typeof detail === 'string') {

@@ -1,14 +1,14 @@
 # DB migration playbook — Phase 4 of LXC → VM migration
 #
 # Prerequisites:
-#   1. Dump already taken on LXC and copied locally:
-#      ssh yjjoe@10.255.181.10 "docker compose -f /path/to/docker-compose.yml \
-#        exec -T postgres pg_dump -U tutorial_user tutorial_db" > /tmp/vidistiller.sql
+#   1. Dump taken on LXC and saved locally to /tmp/vidistiller.sql:
+#      ssh <lxc-host> "docker exec vidistiller-postgres \
+#        pg_dump -U tutorial_user tutorial_db" > /tmp/vidistiller.sql
 #
 #   2. vidistiller-prod is running and postgres container is healthy
 #      (run site.yml first)
 #
-# Run: ansible-playbook migrate-db.yml --vault-password-file .vault-pass
+# Run: cd deploy/ansible && ansible-playbook migrate-db.yml --vault-password-file .vault-pass
 ---
 - name: Restore database on vidistiller-prod
   hosts: vidistiller-prod
@@ -21,6 +21,8 @@
     local_dump: "/tmp/vidistiller.sql"
     remote_dump: "/tmp/vidistiller.sql"
     vidistiller_dir: /opt/vidistiller
+    db_user: tutorial_user
+    db_name: tutorial_db
 
   tasks:
     - name: Copy SQL dump to VM
@@ -37,18 +39,6 @@
       retries: 12
       delay: 5
 
-    - name: Restore dump into postgres
-      command: >
-        docker compose -f {{ vidistiller_dir }}/docker-compose.yml
-        exec -T postgres
-        psql -U {{ db_user }} -d {{ db_name }}
-        -f /tmp/vidistiller.sql
-      environment:
-        PGPASSWORD: "{{ db_password }}"
-      # The dump file needs to be accessible inside the container
-      # We copy it via docker cp first
-      changed_when: true
-
     - name: Copy dump into postgres container
       command: >
         docker cp {{ remote_dump }}
@@ -57,18 +47,23 @@
 
     - name: Restore dump inside container
       command: >
-        docker compose -f {{ vidistiller_dir }}/docker-compose.yml
-        exec -T postgres
+        docker exec -i vidistiller-postgres
         psql -U {{ db_user }} -d {{ db_name }} -f /tmp/vidistiller.sql
       changed_when: true
 
     - name: Run alembic migrations (brings schema to head)
       command: >
         docker compose -f {{ vidistiller_dir }}/docker-compose.yml
-        exec -T backend alembic upgrade head
+        exec -T backend python -m alembic upgrade head
       changed_when: true
 
     - name: Remove dump file from VM
       file:
         path: "{{ remote_dump }}"
         state: absent
+
+    - name: Remove dump file from inside container
+      command: >
+        docker exec vidistiller-postgres
+        rm -f /tmp/vidistiller.sql
+      changed_when: false
