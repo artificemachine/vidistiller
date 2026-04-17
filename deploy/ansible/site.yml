@@ -1,0 +1,14 @@
+# vidistiller-prod full provisioning playbook
+# Run: ansible-playbook site.yml --vault-password-file .vault-pass
+---
+- name: Provision vidistiller-prod
+  hosts: vidistiller-prod
+  gather_facts: true
+
+  vars_files:
+    - vars/secrets.yml
+
+  roles:
+    - common
+    - docker
+    - vidistiller

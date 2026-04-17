@@ -1,0 +1,29 @@
+---
+vidistiller_dir: /opt/vidistiller
+
+# Docker Hub images — update tag for new releases
+backend_image: "celestinmax/vidistiller-backend:v0.2.0"
+frontend_image: "celestinmax/vidistiller-frontend:v0.2.0"
+
+# Postgres
+db_name: tutorial_db
+db_user: tutorial_user
+db_port: 5432
+
+# Redis
+redis_port: 6379
+redis_maxmemory: "512mb"
+redis_maxmemory_policy: "allkeys-lru"
+
+# App ports
+api_port: 8000
+frontend_port: 3000
+pgadmin_port: 5050
+
+# Ollama — direct IP, same as LXC config (10.255.150.10 is routable from VM)
+ollama_url: "http://10.255.150.10:11434"
+ollama_model: "qwen3:8b"
+
+# Celery worker resource limits
+celery_mem_limit: "4g"
+celery_cpu_limit: "2.0"
