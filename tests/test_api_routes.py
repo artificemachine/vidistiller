@@ -19,7 +19,7 @@ from app.db.models import (
 class TestCreateJob:
     def test_valid_url_201(self, client: TestClient, test_db: Session, test_user: User, auth_headers: dict, mock_celery):
         resp = client.post("/api/jobs", json={
-            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         }, headers=auth_headers)
         assert resp.status_code == 201
         data = resp.json()
@@ -29,29 +29,29 @@ class TestCreateJob:
 
     def test_triggers_celery(self, client: TestClient, test_db: Session, auth_headers: dict, mock_celery):
         client.post("/api/jobs", json={
-            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         }, headers=auth_headers)
         mock_celery.assert_called_once()
 
     def test_invalid_url_422(self, client: TestClient, test_db: Session, auth_headers: dict, mock_celery):
         resp = client.post("/api/jobs", json={
-            "youtube_url": "https://example.com/not-youtube",
+            "video_url": "not_a_valid_url",
         }, headers=auth_headers)
         assert resp.status_code == 422
 
     def test_persists_to_db(self, client: TestClient, test_db: Session, test_user: User, auth_headers: dict, mock_celery):
         resp = client.post("/api/jobs", json={
-            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         }, headers=auth_headers)
         job_id = resp.json()["job_id"]
         job = test_db.query(ProcessingJob).filter(ProcessingJob.job_id == job_id).first()
         assert job is not None
-        assert job.youtube_url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        assert job.video_url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
         assert job.user_id == test_user.id
 
     def test_requires_auth(self, client: TestClient, test_db: Session, mock_celery):
         resp = client.post("/api/jobs", json={
-            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         })
         assert resp.status_code == 401
 
@@ -180,7 +180,7 @@ class TestSummarizeTranscript:
     def test_no_transcript_422(self, client: TestClient, test_db: Session, auth_headers: dict, mock_celery):
         """No transcript returns 422."""
         resp = client.post("/api/jobs", json={
-            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         }, headers=auth_headers)
         job_id = resp.json()["job_id"]
 
@@ -200,7 +200,7 @@ class TestCancelJob:
     def test_cancel_processing_job(self, client: TestClient, test_db: Session, auth_headers: dict, mock_celery, mock_celery_control):
         """Cancelling a processing job revokes the Celery task and sets CANCELLED."""
         resp = client.post("/api/jobs", json={
-            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         }, headers=auth_headers)
         job_id = resp.json()["job_id"]
 

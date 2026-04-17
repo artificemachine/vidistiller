@@ -1,6 +1,8 @@
-# YouTube Tutorial to Documentation Converter
+# Vidistiller
 
-Convert YouTube tutorials into structured documentation with automatic transcription, snapshot extraction, and LLM-powered content generation.
+**Turn any video into structured documentation.**
+
+Vidistiller is a local-first, source-agnostic video-to-documentation engine. Paste a URL from YouTube, Vimeo, Twitch, X, Reddit, Rumble, or any direct MP4 link — Vidistiller distills the video down to what matters: the spoken words, the slides, the structure. Hours of watching become minutes of reading.
 
 ---
 
@@ -17,7 +19,7 @@ The diagram below shows how every component connects at runtime.
                           ┌──────────────────────────────────────────────────┐
                           │             web  (Next.js Frontend)              │
                           │  React + TypeScript · Tailwind CSS               │
-                          │  Submits YouTube URLs, displays generated docs   │
+                          │  Submits video URLs, displays generated docs     │
                           └──────────────────────┬───────────────────────────┘
                                                  │  HTTP REST (port 8000)
                                                  ▼
@@ -31,8 +33,8 @@ The diagram below shows how every component connects at runtime.
                │                         │                         │
                ▼                         ▼                         ▼
   ┌────────────────────┐   ┌────────────────────┐   ┌────────────────────────┐
-  │  postgres (DB)     │   │  redis (Cache +    │   │  ollama (LLM)          │
-  │  PostgreSQL 15     │   │  Message Broker)   │   │  Mistral 7B local      │
+  │  postgres (DB)     │   │  redis (Cache +    │   │  LLM (multi-provider)  │
+  │  PostgreSQL 15     │   │  Message Broker)   │   │  Ollama/OpenAI/Claude  │
   │  Stores all data:  │   │  Redis 7           │   │  Generates structured  │
   │  jobs, videos,     │   │  Caches results,   │   │  documentation from    │
   │  transcripts,      │   │  rate limits,      │   │  transcripts           │
@@ -46,7 +48,7 @@ The diagram below shows how every component connects at runtime.
                           │  Same codebase as api, different startup command  │
                           │                                                  │
                           │  ┌─────────────┐  ┌──────────────┐              │
-                          │  │  YouTube     │  │  Transcript  │              │
+                          │  │  Video       │  │  Transcript  │              │
                           │  │  Service     │  │  Service     │              │
                           │  │  (download)  │  │  (Whisper)   │              │
                           │  └─────────────┘  └──────────────┘              │
@@ -70,11 +72,11 @@ The diagram below shows how every component connects at runtime.
 ### Data Flow (step by step)
 
 ```
-1. User pastes a YouTube URL in the frontend
+1. User pastes a video URL in the frontend
 2. Frontend sends POST request to the API
 3. API validates the URL, creates a ProcessingJob in PostgreSQL, and pushes a task to Redis
 4. Celery worker picks up the task from Redis and runs the pipeline:
-   a. YouTube Service  → downloads the video and extracts metadata
+   a. Video Service    → downloads the video and extracts metadata
    b. Transcript Service → converts audio to text (via Ollama Whisper)
    c. Snapshot Service  → extracts key frames with FFmpeg
    d. LLM Service       → generates structured markdown/HTML documentation
@@ -130,11 +132,11 @@ This type of video typically produces 20–40 well-defined slides with OCR text 
 
 ## <span style="color: pink;">🎨 Design System — Multi-Theme</span>
 
-The youtube-model-feeder UI supports three palettes switchable at runtime: **Monokai** (default, dark), **Lunaris**, and **Nord**. The active palette is persisted to `localStorage` as `youtube-model-feeder-theme`.
+The Vidistiller UI supports three palettes switchable at runtime: **Monokai** (default, dark), **Lunaris**, and **Nord**. The active palette is persisted to `localStorage` as `vidistiller-theme`.
 
 ### Design Files & Documentation
 
-- **Design File:** [`new_youtube-model-feeder_ui.pen`](./new_youtube-model-feeder_ui.pen) — Complete Pencil design with all screens and Monokai colors
+- **Design File:** [`new_vidistiller_ui.pen`](./new_vidistiller_ui.pen) — Complete Pencil design with all screens and Monokai colors
 - **Design Specification:** [`DESIGN_SPEC.md`](./DESIGN_SPEC.md) — Full design system details, colors, typography, and spacing
 - **Implementation Guide:** [`DESIGN_EXPORT_GUIDE.md`](./DESIGN_EXPORT_GUIDE.md) — Code implementation patterns for React/Tailwind
 - **Quick Reference:** [`DESIGN_README.md`](./DESIGN_README.md) — 5-minute overview of the design system
@@ -160,7 +162,7 @@ The youtube-model-feeder UI supports three palettes switchable at runtime: **Mon
 
 To view or edit the design:
 ```bash
-open new_youtube-model-feeder_ui.pen
+open new_vidistiller_ui.pen
 ```
 
 The design includes:
@@ -194,16 +196,16 @@ The user-facing web application. Built with [Next.js](https://nextjs.org/) (App 
 - **`services/api.ts`** and **`lib/api.ts`** handle all HTTP communication with the backend.
 - **`hooks/`** provides custom React hooks for data fetching and polling job status.
 
-### `services/` — Standalone Service Modules
+### `backend/app/services/` — Core Service Modules
 
-Four self-contained Python packages that encapsulate the core processing logic. They are mounted into both the `api` and `celery_worker` containers via Docker volumes, so both can import them.
+Self-contained Python modules that encapsulate the core processing logic, all located in `backend/app/services/`.
 
 | Service | What it does |
 |---|---|
-| `youtube/` | Downloads the video, extracts metadata (title, channel, duration, thumbnail) |
-| `transcript/` | Sends audio to Ollama Whisper, returns timestamped text segments |
-| `snapshot/` | Uses FFmpeg to extract key frames at configurable intervals |
-| `llm/` | Sends transcript + snapshots to Ollama Mistral, returns structured documentation |
+| `video.py` | Downloads the video, extracts metadata (title, channel, duration, thumbnail), resolves source type |
+| `transcript.py` | Sends audio to Whisper, returns timestamped text segments |
+| `snapshot.py` | Uses FFmpeg to extract key frames at configurable intervals |
+| `llm.py` | Sends transcript + snapshots to LLM (Ollama, OpenAI, or Anthropic), returns structured documentation |
 
 ### `migrations/` — Database Migrations (Alembic)
 
@@ -342,7 +344,7 @@ To address all issues (including breaking changes), run:
 
 Run `npm audit` for details.
 
-> youtube-model-feeder@1.0.0 dev
+> vidistiller@1.1.0 dev
 > next dev
 
   ▲ Next.js 14.2.35

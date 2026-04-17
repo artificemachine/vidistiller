@@ -65,7 +65,7 @@ export default function RegisterPage() {
     <div className="min-h-screen bg-bg-light dark:bg-bg-dark flex items-center justify-center px-4">
       <div className="bg-card-light dark:bg-card-dark rounded-16 shadow-lg dark:shadow-gray-900 p-10 w-full max-w-[420px]">
         <div className="text-center mb-6">
-          <h2 className="text-3xl font-bold text-primary mb-4">youtube-model-feeder</h2>
+          <h2 className="text-3xl font-bold text-primary mb-4">vidistiller</h2>
           <h1 className="text-2xl font-semibold text-text-dark dark:text-text-light mb-2">
             create account
           </h1>

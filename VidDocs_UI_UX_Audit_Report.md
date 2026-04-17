@@ -1,4 +1,4 @@
-# VidDocs — UI/UX Design Audit Report
+# Vidistiller — UI/UX Design Audit Report
 
 **Date:** February 26, 2026
 **Prepared for:** Rocha (contact@example.com)
@@ -8,9 +8,9 @@
 
 ## 1. Executive Summary
 
-This audit evaluates the VidDocs web application across three screens: the Home/Landing page, the Jobs Dashboard, and the Job Detail Workspace. The review is informed by current design patterns from Mobbin, Dribbble, Aura, and 2026 SaaS conversion best practices, as well as techniques documented in the Gemini 3 design workflow note from the project vault.
+This audit evaluates the Vidistiller web application across three screens: the Home/Landing page, the Jobs Dashboard, and the Job Detail Workspace. The review is informed by current design patterns from Mobbin, Dribbble, Aura, and 2026 SaaS conversion best practices, as well as techniques documented in the Gemini 3 design workflow note from the project vault.
 
-VidDocs has a solid foundation: a clear value proposition, a well-structured VS Code-like workspace metaphor, and a functional dark mode. However, several issues impact both usability and conversion, ranging from a critical authentication bug on the Dashboard to visual polish gaps that reduce perceived quality.
+Vidistiller has a solid foundation: a clear value proposition, a well-structured VS Code-like workspace metaphor, and a functional dark mode. However, several issues impact both usability and conversion, ranging from a critical authentication bug on the Dashboard to visual polish gaps that reduce perceived quality.
 
 **Key findings:** 2 critical bugs, 3 high-priority UX issues, and 7 design polish recommendations.
 
@@ -99,13 +99,13 @@ This is the core product experience and has the most room for improvement.
 
 ## 4. Design Reference: Better Stack Uptime (Mobbin)
 
-The following patterns are drawn from Better Stack's Uptime dashboard (curated by Mobbin) and are directly applicable to VidDocs.
+The following patterns are drawn from Better Stack's Uptime dashboard (curated by Mobbin) and are directly applicable to Vidistiller.
 
 ### 4.1 Onboarding Checklist for Empty States
 
 Better Stack shows a "Get the most out of Better Stack" card on the dashboard with a progress indicator ("5 out of 6 steps left") and expandable task cards. Each step has a clear action label and a brief description. Completed steps show a green checkmark; pending steps show an open circle.
 
-**Application to VidDocs Dashboard:** Replace the current "No jobs yet. Create one" dead space with a getting-started checklist:
+**Application to Vidistiller Dashboard:** Replace the current "No jobs yet. Create one" dead space with a getting-started checklist:
 
 1. Convert your first video
 2. Capture snapshots while watching
@@ -119,7 +119,7 @@ This gives new users a clear path to value and makes the empty Dashboard feel pu
 
 Better Stack's incident detail page uses clearly separated cards with distinct sections: "Cause" (monospace code block), "Created by / Started at / Length" (three equal-width cards in a row), and "Escalation" (full-width card below). Each card has a small gray label above a large bold value, creating strong visual hierarchy.
 
-**Application to VidDocs Job Detail:** The job metadata (Job ID, YouTube URL, language, status, created date) is currently compressed into the transcript panel header. Break this out into a structured card layout:
+**Application to Vidistiller Job Detail:** The job metadata (Job ID, YouTube URL, language, status, created date) is currently compressed into the transcript panel header. Break this out into a structured card layout:
 
 - A "Status / Created / Duration" row of small cards at the top of the sidebar, using the same label-above-value pattern
 - "Source URL" as a clickable link card
@@ -129,13 +129,13 @@ Better Stack's incident detail page uses clearly separated cards with distinct s
 
 Better Stack's sidebar uses icon + text labels for every navigation item, with count badges (e.g., "Incidents 2") for items that need attention. The active item has a highlighted background.
 
-**Application to VidDocs Activity Bar:** The current icon-only Activity Bar should adopt this pattern. At minimum, add tooltip labels on hover. Ideally, when the sidebar is expanded, show icon + text labels. Add a count badge to the snapshots icon showing how many snapshots have been captured.
+**Application to Vidistiller Activity Bar:** The current icon-only Activity Bar should adopt this pattern. At minimum, add tooltip labels on hover. Ideally, when the sidebar is expanded, show icon + text labels. Add a count badge to the snapshots icon showing how many snapshots have been captured.
 
 ### 4.4 Status Indicators and Success Banners
 
 Better Stack uses a green success banner ("Incident was successfully reported and the team will be notified") for confirmations, and a red dot + "Ongoing" label for active status. The "Acknowledge" button is prominently placed with a green highlight.
 
-**Application to VidDocs:** The processing status could adopt this pattern more clearly — show a green banner when processing completes ("Your documentation is ready"), and use the dot + label pattern for the NavStatusBadge in the navbar to make job status more scannable.
+**Application to Vidistiller:** The processing status could adopt this pattern more clearly — show a green banner when processing completes ("Your documentation is ready"), and use the dot + label pattern for the NavStatusBadge in the navbar to make job status more scannable.
 
 ---
 
@@ -180,7 +180,7 @@ As demonstrated in the Aura design tool and referenced in the Gemini 3 note, bor
 
 ## 7. Key Techniques from Gemini 3 Design Workflow
 
-The following techniques are extracted from the Gemini 3 design note in the project vault and are directly applicable to VidDocs redesign work.
+The following techniques are extracted from the Gemini 3 design note in the project vault and are directly applicable to Vidistiller redesign work.
 
 ### Inspiration Feeding
 
@@ -188,15 +188,15 @@ Rather than using generic prompts, feed AI design tools (Gemini 3, Cursor, v0) w
 
 ### Style Combining
 
-Take an existing template and combine it with a different design reference. For example: "Keep the cards from Template A but change the rest to match the style of Screenshot B." This mix-and-match approach produces original designs that are more creative than either source alone. This is particularly relevant for VidDocs — the workspace layout could adopt card patterns from Better Stack while keeping the VS Code panel metaphor.
+Take an existing template and combine it with a different design reference. For example: "Keep the cards from Template A but change the rest to match the style of Screenshot B." This mix-and-match approach produces original designs that are more creative than either source alone. This is particularly relevant for Vidistiller — the workspace layout could adopt card patterns from Better Stack while keeping the VS Code panel metaphor.
 
 ### Icon and Logo Strategy
 
-Always specify icon libraries upfront in prompts: Iconify Solar Duotone for UI icons, SVG Logos for brand/company logos. This prevents AI from generating placeholder icons that need manual replacement later. VidDocs should adopt a consistent icon library across the Activity Bar, toolbar buttons, and status indicators.
+Always specify icon libraries upfront in prompts: Iconify Solar Duotone for UI icons, SVG Logos for brand/company logos. This prevents AI from generating placeholder icons that need manual replacement later. Vidistiller should adopt a consistent icon library across the Activity Bar, toolbar buttons, and status indicators.
 
 ### Animation Patterns
 
-Border beam animations, scroll-triggered reveals (animate on scroll), and keyframe animations add significant perceived quality. These can be prompted directly: "animate border beam using yellow" or "add animate on scroll and animate keyframe." For VidDocs, applying border beam to the active panel or scroll-triggered fade-in to transcript sections would add polish with minimal code.
+Border beam animations, scroll-triggered reveals (animate on scroll), and keyframe animations add significant perceived quality. These can be prompted directly: "animate border beam using yellow" or "add animate on scroll and animate keyframe." For Vidistiller, applying border beam to the active panel or scroll-triggered fade-in to transcript sections would add polish with minimal code.
 
 ### Background Depth with Unicorn Studio
 
@@ -237,4 +237,4 @@ For hero sections and landing pages, Unicorn Studio backgrounds (beams, glyphs, 
 ### Project References
 
 - **Gemini 3 Changes Everything for Web Design** — [Obsidian vault note](obsidian://open?vault=&file=notes/web_design/gemini_3_changes_everything_for_web_design) — Techniques for inspiration feeding, style combining, and animation with AI design tools. [Source video](https://youtu.be/b-kTkak2FKs).
-- **VidDocs UI/UX Design Document** (project spec) — Full component inventory, state management, theming, and route map.
+- **Vidistiller UI/UX Design Document** (project spec) — Full component inventory, state management, theming, and route map.

@@ -438,7 +438,8 @@ Summary:"""
         snapshots: Optional[List[Dict]] = None,
         language: str = "en",
         title: str = "",
-        youtube_url: str = "",
+        video_url: str = "",
+        source_type: str = "",
         cancel_check: Optional[Callable[[], bool]] = None,
     ) -> str:
         """
@@ -498,7 +499,7 @@ Summary:"""
                 summaries.append(summary)
 
             # Assemble final output
-            return self._assemble_output(sections, summaries, title=title, youtube_url=youtube_url)
+            return self._assemble_output(sections, summaries, title=title, video_url=video_url, source_type=source_type)
 
         except CancelledException:
             raise
@@ -525,7 +526,7 @@ Summary:"""
                 result_parts.append(summary)
 
         result = "\n\n".join(result_parts)
-        result = self._prepend_title_header(result, title, youtube_url)
+        result = self._prepend_title_header(result, title, video_url, source_type)
         return result
 
     def export_format(self, content: str, format_type: str = "markdown") -> str:
@@ -1128,13 +1129,14 @@ Documentation:"""
             return section.text
 
     @staticmethod
-    def _prepend_title_header(content: str, title: str = "", youtube_url: str = "") -> str:
+    def _prepend_title_header(content: str, title: str = "", video_url: str = "", source_type: str = "") -> str:
         """Prepend video title and source URL as a markdown header."""
         if not title:
             return content
         header = f"# {title}"
-        if youtube_url:
-            header += f"\n\nSource: {youtube_url}"
+        if video_url:
+            source_label = f" ({source_type})" if source_type else ""
+            header += f"\n\nSource: {video_url}{source_label}"
         header += "\n\n---"
         if content:
             return header + "\n\n" + content
@@ -1145,21 +1147,12 @@ Documentation:"""
         sections: list[TranscriptSection],
         summaries: list[str],
         title: str = "",
-        youtube_url: str = "",
+        video_url: str = "",
+        source_type: str = "",
     ) -> str:
-        """Combine section headers, summaries, and snapshot images.
-
-        Args:
-            sections: TranscriptSection objects
-            summaries: Corresponding summary strings
-            title: Video title to prepend as H1 header
-            youtube_url: YouTube source URL
-
-        Returns:
-            Final markdown document
-        """
+        """Combine section headers, summaries, and snapshot images."""
         parts: list[str] = []
-        header = LLMService._prepend_title_header("", title, youtube_url)
+        header = LLMService._prepend_title_header("", title, video_url, source_type)
         if header:
             parts.append(header)
         for section, summary in zip(sections, summaries):

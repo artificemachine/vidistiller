@@ -41,7 +41,7 @@ class TestGetJobSnapshots:
         job = ProcessingJob(
             job_id="empty-snap",
             status=ProcessingStatus.PENDING,
-            youtube_url="https://www.youtube.com/watch?v=empty1234567",
+            video_url="https://www.youtube.com/watch?v=empty1234567",
             user_id=test_user.id,
         )
         test_db.add(job)
@@ -103,7 +103,7 @@ class TestCaptureSnapshot:
         }, headers=auth_headers)
         assert resp.status_code == 404
 
-    def test_no_youtube_url(self, client: TestClient, test_db: Session, auth_headers, test_user):
+    def test_no_video_url(self, client: TestClient, test_db: Session, auth_headers, test_user):
         job = ProcessingJob(
             job_id="no-url-job",
             status=ProcessingStatus.PENDING,
@@ -127,7 +127,7 @@ class TestCaptureSnapshot:
         job = ProcessingJob(
             job_id="capture-test",
             status=ProcessingStatus.COMPLETED,
-            youtube_url="https://www.youtube.com/watch?v=cap12345678",
+            video_url="https://www.youtube.com/watch?v=cap12345678",
             video_file_path="/tmp/fake_video.mp4",
             user_id=test_user.id,
         )

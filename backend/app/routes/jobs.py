@@ -91,7 +91,7 @@ def create_job(
     Create a new processing job from a YouTube URL.
 
     **Request body:**
-    - `youtube_url`: YouTube video URL (validated format)
+    - `video_url`: Video URL to process (YouTube, Vimeo, Twitch, Twitter/X, TikTok, Reddit, Rumble, or direct MP4)
     - `output_format`: Desired output format (markdown, html, pdf)
     - `extract_snapshots`: Whether to extract key frames (default: true)
 
@@ -99,15 +99,18 @@ def create_job(
 
     **Status codes:**
     - 201: Job created successfully
-    - 422: Invalid YouTube URL or parameters
+    - 422: Invalid URL or parameters
     """
     try:
-        # Create new processing job with unique UUID
+        from app.services.source_resolver import VideoSourceResolver
+        source_type, _ = VideoSourceResolver.resolve(job_data.video_url)
+
         processing_mode = ProcessingMode.SLIDE_AWARE.value if job_data.is_slide_mode else ProcessingMode.STANDARD.value
         new_job = ProcessingJob(
             job_id=str(uuid.uuid4()),
             status=ProcessingStatus.PENDING,
-            youtube_url=job_data.youtube_url,
+            video_url=job_data.video_url,
+            source_type=source_type.value,
             processing_mode=processing_mode,
             user_id=current_user.id,
         )
@@ -694,7 +697,8 @@ def export_job(
         "job": {
             "job_id": job.job_id,
             "status": job.status.value,
-            "youtube_url": job.youtube_url,
+            "video_url": job.video_url,
+            "source_type": job.source_type,
             "created_at": job.created_at.isoformat(),
             "updated_at": job.updated_at.isoformat(),
         },

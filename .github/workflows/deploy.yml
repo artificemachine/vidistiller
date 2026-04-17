@@ -74,7 +74,7 @@ jobs:
   # access to Docker and the project directory.
   deploy-production:
     name: Deploy → production
-    runs-on: [self-hosted, linux, youtube-model-feeder-prod]
+    runs-on: [self-hosted, linux, vidistiller-prod]
     needs: [test-backend, test-frontend, security]
     if: github.ref == 'refs/heads/main'
     environment: production
@@ -85,7 +85,7 @@ jobs:
     steps:
       - name: Pull latest code
         run: |
-          cd "${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder}"
+          cd "${VIDISTILLER_DIR:-$HOME/vidistiller}"
           git fetch origin main
           git reset --hard origin/main
 
@@ -94,7 +94,7 @@ jobs:
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: |
-          cd "${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder}"
+          cd "${VIDISTILLER_DIR:-$HOME/vidistiller}"
           sed -i "s|^SENTRY_DSN=.*|SENTRY_DSN=${SENTRY_DSN}|" .env
           sed -i "s|^SENTRY_ENABLED=.*|SENTRY_ENABLED=true|" .env
           grep -q "^NEXT_PUBLIC_SENTRY_DSN=" .env \
@@ -103,13 +103,13 @@ jobs:
 
       - name: Build and deploy
         run: |
-          cd "${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder}"
+          cd "${VIDISTILLER_DIR:-$HOME/vidistiller}"
           docker compose build --pull
           docker compose up -d
 
       - name: Run migrations
         run: |
-          cd "${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder}"
+          cd "${VIDISTILLER_DIR:-$HOME/vidistiller}"
           sleep 8
           docker compose exec -T api alembic upgrade head
 
@@ -117,12 +117,12 @@ jobs:
         run: |
           sleep 12
           curl -sf http://localhost:8000/health || { echo "API health check failed"; exit 1; }
-          echo "Deploy successful — $(git -C ${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder} rev-parse --short HEAD)"
+          echo "Deploy successful — $(git -C ${VIDISTILLER_DIR:-$HOME/vidistiller} rev-parse --short HEAD)"
 
   # ── 5. Deploy to staging (self-hosted runner on staging LXC) ───────────────
   deploy-staging:
     name: Deploy → staging
-    runs-on: [self-hosted, linux, youtube-model-feeder-staging]
+    runs-on: [self-hosted, linux, vidistiller-staging]
     needs: [test-backend, test-frontend]
     if: github.ref == 'refs/heads/staging'
     environment: staging
@@ -133,19 +133,19 @@ jobs:
     steps:
       - name: Pull latest code
         run: |
-          cd "${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder}"
+          cd "${VIDISTILLER_DIR:-$HOME/vidistiller}"
           git fetch origin staging
           git reset --hard origin/staging
 
       - name: Build and deploy staging
         run: |
-          cd "${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder}"
+          cd "${VIDISTILLER_DIR:-$HOME/vidistiller}"
           docker compose -f docker-compose.yml -f docker-compose.staging.yml build --pull
           docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
 
       - name: Run migrations
         run: |
-          cd "${YOUTUBE_MODEL_FEEDER_DIR:-$HOME/youtube-model-feeder}"
+          cd "${VIDISTILLER_DIR:-$HOME/vidistiller}"
           sleep 8
           docker compose -f docker-compose.yml -f docker-compose.staging.yml exec -T api alembic upgrade head
 

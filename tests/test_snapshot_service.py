@@ -161,7 +161,7 @@ class TestSaveSnapshots:
         job = ProcessingJob(
             job_id="snap-save-1",
             status=ProcessingStatus.PENDING,
-            youtube_url="https://www.youtube.com/watch?v=test12345ab",
+            video_url="https://www.youtube.com/watch?v=test12345ab",
         )
         test_db.add(job)
         test_db.commit()
@@ -180,7 +180,7 @@ class TestSaveSnapshots:
         job = ProcessingJob(
             job_id="snap-save-2",
             status=ProcessingStatus.PENDING,
-            youtube_url="https://www.youtube.com/watch?v=test12345ac",
+            video_url="https://www.youtube.com/watch?v=test12345ac",
         )
         test_db.add(job)
         test_db.commit()

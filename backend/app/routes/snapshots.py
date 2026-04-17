@@ -107,18 +107,18 @@ async def capture_snapshot(
     # Look up the job
     job = _get_job_for_user_by_uuid(db, request.job_id, current_user)
 
-    if not job.youtube_url:
-        raise HTTPException(status_code=400, detail="Job has no YouTube URL")
+    if not job.video_url:
+        raise HTTPException(status_code=400, detail="Job has no video URL")
 
     # Download video on-demand if not already available
     video_path = job.video_file_path
     if not video_path or not Path(video_path).exists():
         try:
-            from app.services.youtube import YouTubeService
-            yt = YouTubeService()
+            from app.services.video import VideoService
+            yt = VideoService()
             video_dir = str(_videos_base() / request.job_id)
             video_path, _ = yt.download_video(
-                job.youtube_url, output_path=video_dir, quality="720p",
+                job.video_url, output_path=video_dir, quality="720p",
             )
             job.video_file_path = video_path
             db.commit()

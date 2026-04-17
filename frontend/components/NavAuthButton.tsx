@@ -5,7 +5,7 @@ import { useRef, useState, useEffect, useCallback } from 'react';
 import { useAuthStore } from '@/lib/authStore';
 import NavStatusBadge from './NavStatusBadge';
 
-const SETUPS_KEY = 'youtube-model-feeder-ui-setups';
+const SETUPS_KEY = 'vidistiller-ui-setups';
 
 interface UISetup {
   name: string;
@@ -21,12 +21,12 @@ function saveSetups(setups: UISetup[]) {
   localStorage.setItem(SETUPS_KEY, JSON.stringify(setups));
 }
 
-const UI_CAPTURE_PREFIXES = ['workspace', 'react-resizable-panels', 'theme', 'youtube-model-feeder-theme', 'youtube-model-feeder-workspace'];
+const UI_CAPTURE_PREFIXES = ['workspace', 'react-resizable-panels', 'theme', 'vidistiller-theme', 'vidistiller-workspace'];
 
 function captureSnapshot(): Record<string, string | null> {
   const snapshot: Record<string, string | null> = {};
   for (const key of Object.keys(localStorage)) {
-    if (key === SETUPS_KEY || key === 'youtube-model-feeder-ui-snapshot') continue;
+    if (key === SETUPS_KEY || key === 'vidistiller-ui-snapshot') continue;
     if (UI_CAPTURE_PREFIXES.some((p) => key.startsWith(p))) {
       snapshot[key] = localStorage.getItem(key);
     }
@@ -92,7 +92,7 @@ export default function NavAuthButton() {
     const newSetup: UISetup = { name, savedAt: new Date().toISOString(), data: captureSnapshot() };
     const updated = [newSetup, ...existing.filter((s) => s.name !== name)].slice(0, 3);
     saveSetups(updated);
-    localStorage.setItem('youtube-model-feeder-ui-snapshot', JSON.stringify(newSetup.data));
+    localStorage.setItem('vidistiller-ui-snapshot', JSON.stringify(newSetup.data));
     setConfirmOverwrite(false);
     scheduleFeedback('saved!', 2000);
     setOpen(false);
@@ -101,7 +101,7 @@ export default function NavAuthButton() {
 
   function handleLoad(setup: UISetup) {
     restoreSnapshot(setup.data);
-    localStorage.setItem('youtube-model-feeder-ui-snapshot', JSON.stringify(setup.data));
+    localStorage.setItem('vidistiller-ui-snapshot', JSON.stringify(setup.data));
     window.location.reload();
   }
 
@@ -181,9 +181,9 @@ export default function NavAuthButton() {
                 <button
                   onClick={() => {
                     logout();
-                    localStorage.removeItem('youtube-model-feeder-theme');
+                    localStorage.removeItem('vidistiller-theme');
                     localStorage.removeItem('theme');
-                    localStorage.removeItem('youtube-model-feeder-workspace-state');
+                    localStorage.removeItem('vidistiller-workspace-state');
                     window.location.href = '/login';
                   }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-text-light/50 hover:text-destructive hover:bg-border-dark transition-colors"

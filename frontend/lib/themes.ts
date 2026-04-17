@@ -15,6 +15,6 @@ export const THEMES: ThemeOption[] = [
 export const DEFAULT_THEME: ThemeId = 'lunaris';
 
 export const STORAGE_KEYS = {
-  theme: 'youtube-model-feeder-theme',
+  theme: 'vidistiller-theme',
   mode: 'theme',
 } as const;

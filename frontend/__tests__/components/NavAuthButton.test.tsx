@@ -20,7 +20,7 @@ import { useAuthStore } from '@/lib/authStore';
 import NavAuthButton from '@/components/NavAuthButton';
 import ThemeProvider from '@/components/ThemeProvider';
 
-const SETUPS_KEY = 'youtube-model-feeder-ui-setups';
+const SETUPS_KEY = 'vidistiller-ui-setups';
 
 function renderWithProviders(ui: React.ReactElement) {
   return render(<ThemeProvider>{ui}</ThemeProvider>);
@@ -125,18 +125,18 @@ describe('NavAuthButton', () => {
 
     it('clears theme and workspace state from localStorage on logout', async () => {
       const user = userEvent.setup();
-      lsMock.setItem('youtube-model-feeder-theme', 'monokai');
+      lsMock.setItem('vidistiller-theme', 'monokai');
       lsMock.setItem('theme', 'dark');
-      lsMock.setItem('youtube-model-feeder-workspace-state', '{"playerZoom":80}');
+      lsMock.setItem('vidistiller-workspace-state', '{"playerZoom":80}');
 
       Object.defineProperty(window, 'location', { value: { href: '' }, writable: true });
       renderWithProviders(<NavAuthButton />);
       await user.click(screen.getByText('testuser'));
       await user.click(screen.getByText('logout'));
 
-      expect(lsMock.getItem('youtube-model-feeder-theme')).toBeNull();
+      expect(lsMock.getItem('vidistiller-theme')).toBeNull();
       expect(lsMock.getItem('theme')).toBeNull();
-      expect(lsMock.getItem('youtube-model-feeder-workspace-state')).toBeNull();
+      expect(lsMock.getItem('vidistiller-workspace-state')).toBeNull();
     });
   });
 
@@ -311,7 +311,7 @@ describe('NavAuthButton', () => {
         value: { ...window.location, reload: vi.fn() },
         writable: true,
       });
-      const data = { 'youtube-model-feeder-workspace-state': '{"playerZoom":60}' };
+      const data = { 'vidistiller-workspace-state': '{"playerZoom":60}' };
       localStorage.setItem(SETUPS_KEY, JSON.stringify([
         { name: 'my setup', savedAt: new Date().toISOString(), data },
       ]));
@@ -321,8 +321,8 @@ describe('NavAuthButton', () => {
       await user.click(screen.getByText('load ui setup'));
       await user.click(screen.getByText('my setup'));
 
-      expect(lsMock.getItem('youtube-model-feeder-workspace-state')).toBe('{"playerZoom":60}');
-      expect(lsMock.getItem('youtube-model-feeder-ui-snapshot')).toBe(JSON.stringify(data));
+      expect(lsMock.getItem('vidistiller-workspace-state')).toBe('{"playerZoom":60}');
+      expect(lsMock.getItem('vidistiller-ui-snapshot')).toBe(JSON.stringify(data));
     });
 
     it('deletes a setup without loading it', async () => {

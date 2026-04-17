@@ -111,7 +111,7 @@ describe('apiClient interceptor', () => {
     expect(mockAxiosPost).toHaveBeenCalledWith(
       expect.stringContaining('/auth/refresh'),
       {},
-      { headers: { Authorization: 'Bearer valid-refresh' } }
+      { headers: { Authorization: 'Bearer valid-refresh' }, withCredentials: true }
     );
     // Access token is in-memory only (never in localStorage)
     expect(getAccessToken()).toBe('new-token');

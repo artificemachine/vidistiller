@@ -175,25 +175,25 @@ describe('LoginPage UI setup restore', () => {
     await vi.waitFor(() => expect(window.location.href).toBe('/dashboard'));
   }
 
-  it('restores last saved UI setup from youtube-model-feeder-ui-setups on login', async () => {
-    const data = { 'youtube-model-feeder-workspace-state': '{"playerZoom":75,"sidebarVisible":true}', 'youtube-model-feeder-theme': 'monokai' };
-    lsMock.setItem('youtube-model-feeder-ui-setups', JSON.stringify([
+  it('restores last saved UI setup from vidistiller-ui-setups on login', async () => {
+    const data = { 'vidistiller-workspace-state': '{"playerZoom":75,"sidebarVisible":true}', 'vidistiller-theme': 'monokai' };
+    lsMock.setItem('vidistiller-ui-setups', JSON.stringify([
       { name: 'my layout', savedAt: new Date().toISOString(), data },
     ]));
 
     await loginAs();
 
-    expect(lsMock.getItem('youtube-model-feeder-workspace-state')).toBe('{"playerZoom":75,"sidebarVisible":true}');
-    expect(lsMock.getItem('youtube-model-feeder-theme')).toBe('monokai');
+    expect(lsMock.getItem('vidistiller-workspace-state')).toBe('{"playerZoom":75,"sidebarVisible":true}');
+    expect(lsMock.getItem('vidistiller-theme')).toBe('monokai');
   });
 
-  it('falls back to youtube-model-feeder-ui-snapshot when no named setups exist', async () => {
-    const data = { 'youtube-model-feeder-workspace-state': '{"playerZoom":60}' };
-    lsMock.setItem('youtube-model-feeder-ui-snapshot', JSON.stringify(data));
+  it('falls back to vidistiller-ui-snapshot when no named setups exist', async () => {
+    const data = { 'vidistiller-workspace-state': '{"playerZoom":60}' };
+    lsMock.setItem('vidistiller-ui-snapshot', JSON.stringify(data));
 
     await loginAs();
 
-    expect(lsMock.getItem('youtube-model-feeder-workspace-state')).toBe('{"playerZoom":60}');
+    expect(lsMock.getItem('vidistiller-workspace-state')).toBe('{"playerZoom":60}');
   });
 
   it('skips restore gracefully when no setup or snapshot exists', async () => {
@@ -202,14 +202,14 @@ describe('LoginPage UI setup restore', () => {
   });
 
   it('uses first (most recent) setup from list', async () => {
-    lsMock.setItem('youtube-model-feeder-ui-setups', JSON.stringify([
-      { name: 'newest', savedAt: '2026-03-01T00:00:00Z', data: { 'youtube-model-feeder-workspace-state': '{"playerZoom":80}' } },
-      { name: 'older', savedAt: '2026-01-01T00:00:00Z', data: { 'youtube-model-feeder-workspace-state': '{"playerZoom":30}' } },
+    lsMock.setItem('vidistiller-ui-setups', JSON.stringify([
+      { name: 'newest', savedAt: '2026-03-01T00:00:00Z', data: { 'vidistiller-workspace-state': '{"playerZoom":80}' } },
+      { name: 'older', savedAt: '2026-01-01T00:00:00Z', data: { 'vidistiller-workspace-state': '{"playerZoom":30}' } },
     ]));
 
     await loginAs();
 
-    expect(lsMock.getItem('youtube-model-feeder-workspace-state')).toBe('{"playerZoom":80}');
+    expect(lsMock.getItem('vidistiller-workspace-state')).toBe('{"playerZoom":80}');
   });
 
   it('redirects to /dashboard after restoring UI', async () => {
@@ -219,17 +219,17 @@ describe('LoginPage UI setup restore', () => {
 
   it('removes null-valued keys from localStorage during restore', async () => {
     const data: Record<string, string | null> = {
-      'youtube-model-feeder-workspace-state': '{"playerZoom":55}',
-      'youtube-model-feeder-theme': null,
+      'vidistiller-workspace-state': '{"playerZoom":55}',
+      'vidistiller-theme': null,
     };
-    lsMock.setItem('youtube-model-feeder-ui-setups', JSON.stringify([
+    lsMock.setItem('vidistiller-ui-setups', JSON.stringify([
       { name: 'test', savedAt: new Date().toISOString(), data },
     ]));
-    lsMock.setItem('youtube-model-feeder-theme', 'nord');
+    lsMock.setItem('vidistiller-theme', 'nord');
 
     await loginAs();
 
-    expect(lsMock.getItem('youtube-model-feeder-workspace-state')).toBe('{"playerZoom":55}');
-    expect(lsMock.getItem('youtube-model-feeder-theme')).toBeNull();
+    expect(lsMock.getItem('vidistiller-workspace-state')).toBe('{"playerZoom":55}');
+    expect(lsMock.getItem('vidistiller-theme')).toBeNull();
   });
 });

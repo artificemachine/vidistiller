@@ -75,7 +75,7 @@ describe('Dashboard', () => {
   it('renders empty state without toolbar', async () => {
     mockGet.mockResolvedValue({ data: [] });
     renderDashboard();
-    expect(await screen.findByText('get started with youtube-model-feeder')).toBeInTheDocument();
+    expect(await screen.findByText('get started with vidistiller')).toBeInTheDocument();
     expect(screen.getByText('convert your first video')).toBeInTheDocument();
     expect(screen.queryByText('stop all')).not.toBeInTheDocument();
     expect(screen.queryByText('clear history')).not.toBeInTheDocument();
@@ -149,6 +149,6 @@ describe('Dashboard', () => {
     expect(await screen.findByText('Failed to load jobs')).toBeInTheDocument();
     expect(screen.getByText('retry')).toBeInTheDocument();
     // Empty state should NOT appear alongside the error
-    expect(screen.queryByText('get started with youtube-model-feeder')).not.toBeInTheDocument();
+    expect(screen.queryByText('get started with vidistiller')).not.toBeInTheDocument();
   });
 });

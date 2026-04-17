@@ -9,7 +9,7 @@ import { useAuthStore } from '@/lib/authStore';
 interface RecentJob {
   job_id: string;
   status: string;
-  youtube_url: string | null;
+  video_url: string | null;
   video_title: string | null;
   created_at: string;
 }
@@ -77,7 +77,7 @@ export default function Home() {
     try {
       const response = await apiClient.post(
         '/jobs',
-        { youtube_url: url, output_format: 'markdown', extract_snapshots: true, is_slide_mode: slideMode }
+        { video_url: url, output_format: 'markdown', extract_snapshots: true, is_slide_mode: slideMode }
       );
       router.push(`/jobs/${response.data.job_id}`);
     } catch (err: any) {
@@ -133,21 +133,21 @@ export default function Home() {
             500+ videos converted
           </span>
           <span>free · no api key required</span>
-          <span>works with any youtube video</span>
+          <span>YouTube, Vimeo, Twitch, X.com, TikTok, Reddit, Rumble and more</span>
         </div>
 
         <div className="bg-card-light dark:bg-surface rounded-16 shadow-lg dark:shadow-gray-900 p-6 mb-8 max-w-[600px] mx-auto">
           <form onSubmit={handleSubmit} className="flex flex-col gap-5">
             <div>
               <label htmlFor="url" className="block text-[14px] font-semibold text-text-dark dark:text-text-light mb-2">
-                youtube url
+                video url
               </label>
               <input
                 type="url"
                 id="url"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://www.youtube.com/watch?v=..."
+                placeholder="YouTube, Vimeo, Twitch, X.com, TikTok, Reddit, Rumble or direct .mp4..."
                 className="w-full px-4 h-12 rounded-lg bg-card-light dark:bg-input-bg text-text-dark dark:text-text-light placeholder-text-muted focus:ring-2 focus:ring-primary focus:outline-none"
                 required
               />
@@ -263,7 +263,7 @@ export default function Home() {
                     >
                       <div className="min-w-0 flex-1 mr-4">
                         <p className="text-sm font-medium text-text-dark dark:text-text-light truncate">
-                          {job.video_title || (job.youtube_url ? job.youtube_url.slice(0, 60) : job.job_id)}
+                          {job.video_title || (job.video_url ? job.video_url.slice(0, 60) : job.job_id)}
                         </p>
                         <p className="text-xs text-text-dark/50 dark:text-text-light/50 mt-0.5">
                           {timeAgo(job.created_at)}

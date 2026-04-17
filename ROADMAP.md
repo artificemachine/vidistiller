@@ -1,4 +1,4 @@
-# VidDocs Roadmap
+# Vidistiller Roadmap
 
 ## Auth
 - [ ] Email verification on register

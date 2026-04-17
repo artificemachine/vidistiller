@@ -134,7 +134,7 @@ def seeded_job(test_db, test_user) -> ProcessingJob:
     job = ProcessingJob(
         job_id="aaaa-bbbb-cccc",
         status=ProcessingStatus.COMPLETED,
-        youtube_url="https://www.youtube.com/watch?v=test12345",
+        video_url="https://www.youtube.com/watch?v=test12345",
         user_id=test_user.id,
     )
     test_db.add(job)
@@ -210,7 +210,7 @@ def seeded_slide_job(test_db, test_user) -> ProcessingJob:
     job = ProcessingJob(
         job_id="slide-job-1234",
         status=ProcessingStatus.COMPLETED,
-        youtube_url="https://www.youtube.com/watch?v=slide12345",
+        video_url="https://www.youtube.com/watch?v=slide12345",
         processing_mode="slide_aware",
         user_id=test_user.id,
     )

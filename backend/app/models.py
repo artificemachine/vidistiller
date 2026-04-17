@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 class JobCreateRequest(BaseModel):
     """Request to create a new processing job."""
-    youtube_url: str = Field(..., description="YouTube video URL")
+    video_url: str = Field(..., description="Video URL")
 
 
 class JobResponse(BaseModel):
@@ -24,7 +24,7 @@ class JobResponse(BaseModel):
     job_id: str = Field(..., description="Unique UUID for job")
     status: str
     error_message: Optional[str] = None
-    youtube_url: Optional[str] = None
+    video_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

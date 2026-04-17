@@ -262,7 +262,7 @@ export default function Dashboard() {
         {jobs.length === 0 ? (
           <div className="p-8">
             <h2 className="text-lg font-semibold text-text-dark dark:text-text-light mb-1">
-              get started with youtube-model-feeder
+              get started with vidistiller
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
               follow these steps to get the most out of the app

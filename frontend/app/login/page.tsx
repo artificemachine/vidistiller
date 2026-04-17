@@ -32,10 +32,10 @@ export default function LoginPage() {
 
       // Restore last saved UI setup on login
       try {
-        const setups = JSON.parse(localStorage.getItem('youtube-model-feeder-ui-setups') || '[]');
+        const setups = JSON.parse(localStorage.getItem('vidistiller-ui-setups') || '[]');
         const data = setups.length > 0
           ? setups[0].data
-          : JSON.parse(localStorage.getItem('youtube-model-feeder-ui-snapshot') || 'null');
+          : JSON.parse(localStorage.getItem('vidistiller-ui-snapshot') || 'null');
         if (data) {
           for (const [key, value] of Object.entries(data as Record<string, string | null>)) {
             if (value !== null) localStorage.setItem(key, value as string);
@@ -63,7 +63,7 @@ export default function LoginPage() {
     <div className="min-h-screen bg-bg-light dark:bg-bg-dark flex items-center justify-center px-4">
       <div className="bg-card-light dark:bg-card-dark rounded-16 shadow-lg dark:shadow-gray-900 p-10 w-full max-w-[420px]">
         <div className="text-center mb-6">
-          <h2 className="text-3xl font-bold text-primary mb-4">youtube-model-feeder</h2>
+          <h2 className="text-3xl font-bold text-primary mb-4">vidistiller</h2>
           <h1 className="text-2xl font-semibold text-text-dark dark:text-text-light mb-2">
             sign in
           </h1>

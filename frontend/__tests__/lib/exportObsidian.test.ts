@@ -59,7 +59,7 @@ beforeEach(() => {
 describe('exportToObsidian', () => {
   const baseOptions = {
     title: 'Test Tutorial',
-    youtubeUrl: 'https://youtube.com/watch?v=abc',
+    videoUrl: 'https://youtube.com/watch?v=abc',
     transcriptText: '[00:00:05] Hello world\n[00:00:10] Second line',
     snapshots: [{ timestamp: 5.0, image_url: '/snapshots/snap.jpg' }],
     baseUrl: 'http://localhost:8000',

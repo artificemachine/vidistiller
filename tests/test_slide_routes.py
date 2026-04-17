@@ -11,7 +11,7 @@ class TestCreateJobSlideMode:
     def test_create_job_with_slide_mode(self, client, auth_headers, mock_celery):
         """Job created with is_slide_mode=True should have processing_mode='slide_aware'."""
         resp = client.post("/api/jobs", json={
-            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
             "is_slide_mode": True,
         }, headers=auth_headers)
         assert resp.status_code == 201
@@ -21,7 +21,7 @@ class TestCreateJobSlideMode:
     def test_create_job_without_slide_mode(self, client, auth_headers, mock_celery):
         """Job created without is_slide_mode should have processing_mode='standard'."""
         resp = client.post("/api/jobs", json={
-            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         }, headers=auth_headers)
         assert resp.status_code == 201
         data = resp.json()
@@ -30,7 +30,7 @@ class TestCreateJobSlideMode:
     def test_create_job_slide_mode_false(self, client, auth_headers, mock_celery):
         """Explicit is_slide_mode=False should produce 'standard' mode."""
         resp = client.post("/api/jobs", json={
-            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
             "is_slide_mode": False,
         }, headers=auth_headers)
         assert resp.status_code == 201

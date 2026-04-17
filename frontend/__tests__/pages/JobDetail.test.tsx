@@ -52,7 +52,7 @@ const COMPLETED_JOB = {
   id: 1,
   job_id: 'test-job-uuid',
   status: 'completed' as const,
-  youtube_url: 'https://youtube.com/watch?v=abc',
+  video_url: 'https://youtube.com/watch?v=abc',
   summarize_status: null,
   processing_mode: null,
   created_at: '2026-01-01T00:00:00Z',
@@ -169,7 +169,7 @@ describe('JobDetail — export (Obsidian)', () => {
       expect(mockExportObsidian).toHaveBeenCalledTimes(1);
       const opts = mockExportObsidian.mock.calls[0][0];
       expect(opts.title).toBe('Test Video');
-      expect(opts.youtubeUrl).toBe('https://youtube.com/watch?v=abc');
+      expect(opts.videoUrl).toBe('https://youtube.com/watch?v=abc');
       expect(opts.transcriptText).toContain('Hello world');
       expect(opts.snapshots).toHaveLength(1);
       expect(opts.snapshots[0].timestamp).toBe(5.0);

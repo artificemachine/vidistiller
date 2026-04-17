@@ -2,8 +2,8 @@
   "version": 1,
   "mappings": [
     {
-      "id": "youtube-model-feeder-ui",
-      "penFile": "./youtube-model-feeder_ui_monokai.pen",
+      "id": "vidistiller-ui",
+      "penFile": "./vidistiller_ui_monokai.pen",
       "codeDir": "./frontend",
       "codeGlobs": ["components/**/*.tsx", "app/**/*.tsx", "app/**/*.css"],
       "framework": "nextjs",

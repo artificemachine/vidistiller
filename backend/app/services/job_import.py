@@ -75,7 +75,7 @@ def import_job_payload(
     new_job = ProcessingJob(
         job_id=str(uuid.uuid4()),
         status=ProcessingStatus.COMPLETED,
-        youtube_url=job_data.get("youtube_url"),
+        video_url=job_data.get("video_url") or job_data.get("youtube_url"),
         user_id=current_user_id,
     )
     db.add(new_job)

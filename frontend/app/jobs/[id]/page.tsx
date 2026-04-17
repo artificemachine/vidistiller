@@ -4,8 +4,8 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import apiClient from '@/lib/api';
 import { useParams } from 'next/navigation';
 import ProcessingStatus from '@/components/ProcessingStatus';
-import YouTubePlayer from '@/components/YouTubePlayer';
-import type { YouTubePlayerHandle } from '@/components/YouTubePlayer';
+import VideoPlayer from '@/components/VideoPlayer';
+import type { VideoPlayerHandle } from '@/components/VideoPlayer';
 import SnapshotsGallery from '@/components/SnapshotsGallery';
 import SlidesGallery from '@/components/SlidesGallery';
 import type { SlideItem } from '@/components/SlidesGallery';
@@ -29,7 +29,8 @@ interface JobDetail {
   job_id: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   error_message?: string;
-  youtube_url?: string;
+  video_url?: string;
+  source_type?: string;
   summarize_status?: string | null;
   processing_mode?: string | null;
   created_at: string;
@@ -106,7 +107,7 @@ export default function JobDetail() {
   const [summaryContent, setSummaryContent] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [ollamaDiag, setOllamaDiag] = useState<any | null>(null);
-  const playerRef = useRef<YouTubePlayerHandle>(null);
+  const playerRef = useRef<VideoPlayerHandle>(null);
   const isMobile = useIsMobile();
   const { setJobStatus } = useJobStatus();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -231,7 +232,7 @@ export default function JobDetail() {
     const transcript = job.transcripts[0];
     await exportToObsidian({
       title: job.videos[0]?.title || 'video',
-      youtubeUrl: job.youtube_url || '',
+      videoUrl: job.video_url || '',
       transcriptText: transcript.full_text,
       snapshots: snapshots.map((s) => ({ timestamp: s.timestamp, image_url: s.image_url })),
       baseUrl,
@@ -444,7 +445,7 @@ export default function JobDetail() {
     );
   };
 
-  const showPlayer = job.status === 'completed' && job.youtube_url;
+  const showPlayer = job.status === 'completed' && job.video_url;
 
   // Sidebar content: summary or transcript
   const sidebarContent = showSummary && summaryContent ? renderSummary(summaryContent) : undefined;
@@ -453,14 +454,14 @@ export default function JobDetail() {
   const transcriptContent = (
     <div className="p-3">
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">job: {job.job_id.slice(0, 8)}...</p>
-      {job.youtube_url && (
+      {job.video_url && (
         <a
-          href={job.youtube_url}
+          href={job.video_url}
           target="_blank"
           rel="noopener noreferrer"
           className="block text-xs text-primary hover:underline truncate mb-2 px-1"
         >
-          {job.youtube_url}
+          {job.video_url}
         </a>
       )}
       {job.transcripts.length > 0 ? (
@@ -532,9 +533,9 @@ export default function JobDetail() {
 
   // Main player content (receives zoom level from WorkspaceLayout)
   const playerContent = (zoom: number) => showPlayer ? (
-    <YouTubePlayer
+    <VideoPlayer
       ref={playerRef}
-      youtubeUrl={job.youtube_url!}
+      videoUrl={job.video_url!}
       onSnapshot={handleSnapshot}
       zoom={zoom}
     />
@@ -695,8 +696,8 @@ export default function JobDetail() {
           <>
             <div className="bg-white dark:bg-gray-900 rounded-lg shadow dark:shadow-gray-900 p-4 mb-6">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50 mb-3">video player</h2>
-              <YouTubePlayer
-                youtubeUrl={job.youtube_url!}
+              <VideoPlayer
+                videoUrl={job.video_url!}
                 onSnapshot={handleSnapshot}
               />
             </div>

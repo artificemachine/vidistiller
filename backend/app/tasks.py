@@ -56,83 +56,49 @@ celery_app.conf.update(
 # TRANSCRIPT TASK HELPERS
 # ==============================================================================
 
-def _fetch_youtube_captions(db, job_id: int, yt_service, youtube_url: str) -> tuple[str | None, str]:
+def _fetch_platform_captions(
+    db, job_id: int, video_service, video_url: str
+) -> tuple[str | None, str]:
     """
-    Attempt to retrieve captions via YouTubeTranscriptApi.
+    Fetch captions using the appropriate provider for the detected platform.
 
-    Returns (transcript_text, detected_language) on success,
-    or (None, "en") when captions are unavailable.
+    For YouTube: uses YouTubeCaptionProvider (native API with timestamps).
+    For all other sources: uses YtdlpCaptionProvider (subtitle download).
+    Returns (text, detected_language) or (None, "en") when unavailable.
     """
-    def fmt_ts(seconds: float) -> str:
-        h = int(seconds // 3600)
-        m = int((seconds % 3600) // 60)
-        s = int(seconds % 60)
-        return f"[{h:02d}:{m:02d}:{s:02d}]"
+    from app.core.source_type import SourceType
+    from app.services.caption_providers import YouTubeCaptionProvider, YtdlpCaptionProvider
 
-    try:
-        video_id = yt_service.extract_video_id(youtube_url)
-        from youtube_transcript_api import YouTubeTranscriptApi
-        ytt_api = YouTubeTranscriptApi()
+    source_type, source_id = video_service.resolve(video_url)
 
-        # List available transcripts and pick the best one (keep original language)
-        transcript_list = ytt_api.list(video_id)
-        transcript_obj = None
+    if source_type == SourceType.YOUTUBE:
+        _add_log(db, job_id, "Fetching YouTube native captions...", "info", "youtube_captions")
+        provider = YouTubeCaptionProvider()
+        step = "youtube_captions"
+    else:
+        _add_log(db, job_id, f"Fetching subtitles via yt-dlp ({source_type.value})...", "info", "yt_dlp_captions")
+        provider = YtdlpCaptionProvider()
+        step = "yt_dlp_captions"
 
-        # Pick the first available transcript (prefer manual over generated)
-        try:
-            transcript_obj = transcript_list.find_manually_created_transcript(
-                [t.language_code for t in transcript_list]
-            )
-        except Exception:
-            transcript_obj = next(iter(transcript_list))
+    text, lang = provider.fetch(video_url, source_id)
 
-        detected_language = transcript_obj.language_code
-        _add_log(db, job_id, f"Found {transcript_obj.language} ({detected_language}) captions", "info", "youtube_captions")
+    if text:
+        _add_log(db, job_id, f"Captions retrieved ({len(text)} chars, lang={lang})", "info", step)
+        return text, lang
 
-        transcript_snippets = transcript_obj.fetch()
+    # For YouTube, also try yt-dlp as a secondary fallback before Whisper
+    if source_type == SourceType.YOUTUBE:
+        _add_log(db, job_id, "YouTube native captions unavailable, trying yt-dlp...", "warning", "yt_dlp_captions")
+        text, lang = YtdlpCaptionProvider().fetch(video_url, source_id)
+        if text:
+            _add_log(db, job_id, f"yt-dlp captions retrieved ({len(text)} chars)", "info", "yt_dlp_captions")
+            return text, lang
 
-        lines = []
-        for snippet in transcript_snippets:
-            text = snippet.text.replace("\n", " ")
-            lines.append(f"{fmt_ts(snippet.start)} {text}")
-
-        captions = "\n".join(lines)
-
-        if captions and len(captions.strip()) > 0:
-            _add_log(db, job_id, f"YouTube captions retrieved ({len(captions)} chars)", "info", "youtube_captions")
-            logger.info(f"Got YouTube captions for {video_id} ({len(captions)} chars)")
-            return captions, detected_language
-
-    except Exception as e:
-        _add_log(db, job_id, f"YouTube captions not available: {e}", "warning", "youtube_captions")
-        logger.warning(f"YouTube captions failed: {e}")
-
+    _add_log(db, job_id, "No captions available, will use Whisper", "warning", step)
     return None, "en"
 
 
-def _fetch_ytdlp_captions(db, job_id: int, yt_service, youtube_url: str) -> str | None:
-    """
-    Attempt to retrieve captions via yt-dlp subtitle extraction.
-
-    Returns transcript text on success, or None when no captions are found.
-    """
-    _add_log(db, job_id, "Trying yt-dlp subtitle extraction...", "info", "yt_dlp_captions")
-    try:
-        ytdlp_captions = yt_service.get_captions_ytdlp(youtube_url)
-        if ytdlp_captions and ytdlp_captions.strip():
-            _add_log(db, job_id, f"yt-dlp captions retrieved ({len(ytdlp_captions)} chars)", "info", "yt_dlp_captions")
-            logger.info(f"Got yt-dlp captions for job {job_id} ({len(ytdlp_captions)} chars)")
-            return ytdlp_captions
-        else:
-            _add_log(db, job_id, "yt-dlp returned no captions", "warning", "yt_dlp_captions")
-    except Exception as e:
-        _add_log(db, job_id, f"yt-dlp caption extraction failed: {e}", "warning", "yt_dlp_captions")
-        logger.warning(f"yt-dlp caption extraction failed: {e}")
-
-    return None
-
-
-def _transcribe_audio(db, job_id: int, job, yt_service, youtube_url: str) -> tuple[str, str]:
+def _transcribe_audio(db, job_id: int, job, video_service, video_url: str) -> tuple[str, str]:
     """
     Download audio and transcribe via Ollama Whisper.
 
@@ -146,7 +112,7 @@ def _transcribe_audio(db, job_id: int, job, yt_service, youtube_url: str) -> tup
         from app.services.transcript import TranscriptService
 
         logger.info("No captions available, falling back to Ollama Whisper...")
-        audio_path, _ = yt_service.download_audio(youtube_url)
+        audio_path, _ = video_service.download_audio(video_url)
         ts = TranscriptService()
         result = ts.transcribe_audio(audio_path)
         transcript_text = result.get("full_text", "")
@@ -194,7 +160,7 @@ def _embed_chapters(transcript_text: str, chapters: list) -> str:
     return "\n".join(enriched_lines)
 
 
-def _save_video_record(db, job_id: int, job, youtube_url: str, metadata: dict) -> None:
+def _save_video_record(db, job_id: int, job, video_url: str, metadata: dict) -> None:
     """
     Persist a Video record so the title appears in Recent Conversions.
 
@@ -208,7 +174,8 @@ def _save_video_record(db, job_id: int, job, youtube_url: str, metadata: dict) -
     try:
         video_record = Video(
             job_id=job.id,
-            url=youtube_url,
+            url=video_url,
+            source_type=metadata.get("source_type"),
             video_id=metadata["video_id"],
             title=metadata.get("title", "Unknown"),
             description=metadata.get("description"),
@@ -286,7 +253,7 @@ def process_transcript(self, job_id: int):
     """
     from app.db.session import SessionLocal
     from app.db.models import ProcessingJob, ProcessingMode, ProcessingStatus
-    from app.services.youtube import YouTubeService
+    from app.services.video import VideoService
 
     db = SessionLocal()
     try:
@@ -296,40 +263,40 @@ def process_transcript(self, job_id: int):
             logger.error(f"Job {job_id} not found")
             return {"error": f"Job {job_id} not found"}
 
-        youtube_url = job.youtube_url
-        if not youtube_url:
-            _add_log(db, job_id, "No YouTube URL provided", "error", "init")
+        video_url = job.video_url
+        if not video_url:
+            _add_log(db, job_id, "No video URL provided", "error", "init")
             job.status = ProcessingStatus.FAILED
-            job.error_message = "No YouTube URL provided"
+            job.error_message = "No video URL provided"
             db.commit()
-            return {"error": "No YouTube URL"}
+            return {"error": "No video URL"}
 
         # 2. Set status to PROCESSING, store Celery task ID for cancellation
         job.status = ProcessingStatus.PROCESSING
         job.celery_task_id = self.request.id
         db.commit()
-        _add_log(db, job_id, f"Job started: {youtube_url}", "info", "init")
-        logger.info(f"Processing transcript for job {job_id}: {youtube_url}")
+        _add_log(db, job_id, f"Job started: {video_url}", "info", "init")
+        logger.info(f"Processing transcript for job {job_id}: {video_url}")
 
-        yt_service = YouTubeService()
+        video_service = VideoService()
 
-        # 3. Try YouTube captions first (using youtube_transcript_api v1.x)
+        # 3. Try platform-native captions first, then yt-dlp subtitles
         transcript_text = None
-        source = "youtube_captions"
+        source = "yt_dlp_captions"
         detected_language = "en"
 
-        transcript_text, detected_language = _fetch_youtube_captions(db, job_id, yt_service, youtube_url)
+        transcript_text, detected_language = _fetch_platform_captions(db, job_id, video_service, video_url)
 
-        # 4. Fallback: try yt-dlp subtitle extraction
-        if not transcript_text:
-            transcript_text = _fetch_ytdlp_captions(db, job_id, yt_service, youtube_url)
-            if transcript_text:
-                source = "yt_dlp_captions"
+        # Determine the source label based on what was resolved
+        if transcript_text:
+            from app.core.source_type import SourceType
+            source_type, _ = video_service.resolve(video_url)
+            source = "youtube_captions" if source_type == SourceType.YOUTUBE else "yt_dlp_captions"
 
-        # 5. Fallback: download audio and transcribe via Ollama
+        # 4. Fallback: download audio and transcribe via Ollama
         if not transcript_text:
             source = "whisper_local"
-            transcript_text, detected_language = _transcribe_audio(db, job_id, job, yt_service, youtube_url)
+            transcript_text, detected_language = _transcribe_audio(db, job_id, job, video_service, video_url)
 
         if not transcript_text or not transcript_text.strip():
             _add_log(db, job_id, "No transcript could be generated", "error", "save_transcript")
@@ -338,10 +305,10 @@ def process_transcript(self, job_id: int):
             db.commit()
             return {"error": "Empty transcript"}
 
-        # 6. Embed YouTube chapters as markdown headers (for all sources)
+        # 5. Embed chapters as markdown headers (sourced from yt-dlp for any platform)
         metadata = {}
         try:
-            metadata = yt_service.get_video_metadata(youtube_url)
+            metadata = video_service.get_video_metadata(video_url)
             chapters = sorted(metadata.get("chapters", []), key=lambda c: c["start_time"])
         except Exception:
             chapters = []
@@ -350,27 +317,25 @@ def process_transcript(self, job_id: int):
             transcript_text = _embed_chapters(transcript_text, chapters)
             _add_log(db, job_id, f"Injected {len(chapters)} chapter headers", "info", "chapters")
 
-        # 6b. Persist Video record so title appears in Recent Conversions
-        _save_video_record(db, job_id, job, youtube_url, metadata)
+        # 5b. Persist Video record so title appears in Recent Conversions
+        _save_video_record(db, job_id, job, video_url, metadata)
 
-        # 6c. Prepend video title and source URL
+        # 5c. Prepend video title and source URL
         video_title = metadata.get("title", "")
         if video_title:
-            transcript_text = f"# {video_title}\n\nSource: {youtube_url}\n\n{transcript_text}"
+            transcript_text = f"# {video_title}\n\nSource: {video_url}\n\n{transcript_text}"
 
-        # 7. Save transcript to DB and segment it
+        # 6. Save transcript to DB and segment it
         _save_transcript_and_segments(db, job_id, job, transcript_text, source, detected_language)
 
-        # 8. Download video for snapshot capture (non-fatal)
+        # 7. Download video for snapshot capture (non-fatal)
         _add_log(db, job_id, "Downloading video for snapshots...", "info", "video_download")
         try:
             from pathlib import Path as _Path
-            from app.services.youtube import YouTubeService
-            yt_dl = YouTubeService()
             _data_dir = get_settings().storage.data_dir or str(_Path(__file__).resolve().parent.parent / "data")
             videos_dir = str(_Path(_data_dir) / "videos" / job.job_id)
-            video_path, _ = yt_dl.download_video(
-                youtube_url, output_path=videos_dir, quality="720p",
+            video_path, _ = video_service.download_video(
+                video_url, output_path=videos_dir, quality="720p",
             )
             job.video_file_path = video_path
             logger.info(f"Video downloaded for job {job_id}: {video_path}")
@@ -516,7 +481,8 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         )
         summary_content = llm.summarize_transcript_sections(
             transcript_text, snapshot_dicts, language=language,
-            title=title, youtube_url=job.youtube_url,
+            title=title, video_url=job.video_url,
+            source_type=job.source_type or "",
             cancel_check=lambda: _is_cancelled(db, job_id),
         )
 

@@ -17,7 +17,7 @@ interface SlideEntry {
 
 interface ExportOptions {
   title: string;
-  youtubeUrl: string;
+  videoUrl: string;
   transcriptText: string;
   snapshots: SnapshotEntry[];
   /** Base URL for resolving snapshot image paths (e.g. "http://localhost:8000") */
@@ -38,13 +38,13 @@ function snapshotFilename(timestamp: number): string {
 
 function buildMarkdown(
   title: string,
-  youtubeUrl: string,
+  videoUrl: string,
   lines: string[],
   snapMap: Map<number, SnapshotEntry[]>,
 ): string {
   const parts: string[] = [];
   parts.push(`# ${title}\n`);
-  parts.push(`Source: ${youtubeUrl}\n`);
+  parts.push(`Source: ${videoUrl}\n`);
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -181,11 +181,11 @@ async function fetchSlideImages(
 }
 
 export async function exportToObsidian(options: ExportOptions): Promise<void> {
-  const { title, youtubeUrl, transcriptText, snapshots, baseUrl, slides } = options;
+  const { title, videoUrl, transcriptText, snapshots, baseUrl, slides } = options;
   const lines = transcriptText.split('\n');
   const snapMap = buildSnapshotMap(lines, snapshots);
 
-  let markdown = buildMarkdown(title, youtubeUrl, lines, snapMap);
+  let markdown = buildMarkdown(title, videoUrl, lines, snapMap);
 
   if (slides && slides.length > 0) {
     markdown += buildSlidesSection(slides);

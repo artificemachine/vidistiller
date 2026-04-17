@@ -4,7 +4,7 @@ Run from the local Mac (not inside Docker):
     pytest tests/test_lxc_deploy.py -v -m lxc
 
 Pre-requisites:
-    - SSH alias ``youtube-model-feeder-lxc`` configured in the user's SSH config
+    - SSH alias ``vidistiller-lxc`` configured in the user's SSH config
     - LXC container is running and Docker Compose stack is up
 """
 
@@ -24,7 +24,7 @@ load_dotenv()
 # Constants
 # ---------------------------------------------------------------------------
 
-SSH_ALIAS = "youtube-model-feeder-lxc"
+SSH_ALIAS = "vidistiller-lxc"
 SSH_TIMEOUT = 10  # seconds
 HTTP_TIMEOUT = 10  # seconds
 
@@ -319,7 +319,7 @@ class TestAPIFunctionality:
 
     def test_create_job(self, api_reachable, lxc_auth_headers, test_job_cleanup):
         resp = api_post("/api/jobs", data={
-            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         }, headers=lxc_auth_headers)
         assert resp.status_code in (200, 201), "Create job failed: " + resp.text
         body = resp.json()
@@ -328,7 +328,7 @@ class TestAPIFunctionality:
 
     def test_create_slide_aware_job(self, api_reachable, lxc_auth_headers, test_job_cleanup):
         resp = api_post("/api/jobs", data={
-            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
             "processing_mode": "slide_aware",
         }, headers=lxc_auth_headers)
         assert resp.status_code in (200, 201), "Create slide_aware job failed: " + resp.text

@@ -17,7 +17,7 @@ interface WorkspaceLayoutProps {
   slideText?: React.ReactNode;
 }
 
-const UI_STATE_KEY = 'youtube-model-feeder-workspace-state';
+const UI_STATE_KEY = 'vidistiller-workspace-state';
 
 function readUIState() {
   try { return JSON.parse(localStorage.getItem(UI_STATE_KEY) || '{}'); } catch { return {}; }

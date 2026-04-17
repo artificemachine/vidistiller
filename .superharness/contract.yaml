@@ -1,31 +1,112 @@
-# Active contract for youtube-model-feeder
+# Active contract for vidistiller
 id: initial-setup
 created: 2026-03-26
 created_by: owner
-status: draft
+status: active
 
-goal: "TBD — describe the current objective"
+goal: "Build Vidistiller — a local-first, source-agnostic video-to-documentation engine"
 
 tasks:
 - id: docker-hub-publish
   title: "Audit gitignore, write real Dockerfiles, and publish to Docker Hub"
   owner: claude-code
-  status: todo
+  status: done
   description: >
     The project has real app code locally (services/, frontend/, migrations/, .venv312/)
     that is gitignored. Before Docker Hub publish:
-    1. Audit .gitignore — understand what's intentionally excluded vs accidentally excluded.
-       Check if services/, migrations/, frontend/ should be tracked. Never commit .env.
+    1. Audit .gitignore — understand what's intentionally excluded vs accidentally
+    excluded.
+       Check if services/, migrations/, frontend/ should be tracked. Never commit
+    .env.
     2. Write real backend/Dockerfile using uv + pyproject.toml + actual dep tree.
     3. Write real frontend/Dockerfile (Next.js multi-stage build).
     4. Fix docker-compose.yml build contexts to match actual file structure.
-    5. Build images, tag as celstnblacc/youtube-model-feeder-backend:0.1.x, push to Docker Hub.
+    5. Build images, tag as celstnblacc/youtube-model-feeder-backend:0.1.x, push to
+    Docker Hub.
   risks: >
     - .env must not be committed or baked into images
     - docker-compose.yml references ./backend/Dockerfile which doesn't exist yet
     - uv.lock has real deps but pyproject.toml is sparse — full dep audit needed first
-  project_path: /Users/airm2max/DevOpsSec/youtube-model-feeder
+  project_path: /Users/airm2max/DevOpsSec/vidistiller
+  verified: true
+  verified_at: '2026-04-02T15:24:02Z'
+  verified_by: claude-code
+  summary: 'Task completed and verified'
 
-decisions: []
+- id: phase3-react-player-v3
+  title: "Upgrade VideoPlayer.tsx to react-player v3"
+  owner: claude-code
+  status: done
+  description: >
+    Replace react-player v2 with v3. Rewrite VideoPlayer.tsx to use v3 API:
+    src prop (not url), native HTMLVideoElement ref, currentTime for seek,
+    onReady callback. Deploy to LXC and resolve cascading TypeScript errors
+    (slideText, hasSlideText prop mismatches) via full frontend rsync.
+  project_path: /Users/airm2max/DevOpsSec/vidistiller
+  verified: true
+  verified_at: '2026-04-17T00:00:00Z'
+  verified_by: claude-code
+  summary: 'react-player v3 deployed and confirmed working on LXC'
+
+- id: phase4-multi-source
+  title: "youtube_url → video_url + source_type; multi-source video support"
+  owner: claude-code
+  status: done
+  description: >
+    Alembic migration 012: rename youtube_url → video_url, add source_type
+    column to processing_jobs and videos tables. Add SourceType enum,
+    VideoSourceResolver, CaptionProvider abstraction, VideoService replacing
+    YouTubeService. Thread source_type through LLM summarization output
+    (Source: <url> (<source_type>) header). Update all tests and frontend.
+    Import backward compat: falls back to youtube_url in old export JSON.
+  project_path: /Users/airm2max/DevOpsSec/vidistiller
+  verified: true
+  verified_at: '2026-04-17T00:00:00Z'
+  verified_by: claude-code
+  summary: 'All tests pass, migration applied, source_type in LLM output'
+
+- id: phase5-vidistiller-rename
+  title: "Rename project to Vidistiller across all code, config, docs, CI, LXC"
+  owner: claude-code
+  status: done
+  description: >
+    Full rename from youtube-model-feeder/viddocs to Vidistiller.
+    Covers: package.json, pyproject.toml, FastAPI title, localStorage keys,
+    Docker Compose project names, CI/CD runner labels and image name,
+    all frontend pages, backend logger, docs, README, CHANGELOG, SOUL,
+    TECH_STACK, ROADMAP, CONTRIBUTING, DESIGN_SPEC, LXC_DEPLOYMENT,
+    VidDocs_UI_UX_Audit_Report, pen files, pencil-sync.config.json,
+    superharness contract/ledger headers, GitHub repo rename,
+    SSH config alias (vidistiller-lxc), LXC web container rebuild.
+  project_path: /Users/airm2max/DevOpsSec/vidistiller
+  verified: true
+  verified_at: '2026-04-17T00:00:00Z'
+  verified_by: claude-code
+  summary: >
+    Vidistiller rename complete. <title>Vidistiller</title> confirmed live
+    at http://10.255.181.10:3000. Vault checklist fully marked done.
+    Watch-out: LXC Compose project label is still "viddocs" — do not cold
+    restart without a Postgres backup.
+
+decisions:
+- id: lxc-compose-project-keep-viddocs
+  date: '2026-04-17'
+  decision: >
+    Keep LXC Docker Compose project name as "viddocs" (containers: tutorial_*)
+    rather than running docker compose down/up to rename to "vidistiller".
+  reason: >
+    A cold restart would recreate all volumes, risking data loss in Postgres.
+    The name change is cosmetic on the server side and not worth the risk
+    without a backup/migration plan.
+  alternatives: >
+    Full down/up with a pg_dump backup first — defer to a dedicated migration task.
+
+- id: import-backward-compat-youtube-url
+  date: '2026-04-17'
+  decision: >
+    Keep job_import.py fallback: job_data.get("video_url") or job_data.get("youtube_url")
+  reason: >
+    Users may have existing export JSON files with the old "youtube_url" field.
+    Silent fallback prevents import breakage.
 
 failures: []
