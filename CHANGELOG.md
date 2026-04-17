@@ -41,3 +41,4 @@ All notable changes to this project will be documented in this file.
 - localStorage keys: youtube-model-feeder-* → vidistiller-*
 - package.json name, pyproject.toml name, FastAPI title, Docker Compose project names, CI/CD runner labels, Docker image name updated
 - 2026-04-17: deploy Phase 5 Vidistiller rename to LXC (viddocs web rebuild + restart); fix VidDocs_UI_UX_Audit_Report.md header and inline references to Vidistiller
+- 2026-04-17: update CLAUDE.md header from youtube-model-feeder to Vidistiller (rename cleanup)

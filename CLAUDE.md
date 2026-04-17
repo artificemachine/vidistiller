@@ -1,10 +1,10 @@
-# youtube-model-feeder — YouTube Tutorial to Doc Converter
+# Vidistiller — Video to Documentation Engine
 
 ## ⛔ DO NOT DELETE THIS DIRECTORY
 This is an active source project. The `business_with_ai` contract has a task called
 `cleanup-old-viddocs` — that task refers ONLY to the skill stub at
 `business_with_ai/clawhub-skills/youtube-model-feeder/SKILL.md`, not this project.
-Never `rm -rf` or delete `~/DevOpsSec/youtube-model-feeder/`.
+Never `rm -rf` or delete `~/DevOpsSec/vidistiller/`.
 
 Project-specific rules and conventions. For global rules, see `~/.claude/CLAUDE.md`.
 
