@@ -1,0 +1,132 @@
+# Base system setup for vidistiller-prod (Ubuntu 24.04)
+# No Squid proxy — 10.255.181.20 has direct internet access
+---
+- name: Update apt cache
+  apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Upgrade all packages
+  apt:
+    upgrade: dist
+
+- name: Install base packages
+  apt:
+    name:
+      - curl
+      - wget
+      - git
+      - gnupg
+      - ca-certificates
+      - lsb-release
+      - software-properties-common
+      - ufw
+      - htop
+      - jq
+      - unzip
+      - python3
+      - python3-pip
+      - acl
+      - apt-transport-https
+      - postgresql-client
+      - qemu-guest-agent
+    state: present
+
+- name: Enable QEMU guest agent (start may fail if Proxmox agent socket is disabled)
+  systemd:
+    name: qemu-guest-agent
+    state: started
+    enabled: true
+    daemon_reload: true
+  ignore_errors: true
+
+- name: Set timezone
+  timezone:
+    name: "{{ timezone | default('UTC') }}"
+
+- name: Set hostname
+  hostname:
+    name: vidistiller-prod
+
+- name: Harden SSH — disable password auth, enforce key-based login
+  copy:
+    dest: /etc/ssh/sshd_config.d/hardening.conf
+    content: |
+      PermitRootLogin no
+      PasswordAuthentication no
+      PubkeyAuthentication yes
+      ChallengeResponseAuthentication no
+      UsePAM yes
+      X11Forwarding no
+      MaxAuthTries 3
+      ClientAliveInterval 300
+      ClientAliveCountMax 2
+    mode: "0644"
+  notify: restart sshd
+
+# UFW — default deny inbound, allow outbound (direct internet)
+- name: UFW — deny incoming by default
+  ufw:
+    direction: incoming
+    policy: deny
+
+- name: UFW — allow outgoing by default
+  ufw:
+    direction: outgoing
+    policy: allow
+
+- name: UFW — allow SSH from Proxmox management subnet
+  ufw:
+    rule: limit
+    port: "22"
+    proto: tcp
+    from_ip: "10.255.100.0/24"
+    comment: "SSH from Proxmox management subnet"
+
+- name: UFW — allow SSH from same subnet (LXC and lab hosts)
+  ufw:
+    rule: limit
+    port: "22"
+    proto: tcp
+    from_ip: "10.255.181.0/24"
+    comment: "SSH from 10.255.181.x subnet"
+
+- name: UFW — allow frontend from lab network
+  ufw:
+    rule: allow
+    port: "3000"
+    proto: tcp
+    from_ip: "10.255.0.0/16"
+    comment: "Vidistiller frontend"
+
+- name: UFW — allow API from lab network
+  ufw:
+    rule: allow
+    port: "8000"
+    proto: tcp
+    from_ip: "10.255.0.0/16"
+    comment: "Vidistiller API"
+
+- name: UFW — allow pgAdmin from lab network (admin only)
+  ufw:
+    rule: allow
+    port: "5050"
+    proto: tcp
+    from_ip: "10.255.0.0/16"
+    comment: "pgAdmin"
+
+- name: Enable UFW logging
+  ufw:
+    logging: "on"
+
+- name: Enable UFW
+  ufw:
+    state: enabled
+
+- name: Create vidistiller system user
+  user:
+    name: vidistiller
+    system: true
+    shell: /bin/bash
+    home: /opt/vidistiller
+    create_home: true

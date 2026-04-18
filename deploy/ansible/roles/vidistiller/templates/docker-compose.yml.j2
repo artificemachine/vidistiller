@@ -1,0 +1,194 @@
+services:
+  postgres:
+    container_name: vidistiller-postgres
+    image: postgres:15-alpine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    environment:
+      POSTGRES_DB: {{ db_name }}
+      POSTGRES_USER: {{ db_user }}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "127.0.0.1:{{ db_port }}:5432"
+    volumes:
+      - {{ vidistiller_dir }}/postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ db_user }} -d {{ db_name }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    container_name: vidistiller-redis
+    image: redis:7-alpine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory {{ redis_maxmemory }}
+      --maxmemory-policy {{ redis_maxmemory_policy }}
+      --appendonly yes
+    ports:
+      - "127.0.0.1:{{ redis_port }}:6379"
+    volumes:
+      - {{ vidistiller_dir }}/redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  backend:
+    container_name: vidistiller-backend
+    image: {{ backend_image }}
+    restart: unless-stopped
+    # python -m uvicorn respects PYTHONPATH=/app/deps (pip --target install)
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DATABASE_URL: "postgresql://{{ db_user }}:${DB_PASSWORD}@postgres:5432/{{ db_name }}"
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY}
+      OLLAMA_BASE_URL: "{{ ollama_url }}"
+      OLLAMA_MODEL: "{{ ollama_model }}"
+      API_PORT: "{{ api_port }}"
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+      CORS_ORIGINS: '["http://{{ ansible_host }}:{{ frontend_port }}","http://10.255.181.20:{{ frontend_port }}"]'
+    ports:
+      - "{{ ansible_host }}:{{ api_port }}:8000"
+    volumes:
+      - {{ vidistiller_dir }}/app-data:/data
+      - {{ vidistiller_dir }}/alembic.ini:/app/alembic.ini:ro
+      - {{ vidistiller_dir }}/migrations:/app/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  celery_worker:
+    container_name: vidistiller-celery
+    image: {{ backend_image }}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command: ["python", "-m", "celery", "-A", "app.tasks", "worker", "--loglevel=info", "--concurrency=2"]
+    environment:
+      DATABASE_URL: "postgresql://{{ db_user }}:${DB_PASSWORD}@postgres:5432/{{ db_name }}"
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY}
+      OLLAMA_BASE_URL: "{{ ollama_url }}"
+      OLLAMA_MODEL: "{{ ollama_model }}"
+      ENVIRONMENT: production
+    volumes:
+      - {{ vidistiller_dir }}/app-data:/data
+      - {{ vidistiller_dir }}/alembic.ini:/app/alembic.ini:ro
+      - {{ vidistiller_dir }}/migrations:/app/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: {{ celery_mem_limit }}
+          cpus: "{{ celery_cpu_limit }}"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  frontend:
+    container_name: vidistiller-frontend
+    image: {{ frontend_image }}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      NEXT_PUBLIC_API_URL: "http://{{ ansible_host }}:{{ api_port }}/api"
+    ports:
+      - "{{ ansible_host }}:{{ frontend_port }}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  pgadmin:
+    container_name: vidistiller-pgadmin
+    image: dpage/pgadmin4:8.14
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+    ports:
+      - "{{ ansible_host }}:{{ pgadmin_port }}:80"
+    depends_on:
+      - postgres
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+networks:
+  default:
+    name: vidistiller_network
+    driver: bridge

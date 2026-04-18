@@ -1,0 +1,69 @@
+# DB migration playbook — Phase 4 of LXC → VM migration
+#
+# Prerequisites:
+#   1. Dump taken on LXC and saved locally to /tmp/vidistiller.sql:
+#      ssh <lxc-host> "docker exec vidistiller-postgres \
+#        pg_dump -U tutorial_user tutorial_db" > /tmp/vidistiller.sql
+#
+#   2. vidistiller-prod is running and postgres container is healthy
+#      (run site.yml first)
+#
+# Run: cd deploy/ansible && ansible-playbook migrate-db.yml --vault-password-file .vault-pass
+---
+- name: Restore database on vidistiller-prod
+  hosts: vidistiller-prod
+  gather_facts: false
+
+  vars_files:
+    - vars/secrets.yml
+
+  vars:
+    local_dump: "/tmp/vidistiller.sql"
+    remote_dump: "/tmp/vidistiller.sql"
+    vidistiller_dir: /opt/vidistiller
+    db_user: tutorial_user
+    db_name: tutorial_db
+
+  tasks:
+    - name: Copy SQL dump to VM
+      copy:
+        src: "{{ local_dump }}"
+        dest: "{{ remote_dump }}"
+        mode: "0600"
+
+    - name: Wait for postgres container to be healthy
+      community.docker.docker_container_info:
+        name: vidistiller-postgres
+      register: pg_info
+      until: pg_info.container.State.Health.Status == "healthy"
+      retries: 12
+      delay: 5
+
+    - name: Copy dump into postgres container
+      command: >
+        docker cp {{ remote_dump }}
+        vidistiller-postgres:/tmp/vidistiller.sql
+      changed_when: true
+
+    - name: Restore dump inside container
+      command: >
+        docker exec -i vidistiller-postgres
+        psql -U {{ db_user }} -d {{ db_name }} -f /tmp/vidistiller.sql
+      changed_when: true
+
+    - name: Run alembic migrations (brings schema to head)
+      command: >
+        docker compose -f {{ vidistiller_dir }}/docker-compose.yml
+        exec -T backend python -m alembic upgrade head
+      changed_when: true
+
+    - name: Remove dump file from VM
+      file:
+        path: "{{ remote_dump }}"
+        state: absent
+
+    - name: Remove dump file from inside container
+      command: >
+        docker exec vidistiller-postgres
+        rm -f /tmp/vidistiller.sql
+      changed_when: false

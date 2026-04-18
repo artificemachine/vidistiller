@@ -1,0 +1,104 @@
+# Deploy Vidistiller stack via Docker Compose on vidistiller-prod
+---
+- name: Create vidistiller working directory
+  file:
+    path: "{{ vidistiller_dir }}"
+    state: directory
+    mode: "0750"
+    owner: vidistiller
+    group: vidistiller
+
+- name: Create postgres data directory
+  file:
+    path: "{{ vidistiller_dir }}/postgres-data"
+    state: directory
+    mode: "0700"
+    owner: "70"   # postgres:15-alpine UID
+    group: "70"
+
+- name: Create redis data directory
+  file:
+    path: "{{ vidistiller_dir }}/redis-data"
+    state: directory
+    mode: "0700"
+    owner: "999"  # redis:7-alpine UID
+    group: "999"
+
+- name: Create app data directory (snapshots, videos)
+  file:
+    path: "{{ vidistiller_dir }}/app-data"
+    state: directory
+    mode: "0750"
+    owner: vidistiller
+    group: vidistiller
+
+- name: Copy Alembic migrations directory to VM
+  copy:
+    src: "{{ playbook_dir }}/../../migrations/"
+    dest: "{{ vidistiller_dir }}/migrations/"
+    owner: vidistiller
+    group: vidistiller
+    mode: preserve
+
+- name: Deploy alembic.ini
+  template:
+    src: alembic.ini.j2
+    dest: "{{ vidistiller_dir }}/alembic.ini"
+    mode: "0644"
+    owner: vidistiller
+    group: vidistiller
+
+- name: Deploy docker-compose.yml
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ vidistiller_dir }}/docker-compose.yml"
+    mode: "0640"
+    owner: vidistiller
+    group: vidistiller
+  notify: restart vidistiller
+
+- name: Deploy .env file (vault-encrypted secrets)
+  template:
+    src: env.j2
+    dest: "{{ vidistiller_dir }}/.env"
+    mode: "0600"
+    owner: vidistiller
+    group: vidistiller
+  notify: restart vidistiller
+
+- name: Pull latest images from Docker Hub
+  community.docker.docker_compose_v2:
+    project_src: "{{ vidistiller_dir }}"
+    state: present
+    pull: always
+
+- name: Wait for postgres to be healthy
+  community.docker.docker_container_info:
+    name: vidistiller-postgres
+  register: pg_info
+  until: pg_info.container.State.Health.Status == "healthy"
+  retries: 12
+  delay: 5
+
+- name: Wait for redis to be healthy
+  community.docker.docker_container_info:
+    name: vidistiller-redis
+  register: redis_info
+  until: redis_info.container.State.Health.Status == "healthy"
+  retries: 12
+  delay: 5
+
+- name: Run alembic migrations
+  command: >
+    docker compose -f {{ vidistiller_dir }}/docker-compose.yml
+    exec -T backend python -m alembic upgrade head
+  changed_when: true
+
+- name: Wait for API to be healthy
+  uri:
+    url: "http://{{ ansible_host }}:{{ api_port }}/health"
+    status_code: 200
+  register: api_health
+  until: api_health.status == 200
+  retries: 12
+  delay: 5

@@ -1,0 +1,90 @@
+# Install Docker CE + Docker Compose plugin (Ubuntu 24.04)
+# Direct internet — no Squid proxy
+---
+- name: Remove old Docker packages
+  apt:
+    name:
+      - docker
+      - docker-engine
+      - docker.io
+      - containerd
+      - runc
+    state: absent
+
+- name: Add Docker GPG key
+  apt_key:
+    url: "https://download.docker.com/linux/ubuntu/gpg"
+    state: present
+
+- name: Add Docker repository
+  apt_repository:
+    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+    filename: docker
+
+- name: Install Docker CE
+  apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+- name: Ensure Docker service is running
+  systemd:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Add vidistiller user to docker group
+  user:
+    name: vidistiller
+    groups: docker
+    append: true
+
+- name: Configure Docker daemon (log rotation + no-new-privileges)
+  copy:
+    dest: /etc/docker/daemon.json
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "20m",
+          "max-file": "5"
+        },
+        "storage-driver": "overlay2",
+        "no-new-privileges": true
+      }
+    mode: "0644"
+  notify: restart docker
+
+- name: Create swapfile (2 GB guard against OOM with Postgres + Celery + LLM)
+  command: fallocate -l 2G /swapfile
+  args:
+    creates: /swapfile
+
+- name: Set swapfile permissions
+  file:
+    path: /swapfile
+    mode: "0600"
+
+- name: Format swapfile
+  command: mkswap /swapfile
+  register: mkswap_result
+  changed_when: mkswap_result.rc == 0
+  failed_when: mkswap_result.rc != 0 and 'mounted' not in mkswap_result.stderr
+
+- name: Enable swap
+  command: swapon /swapfile
+  register: swapon_result
+  failed_when: swapon_result.rc != 0 and 'busy' not in swapon_result.stderr and 'already' not in swapon_result.stderr
+  changed_when: swapon_result.rc == 0
+
+- name: Persist swap in fstab
+  lineinfile:
+    path: /etc/fstab
+    line: "/swapfile none swap sw 0 0"
+    state: present

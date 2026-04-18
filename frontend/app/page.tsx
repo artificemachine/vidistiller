@@ -108,11 +108,14 @@ export default function Home() {
     <div className="min-h-screen bg-bg-light dark:bg-bg-dark">
       <div className="max-w-4xl mx-auto px-4 py-12">
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-semibold text-text-dark dark:text-text-light mb-4">
-            video to doc (markdown)
+          <h1 className="text-4xl font-semibold text-text-dark dark:text-text-light mb-2">
+            stop watching. start knowing.
           </h1>
+          <p className="text-sm italic text-text-muted text-center mb-3">
+            every video is a lesson waiting to be captured.
+          </p>
           <p className="text-base text-text-muted text-center">
-            convert into beautiful, searchable documents with snapshots and slides
+            drop a link. get a knowledge base for you and your AI.
           </p>
           <div className="flex flex-wrap justify-center gap-3 mt-4">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-card-light dark:bg-card-dark text-text-dark dark:text-text-light border border-border-light dark:border-border-dark">

@@ -1,0 +1,7 @@
+---
+- name: restart vidistiller
+  community.docker.docker_compose_v2:
+    project_src: "{{ vidistiller_dir }}"
+    state: present
+    pull: never
+    recreate: always
