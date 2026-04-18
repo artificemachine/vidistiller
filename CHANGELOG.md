@@ -48,3 +48,4 @@ All notable changes to this project will be documented in this file.
 - 2026-04-17: fix: ansible provisioning fixes — python -m commands, alembic.ini template, migrations copy, image tag format, qemu-guest-agent ignore_errors
 - 2026-04-17: feat: update hero copy, add register password validation, fix migrate-db.yml, fix pgadmin email in vault
 - 2026-04-18: fix: add secret-protection entries to deploy/terraform and deploy/ansible .gitignore (shipguard SC-004)
+- 2026-04-18: fix: Next.js rewrites proxy — default NEXT_PUBLIC_API_URL to /api and proxy via BACKEND_URL so browser never needs direct access to port 8000
