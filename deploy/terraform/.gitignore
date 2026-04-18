@@ -3,3 +3,8 @@ terraform.tfvars
 *.tfstate
 *.tfstate.backup
 .terraform.lock.hcl
+.env
+*.key
+*.pem
+*.p12
+*.pfx

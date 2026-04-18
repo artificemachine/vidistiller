@@ -1,3 +1,8 @@
 vars/secrets.yml
 .vault-pass
 *.retry
+.env
+*.key
+*.pem
+*.p12
+*.pfx
