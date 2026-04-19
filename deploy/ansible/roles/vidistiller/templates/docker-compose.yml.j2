@@ -153,7 +153,8 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
-      NEXT_PUBLIC_API_URL: "http://{{ ansible_host }}:{{ api_port }}/api"
+      NEXT_PUBLIC_API_URL: "http://backend:{{ api_port }}/api"
+      BACKEND_URL: "http://backend:{{ api_port }}"
     ports:
       - "{{ ansible_host }}:{{ frontend_port }}:3000"
     depends_on:
