@@ -81,7 +81,7 @@ services:
           max-file: "5"
 
       ports:
-        - "${REDIS_PORT}:6379"   # 6379 is Redis's default port
+        - "127.0.0.1:${REDIS_PORT}:6379"   # Loopback only — Redis must not be reachable externally
 
       # Persist Redis data to disk so cached values survive restarts.
       volumes:
@@ -303,7 +303,7 @@ services:
         PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}  # Password for that login
 
       ports:
-        - "${PGADMIN_PORT}:80"   # pgAdmin serves its UI on port 80 inside the container
+        - "127.0.0.1:${PGADMIN_PORT}:80"   # Loopback only — pgAdmin must not be reachable externally
 
       depends_on:
         - postgres

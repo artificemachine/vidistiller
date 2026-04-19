@@ -11,7 +11,7 @@ Thanks for your interest in contributing! Here's how to get started.
 ## Setup
 
 ```bash
-git clone https://github.com/celstnblacc/vidistiller.git
+git clone https://github.com/artificemachine/vidistiller.git
 cd vidistiller
 cp .env.example .env  # edit with your settings
 docker compose up -d
