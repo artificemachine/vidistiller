@@ -2,8 +2,8 @@
 vidistiller_dir: /opt/vidistiller
 
 # Docker Hub images — update tag for new releases
-backend_image: "celestinmax/vidistiller-backend:0.2.0"
-frontend_image: "celestinmax/vidistiller-frontend:0.2.0"
+backend_image: "newblacc/vidistiller-backend:0.2.0"
+frontend_image: "newblacc/vidistiller-frontend:0.2.2"
 
 # Postgres
 db_name: tutorial_db

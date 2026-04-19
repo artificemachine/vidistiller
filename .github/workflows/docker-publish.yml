@@ -8,7 +8,7 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: celestinmax/vidistiller
+  IMAGE_NAME: newblacc/vidistiller
 
 jobs:
   build-and-push:
