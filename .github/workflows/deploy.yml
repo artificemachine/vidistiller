@@ -83,41 +83,38 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - name: Pull latest code
-        run: |
-          cd "${VIDISTILLER_DIR:-$HOME/vidistiller}"
-          git fetch origin main
-          git reset --hard origin/main
-
       - name: Enable Sentry if DSN is configured
         if: env.SENTRY_DSN != ''
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: |
-          cd "${VIDISTILLER_DIR:-$HOME/vidistiller}"
+          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
           sed -i "s|^SENTRY_DSN=.*|SENTRY_DSN=${SENTRY_DSN}|" .env
           sed -i "s|^SENTRY_ENABLED=.*|SENTRY_ENABLED=true|" .env
           grep -q "^NEXT_PUBLIC_SENTRY_DSN=" .env \
             && sed -i "s|^NEXT_PUBLIC_SENTRY_DSN=.*|NEXT_PUBLIC_SENTRY_DSN=${SENTRY_DSN}|" .env \
             || echo "NEXT_PUBLIC_SENTRY_DSN=${SENTRY_DSN}" >> .env
 
-      - name: Build and deploy
+      - name: Pull latest images
         run: |
-          cd "${VIDISTILLER_DIR:-$HOME/vidistiller}"
-          docker compose build --pull
-          docker compose up -d
+          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
+          docker compose pull
+
+      - name: Deploy
+        run: |
+          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
+          docker compose up -d --remove-orphans
 
       - name: Run migrations
         run: |
-          cd "${VIDISTILLER_DIR:-$HOME/vidistiller}"
           sleep 8
-          docker compose exec -T api alembic upgrade head
+          docker compose -f "${VIDISTILLER_DIR:-/opt/vidistiller}/docker-compose.yml" exec -T backend sh -c 'cd /app && python -m alembic upgrade head'
 
       - name: Health check
         run: |
           sleep 12
-          curl -sf http://localhost:8000/health || { echo "API health check failed"; exit 1; }
-          echo "Deploy successful — $(git -C ${VIDISTILLER_DIR:-$HOME/vidistiller} rev-parse --short HEAD)"
+          curl -sf http://10.255.181.20:8000/health || { echo "API health check failed"; exit 1; }
+          echo "Deploy successful"
 
   # ── 5. Deploy to staging (self-hosted runner on staging LXC) ───────────────
   deploy-staging:
@@ -131,21 +128,19 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - name: Pull latest code
+      - name: Pull latest images
         run: |
-          cd "${VIDISTILLER_DIR:-$HOME/vidistiller}"
-          git fetch origin staging
-          git reset --hard origin/staging
+          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
+          docker compose -f docker-compose.yml -f docker-compose.staging.yml pull
 
-      - name: Build and deploy staging
+      - name: Deploy staging
         run: |
-          cd "${VIDISTILLER_DIR:-$HOME/vidistiller}"
-          docker compose -f docker-compose.yml -f docker-compose.staging.yml build --pull
-          docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
+          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
+          docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d --remove-orphans
 
       - name: Run migrations
         run: |
-          cd "${VIDISTILLER_DIR:-$HOME/vidistiller}"
+          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
           sleep 8
           docker compose -f docker-compose.yml -f docker-compose.staging.yml exec -T api alembic upgrade head
 
