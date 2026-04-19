@@ -259,9 +259,9 @@ The main file. Starts **all 6 services** needed for local development:
 | `pgadmin` | Database admin UI |
 
 ```bash
-docker-compose up -d          # start everything
-docker-compose logs -f api    # follow API logs
-docker-compose down           # stop everything
+docker compose up -d          # start everything
+docker compose logs -f api    # follow API logs
+docker compose down           # stop everything
 ```
 
 ### `docker-compose.test.yml` — Test Infrastructure Only
@@ -274,14 +274,23 @@ Key differences from the main file:
 - **Faster health checks** (5s interval vs 10s) for quicker test startup
 
 ```bash
-docker-compose -f docker-compose.test.yml up -d   # start test infra
+docker compose -f docker-compose.test.yml up -d   # start test infra
 pytest tests/                                       # run tests against real postgres + redis
-docker-compose -f docker-compose.test.yml down      # tear down
+docker compose -f docker-compose.test.yml down      # tear down
 ```
 
 ### `docker-compose.override.yml` — Local Overrides
 
 Automatically merged with `docker-compose.yml` by Docker Compose. Use this for personal developer customizations (extra port mappings, debug flags, volume overrides) without touching the shared main file.
+
+---
+
+## <span style="color: pink;">Prerequisites</span>
+
+- **Docker** 24+ with Compose v2 (`docker compose version`)
+- **Node.js** 18+ (for running the frontend outside Docker)
+- **Python** 3.14+ (for running the backend outside Docker)
+- **Tesseract OCR** — required for Presentation Mode (`brew install tesseract` on macOS)
 
 ---
 
@@ -296,19 +305,18 @@ Automatically merged with `docker-compose.yml` by Docker Compose. Use this for p
 2. **Start all services:**
    ```bash
    # Optional: remove all containers and images first
-   docker-compose down --rmi all
+   docker compose down --rmi all
 
    # Start all services
-   docker-compose down && 
-   docker-compose up -d && 
-   sleep 60 && 
-   docker-compose ps
-
+   docker compose down && \
+   docker compose up -d && \
+   sleep 60 && \
+   docker compose ps
    ```
 
 3. **Run database migrations:**
    ```bash
-   docker-compose exec api alembic upgrade head
+   docker compose exec api alembic upgrade head
    ```
 
 4. **Open the app:**
@@ -330,59 +338,17 @@ If you just want to preview the UI in your browser without starting the full sta
 cd frontend && npm install && npm run dev
 ```
 
-Output
-```bash
-added 130 packages, and audited 131 packages in 21s
-
-29 packages are looking for funding
-  run `npm fund` for details
-
-1 high severity vulnerability
-
-To address all issues (including breaking changes), run:
-  npm audit fix --force
-
-Run `npm audit` for details.
-
-> vidistiller@1.1.0 dev
-> next dev
-
-  ▲ Next.js 14.2.35
-  - Local:        http://localhost:3000
-
- ✓ Starting...
-Attention: Next.js now collects completely anonymous telemetry regarding usage.
-This information is used to shape Next.js' roadmap and prioritize features.
-You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
-https://nextjs.org/telemetry
-
-
-   We detected TypeScript in your project and reconfigured your tsconfig.json file for you. Strict-mode is set to false by default.
-   The following suggested values were added to your tsconfig.json. These values can be changed to fit your project's needs:
-
-   	- allowJs was set to true
-   	- incremental was set to true
-   	- include was updated to add '.next/types/**/*.ts'
-   	- plugins was updated to add { name: 'next' }
-
-   The following mandatory changes were made to your tsconfig.json:
-
-   	- moduleResolution was set to node (to match webpack resolution)
-   	- jsx was set to preserve (next.js implements its own optimized jsx transform)
-...
-```
-
-This starts the Next.js dev server at `http://localhost:3000`. The UI will load and render, but any API calls to the backend will fail since the API isn't running.
+The dev server starts at `http://localhost:3000`. API calls will fail without the backend running.
 
 ### Option 2 — Only the web container (skip dependencies)
 
 ```bash
-docker-compose up -d --no-deps web
+docker compose up -d --no-deps web
 ```
 
 The `--no-deps` flag tells Compose to start **only** the `web` container and ignore its `depends_on` chain (`api` -> `postgres` + `redis`). The UI will render but API requests will fail without the backend.
 
-> **Note:** Running `docker-compose up -d web` (without `--no-deps`) will also start `api`, `postgres`, and `redis` automatically because of the dependency chain defined in `docker-compose.yml`.
+> **Note:** Running `docker compose up -d web` (without `--no-deps`) will also start `api`, `postgres`, and `redis` automatically because of the dependency chain defined in `docker-compose.yml`.
 
 ---
 
@@ -396,7 +362,7 @@ You still need PostgreSQL and Redis running (either locally installed or via the
 
 ```bash
 # Start only the database and cache
-docker-compose -f docker-compose.test.yml up -d
+docker compose -f docker-compose.test.yml up -d
 
 # Install Python dependencies
 cd backend && pip install -r requirements.txt
@@ -413,7 +379,7 @@ The API will be available at `http://localhost:8000` with interactive docs at `h
 ### Option 2 — Only the API container (with its dependencies)
 
 ```bash
-docker-compose up -d api
+docker compose up -d api
 ```
 
 This starts `api`, `postgres`, and `redis` (because `api` depends on both being healthy), but **does not** start `web`, `celery_worker`, or `pgadmin`.
@@ -421,7 +387,7 @@ This starts `api`, `postgres`, and `redis` (because `api` depends on both being 
 ### Option 3 — API + Celery worker (for background job processing)
 
 ```bash
-docker-compose up -d api celery_worker
+docker compose up -d api celery_worker
 ```
 
 This starts `api`, `celery_worker`, `postgres`, and `redis` — everything needed for the full backend pipeline without the frontend or pgAdmin.

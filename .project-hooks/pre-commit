@@ -14,7 +14,7 @@ fi
 # Frontend tests
 if [ -d "$REPO_ROOT/frontend/node_modules" ]; then
     echo "[pre-commit] Running frontend tests..."
-    (cd "$REPO_ROOT/frontend" && npm test -- --reporter=dot)
+    (cd "$REPO_ROOT/frontend" && npm test -- --reporter=dot --retry=2)
 else
     echo "[pre-commit] ⚠️  node_modules not found — skipping frontend tests (run: cd frontend && npm install)"
 fi

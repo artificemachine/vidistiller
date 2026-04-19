@@ -341,3 +341,130 @@ Append-only activity log. Never edit previous entries.
 2026-04-17T08:51:24Z session-stop: snapshot written to session-progress.md (branch: main)
 - 2026-04-17T08:53:08Z — claude-code — modified: pyproject.toml
 - 2026-04-17T08:53:09Z — claude-code — modified: package.json
+2026-04-17T09:08:41Z session-stop: snapshot written to session-progress.md (branch: feat/phase3-5-multi-source-rename-v0.2.0)
+2026-04-17T09:10:09Z session-stop: snapshot written to session-progress.md (branch: feat/phase3-5-multi-source-rename-v0.2.0)
+2026-04-17T09:12:22Z session-stop: snapshot written to session-progress.md (branch: feat/phase3-5-multi-source-rename-v0.2.0)
+2026-04-17T09:13:49Z session-stop: snapshot written to session-progress.md (branch: feat/phase3-5-multi-source-rename-v0.2.0)
+2026-04-17T09:17:39Z session-stop: snapshot written to session-progress.md (branch: feat/phase3-5-multi-source-rename-v0.2.0)
+- 2026-04-17T09:17:55Z — claude-code — modified: CLAUDE.md
+2026-04-17T09:18:38Z session-stop: snapshot written to session-progress.md (branch: feat/phase3-5-multi-source-rename-v0.2.0)
+- 2026-04-17T09:19:53Z — claude-code — modified: README.md
+2026-04-17T09:21:21Z session-stop: snapshot written to session-progress.md (branch: feat/phase3-5-multi-source-rename-v0.2.0)
+2026-04-17T09:22:17Z session-stop: snapshot written to session-progress.md (branch: feat/phase3-5-multi-source-rename-v0.2.0)
+2026-04-17T09:23:35Z session-stop: snapshot written to session-progress.md (branch: feat/phase3-5-multi-source-rename-v0.2.0)
+2026-04-17T09:24:33Z session-stop: snapshot written to session-progress.md (branch: feat/phase3-5-multi-source-rename-v0.2.0)
+- 2026-04-17T09:27:31Z — claude-code — modified: status-groovy-canyon.md
+2026-04-17T09:30:16Z session-stop: snapshot written to session-progress.md (branch: feat/phase3-5-multi-source-rename-v0.2.0)
+2026-04-17T09:42:23Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-17T09:43:28Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-17T09:44:46Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-17T09:45:28Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-17T09:52:01Z session-stop: snapshot written to session-progress.md (branch: main)
+- 2026-04-17T09:54:55Z — claude-code — modified: vidistiller.tf
+- 2026-04-17T09:55:09Z — claude-code — modified: terraform.tfvars.example
+- 2026-04-17T09:55:18Z — claude-code — modified: .gitignore
+- 2026-04-17T09:55:25Z — claude-code — modified: ansible.cfg
+- 2026-04-17T09:55:35Z — claude-code — modified: inventory.yml
+- 2026-04-17T09:55:45Z — claude-code — modified: site.yml
+- 2026-04-17T09:56:04Z — claude-code — modified: migrate-db.yml
+- 2026-04-17T09:56:16Z — claude-code — modified: secrets.yml.example
+- 2026-04-17T09:56:26Z — claude-code — modified: .gitignore
+- 2026-04-17T09:56:43Z — claude-code — modified: main.yml
+- 2026-04-17T09:56:53Z — claude-code — modified: main.yml
+- 2026-04-17T09:57:07Z — claude-code — modified: main.yml
+- 2026-04-17T09:57:17Z — claude-code — modified: main.yml
+- 2026-04-17T09:57:28Z — claude-code — modified: main.yml
+- 2026-04-17T09:57:46Z — claude-code — modified: main.yml
+- 2026-04-17T09:57:52Z — claude-code — modified: main.yml
+- 2026-04-17T09:58:10Z — claude-code — modified: docker-compose.yml.j2
+- 2026-04-17T09:58:17Z — claude-code — modified: env.j2
+2026-04-17T10:00:10Z session-stop: snapshot written to session-progress.md (branch: feat/lxc-to-vm-deploy)
+2026-04-17T10:02:49Z session-stop: snapshot written to session-progress.md (branch: feat/lxc-to-vm-deploy)
+- 2026-04-17T10:04:39Z — claude-code — modified: setup-tfvars.sh
+2026-04-17T10:04:58Z session-stop: snapshot written to session-progress.md (branch: feat/lxc-to-vm-deploy)
+2026-04-17T10:57:03Z session-stop: snapshot written to session-progress.md (branch: feat/lxc-to-vm-deploy)
+- 2026-04-17T11:05:39Z — claude-code — modified: setup-tfvars.sh
+- 2026-04-17T11:07:17Z — claude-code — modified: setup-tfvars.sh
+2026-04-17T11:07:44Z session-stop: snapshot written to session-progress.md (branch: feat/lxc-to-vm-deploy)
+- 2026-04-17T11:13:00Z — claude-code — modified: migrate-db.yml
+- 2026-04-17T12:04:29Z — claude-code — modified: migrate-db.yml
+2026-04-17T17:30:29Z session-stop: snapshot written to session-progress.md (branch: feat/lxc-to-vm-deploy)
+2026-04-17T17:32:39Z session-stop: snapshot written to session-progress.md (branch: feat/lxc-to-vm-deploy)
+2026-04-17T17:41:44Z session-stop: snapshot written to session-progress.md (branch: feat/lxc-to-vm-deploy)
+2026-04-17T18:01:38Z session-stop: snapshot written to session-progress.md (branch: feat/lxc-to-vm-deploy)
+2026-04-18T11:17:24Z session-stop: snapshot written to session-progress.md (branch: feat/lxc-to-vm-deploy)
+- 2026-04-18T11:19:16Z — claude-code — modified: .gitignore
+- 2026-04-18T11:19:23Z — claude-code — modified: .gitignore
+2026-04-18T11:20:56Z session-stop: snapshot written to session-progress.md (branch: feat/lxc-to-vm-deploy)
+2026-04-18T11:22:14Z session-stop: snapshot written to session-progress.md (branch: feat/lxc-to-vm-deploy)
+2026-04-18T11:23:03Z session-stop: snapshot written to session-progress.md (branch: feat/lxc-to-vm-deploy)
+2026-04-18T11:25:21Z session-stop: snapshot written to session-progress.md (branch: feat/lxc-to-vm-deploy)
+2026-04-18T11:28:50Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T11:30:26Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T11:31:29Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T11:32:27Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T11:33:12Z session-stop: snapshot written to session-progress.md (branch: main)
+- 2026-04-18T11:44:53Z — claude-code — modified: smoke_auth.py
+2026-04-18T11:45:10Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T11:50:20Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T11:57:50Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T12:04:03Z session-stop: snapshot written to session-progress.md (branch: main)
+- 2026-04-18T12:07:45Z — claude-code — modified: next.config.js
+2026-04-18T12:19:41Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T12:43:12Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:26:59Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:27:56Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:42:59Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:43:46Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:46:00Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:47:46Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:50:20Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:51:33Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:51:53Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:52:03Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:52:45Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:53:31Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:53:46Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:53:56Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:54:04Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:55:25Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T18:59:40Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T19:06:26Z session-stop: snapshot written to session-progress.md (branch: fix/frontend-api-proxy)
+2026-04-18T19:10:04Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T19:11:44Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T19:13:28Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T19:15:59Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-18T22:40:23Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-19T08:31:54Z session-stop: snapshot written to session-progress.md (branch: main)
+2026-04-19T08:36:28Z session-stop: snapshot written to session-progress.md (branch: main)
+- 2026-04-19T08:38:27Z — claude-code — modified: docker-publish.yml
+- 2026-04-19T08:38:31Z — claude-code — modified: main.yml
+2026-04-19T09:13:44Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+2026-04-19T09:14:54Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+2026-04-19T09:20:16Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+2026-04-19T09:23:17Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+2026-04-19T09:28:00Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+2026-04-19T09:28:09Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+2026-04-19T09:30:48Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+2026-04-19T09:31:08Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+2026-04-19T09:35:28Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+2026-04-19T09:37:34Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+2026-04-19T09:39:02Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+2026-04-19T09:43:12Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+2026-04-19T09:59:39Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+- 2026-04-19T10:24:03Z — claude-code — modified: docker-compose.yml
+- 2026-04-19T10:24:14Z — claude-code — modified: docker-compose.yml
+- 2026-04-19T10:44:38Z — claude-code — modified: README.md
+- 2026-04-19T10:44:47Z — claude-code — modified: README.md
+- 2026-04-19T10:45:04Z — claude-code — modified: README.md
+- 2026-04-19T10:45:23Z — claude-code — modified: README.md
+- 2026-04-19T10:45:43Z — claude-code — modified: README.md
+- 2026-04-19T10:45:53Z — claude-code — modified: README.md
+- 2026-04-19T10:46:14Z — claude-code — modified: README.md
+- 2026-04-19T10:46:28Z — claude-code — modified: README.md
+- 2026-04-19T10:46:46Z — claude-code — modified: README.md
+2026-04-19T10:54:46Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+2026-04-19T10:56:11Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+- 2026-04-19T10:58:18Z — claude-code — modified: CHANGELOG.md
+2026-04-19T10:59:28Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
+- 2026-04-19T11:08:01Z — claude-code — modified: smoke_auth.py

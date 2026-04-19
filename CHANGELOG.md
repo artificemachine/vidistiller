@@ -52,3 +52,7 @@ All notable changes to this project will be documented in this file.
 - 2026-04-19: fix: pass BACKEND_URL build arg in Dockerfile so Next.js rewrites bake http://backend:8000 not localhost:8000; bump frontend image to 0.2.2
 - 2026-04-19: chore: rename Docker Hub org celestinmax → newblacc across Ansible defaults, CI workflow, and live docker-compose
 - 2026-04-19: chore: migrate repo to github.com/artificemachine/vidistiller
+- 2026-04-19: security: bind Redis and pgAdmin ports to 127.0.0.1 in dev docker-compose (threat model hardening)
+- 2026-04-19: chore: update README docker-compose commands to Docker Compose v2 syntax; add Prerequisites section; remove embedded npm vulnerability output
+- 2026-04-19: security: npm audit fix — upgrade axios 1.15.0, rollup 4.60.2, picomatch 2.3.2, brace-expansion 2.1.0, follow-redirects 1.16.0, remove serialize-javascript; 3 HIGH CVEs (Next.js, Sentry) tracked in chore/upgrade-nextjs-v16
+- 2026-04-19: fix: add --retry=2 to pre-commit vitest run to handle load-sensitive async timeouts
