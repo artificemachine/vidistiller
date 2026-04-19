@@ -1,6 +1,6 @@
 {
   "name": "vidistiller",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Turn YouTube videos into structured documentation",
   "private": true,
   "scripts": {
@@ -15,12 +15,12 @@
     "test:e2e:ui": "playwright test --config=../e2e/playwright.config.ts --ui"
   },
   "dependencies": {
-    "@sentry/nextjs": "^8.0.0",
+    "@sentry/nextjs": "^10.49.0",
     "axios": "^1.6.0",
     "jszip": "^3.10.1",
-    "next": "^14.0.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
+    "next": "^15.5.15",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "react-player": "^3.4.0",
     "react-resizable-panels": "^4.6.2",
     "swr": "^2.2.0",
@@ -32,8 +32,8 @@
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/node": "^20.0.0",
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.0",
     "axios-mock-adapter": "^2.1.0",
