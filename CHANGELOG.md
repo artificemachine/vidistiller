@@ -57,3 +57,5 @@ All notable changes to this project will be documented in this file.
 - 2026-04-19: security: npm audit fix — upgrade axios 1.15.0, rollup 4.60.2, picomatch 2.3.2, brace-expansion 2.1.0, follow-redirects 1.16.0, remove serialize-javascript; 3 HIGH CVEs (Next.js, Sentry) tracked in chore/upgrade-nextjs-v16
 - 2026-04-19: fix: add --retry=2 to pre-commit vitest run to handle load-sensitive async timeouts
 - 2026-04-19: chore: bump version 0.2.0 → 0.2.1 (patch: fix/security commits in PRs #10 and #11)
+- 2026-04-19: security: upgrade Next.js 14→15.5.15, React 18→19, @sentry/nextjs 8→10.49.0 — resolves 5 HIGH CVEs (GHSA-ggv3-7p47-pfv8, GHSA-9g9p-9gw9-jx7f, GHSA-h25m-26qc-wcjf, GHSA-3x4c-7xq6-9pq8, GHSA-q4gf-8mx6-v5v3) and 1 rollup HIGH (GHSA-mw96-cpmx-2vgc); remove swcMinify (Next.js 15 default); fix React 19 useRef explicit undefined
+- 2026-04-19: chore: bump version 0.2.1 → 0.2.2, frontend 1.1.0 → 1.2.0 (security: Next.js/React/Sentry upgrade)

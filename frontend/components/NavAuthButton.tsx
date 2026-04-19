@@ -50,7 +50,7 @@ export default function NavAuthButton() {
   const [setups, setSetups] = useState<UISetup[]>([]);
   const [feedback, setFeedback] = useState('');
   const ref = useRef<HTMLDivElement>(null);
-  const feedbackTimer = useRef<ReturnType<typeof setTimeout>>();
+  const feedbackTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
