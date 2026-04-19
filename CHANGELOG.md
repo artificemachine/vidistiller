@@ -51,3 +51,4 @@ All notable changes to this project will be documented in this file.
 - 2026-04-18: fix: Next.js rewrites proxy — default NEXT_PUBLIC_API_URL to /api and proxy via BACKEND_URL so browser never needs direct access to port 8000
 - 2026-04-19: fix: pass BACKEND_URL build arg in Dockerfile so Next.js rewrites bake http://backend:8000 not localhost:8000; bump frontend image to 0.2.2
 - 2026-04-19: chore: rename Docker Hub org celestinmax → newblacc across Ansible defaults, CI workflow, and live docker-compose
+- 2026-04-19: chore: migrate repo to github.com/artificemachine/vidistiller

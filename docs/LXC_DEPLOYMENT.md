@@ -202,7 +202,7 @@ mkdir -p /home/appuser/apps
 cd /home/appuser/apps
 
 # Clone repository
-git clone https://github.com/celstnblacc/vidistiller.git
+git clone https://github.com/artificemachine/vidistiller.git
 cd vidistiller
 
 # Check current branch
@@ -992,7 +992,7 @@ docker system prune -a
 - **Application Docs:** `/docs` directory in repository
 - **API Documentation:** http://<OLLAMA_IP>:8000/docs (Swagger UI)
 - **Alternative API Docs:** http://<OLLAMA_IP>:8000/redoc
-- **Repository:** https://github.com/celstnblacc/vidistiller
+- **Repository:** https://github.com/artificemachine/vidistiller
 - **Docker Docs:** https://docs.docker.com
 - **FastAPI Docs:** https://fastapi.tiangolo.com
 - **Next.js Docs:** https://nextjs.org/docs
