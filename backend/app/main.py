@@ -9,6 +9,7 @@ Initializes the FastAPI application with:
 - Health checks and monitoring
 """
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
 import sys
@@ -90,6 +91,23 @@ settings = get_settings()
 _configure_logging(settings)
 _init_sentry(settings)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Verify database connectivity and ensure tables exist on startup."""
+    try:
+        health_check()
+        logger.info("✅ Database connection healthy on startup")
+    except Exception as e:
+        logger.error(f"❌ Database health check failed on startup: {e}")
+        raise
+
+    import app.db.models  # noqa: F401 — register models with Base metadata
+    Base.metadata.create_all(bind=engine)
+
+    yield
+
+
 app = FastAPI(
     title="Vidistiller API",
     description="Turn any video into structured documentation",
@@ -97,6 +115,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
+    lifespan=lifespan,
 )
 
 # Add CORS middleware
@@ -122,25 +141,6 @@ app.mount("/static/snapshots", StaticFiles(directory=str(snapshots_dir)), name="
 slides_dir = _data_root / "slides"
 slides_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static/slides", StaticFiles(directory=str(slides_dir)), name="slides")
-
-
-# ==============================================================================
-# STARTUP EVENTS
-# ==============================================================================
-
-@app.on_event("startup")
-async def startup_event():
-    """Verify database connectivity and ensure tables exist on startup."""
-    try:
-        health_check()
-        logger.info("✅ Database connection healthy on startup")
-    except Exception as e:
-        logger.error(f"❌ Database health check failed on startup: {e}")
-        raise
-
-    # Ensure all tables exist (creates any missing tables like job_logs)
-    import app.db.models  # noqa: F401 — register models with Base metadata
-    Base.metadata.create_all(bind=engine)
 
 
 # ==============================================================================

@@ -7,7 +7,7 @@ from functools import lru_cache
 import string
 
 from pydantic import SecretStr, HttpUrl, field_validator, Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 # ==============================================================================
@@ -21,9 +21,7 @@ class DatabaseSettings(BaseSettings):
 
     DATABASE_URL: str = "sqlite:///./dev.db"
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 # Configure API keys for external services
@@ -39,9 +37,7 @@ class OllamaSettings(BaseSettings):
     # Defaulting to an Ollama-native model name like 'llama3' or 'mistral'
     model_name: str = Field(default="llama3", validation_alias="OLLAMA_MODEL")
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 class YouTubeSettings(BaseSettings):
@@ -54,9 +50,7 @@ class YouTubeSettings(BaseSettings):
     # You can validate that the channel ID is a valid YouTube channel ID
     channel_ids: Optional[list[str]] = None
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 # Configure CORS allowed origins
@@ -106,10 +100,7 @@ class CorsSettings(BaseSettings):
             return [i.strip() for i in v.split(",")]
         return v
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
-        env_prefix = "CORS_"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_prefix="CORS_")
 
 
 # Configure logging levels and formats
@@ -121,9 +112,7 @@ class LoggingSettings(BaseSettings):
     # Log format for console output
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 # Authentication & JWT
@@ -191,9 +180,7 @@ class JWTSettings(BaseSettings):
 
         return v
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 # Configure service timeouts
@@ -205,9 +192,7 @@ class ServiceTimeouts(BaseSettings):
     whisper_timeout: int = 300  # seconds (5 min for audio transcription)
     llm_timeout: int = 120  # seconds (2 min for LLM generation)
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 # Configure rate limiting parameters
@@ -218,11 +203,7 @@ class RateLimitingConfig(BaseSettings):
     RATE_LIMIT_WINDOW: int = 60  # seconds
     ENABLE_RATE_LIMITING: bool = True
 
-    class Config:
-        env_prefix = "RATE_LIMIT_"
-        case_sensitive = False
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_prefix="RATE_LIMIT_", case_sensitive=False, env_file=".env", extra="ignore")
 
 
 # Configure cache settings
@@ -237,10 +218,7 @@ class CacheSettings(BaseSettings):
     redis_password: str | None = Field(default=None, description="Redis password")
     cache_ttl: int = Field(default=3600, description="Default cache TTL in seconds")
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
-        case_sensitive = False  # Allow both REDIS_URL and redis_url from .env
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 
 
 # Define feature flags
@@ -252,11 +230,7 @@ class FeatureFlags(BaseSettings):
     ENABLE_METRICS: bool = True
     ENABLE_DEBUG_MODE: bool = False
 
-    class Config:
-        env_prefix = "FEATURE_"
-        case_sensitive = False
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_prefix="FEATURE_", case_sensitive=False, env_file=".env", extra="ignore")
 
 
 class EmailSettings(BaseSettings):
@@ -270,9 +244,7 @@ class EmailSettings(BaseSettings):
     MAIL_STARTTLS: bool = True
     MAIL_SSL_TLS: bool = False
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 class PasswordResetSettings(BaseSettings):
@@ -281,9 +253,7 @@ class PasswordResetSettings(BaseSettings):
     token_expire_minutes: int = Field(default=60, validation_alias="PASSWORD_RESET_EXPIRE_MINUTES")
     frontend_reset_url: str = Field(default="http://localhost:3000/reset-password", validation_alias="PASSWORD_RESET_URL")
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 class SentrySettings(BaseSettings):
@@ -294,10 +264,7 @@ class SentrySettings(BaseSettings):
     environment: str = "development"
     traces_sample_rate: float = Field(default=0.1, ge=0.0, le=1.0)
 
-    class Config:
-        env_prefix = "SENTRY_"
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_prefix="SENTRY_", env_file=".env", extra="ignore")
 
 
 class StorageSettings(BaseSettings):
@@ -309,9 +276,7 @@ class StorageSettings(BaseSettings):
         validation_alias="MAX_IMPORT_SIZE_BYTES",
     )
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 # Transcript confidence scores — named constants instead of inline magic numbers.
@@ -336,11 +301,7 @@ class SlideDetectionSettings(BaseSettings):
     layout_sample_count: int = 5
     incremental_ssim_threshold: float = 0.95
 
-    class Config:
-        env_prefix = "SLIDE_"
-        case_sensitive = False
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_prefix="SLIDE_", case_sensitive=False, env_file=".env", extra="ignore")
 
 
 # Add environment-specific settings (dev, test, prod)
@@ -377,10 +338,7 @@ class Settings(BaseSettings):
     storage: StorageSettings = StorageSettings()
     environment: Environment = Environment.DEVELOPMENT
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-        extra = "ignore"  # Ignore extra environment variables in .env
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
 # Cache settings
 @lru_cache()
