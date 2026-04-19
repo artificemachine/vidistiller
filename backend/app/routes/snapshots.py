@@ -217,7 +217,7 @@ async def extract_snapshots(
         return SnapshotListResponse(
             count=len(snapshots),
             snapshots=[
-                SnapshotResponse.from_orm(snapshot)
+                SnapshotResponse.model_validate(snapshot)
                 for snapshot in snapshots
             ]
         )
@@ -293,7 +293,7 @@ async def detect_scene_changes(
         return SnapshotListResponse(
             count=len(snapshots),
             snapshots=[
-                SnapshotResponse.from_orm(snapshot)
+                SnapshotResponse.model_validate(snapshot)
                 for snapshot in snapshots
             ]
         )
@@ -372,7 +372,7 @@ async def get_snapshot(
     try:
         snapshot = _get_snapshot_for_user(db, snapshot_id, current_user)
 
-        return SnapshotResponse.from_orm(snapshot)
+        return SnapshotResponse.model_validate(snapshot)
 
     except HTTPException:
         raise

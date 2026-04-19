@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import apiClient from '@/lib/api';
 import Link from 'next/link';
@@ -28,6 +28,8 @@ export default function Dashboard() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [flash, setFlash] = useState<{ type: 'error' | 'info'; msg: string } | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [sortBy, setSortBy] = useState<SortBy>('newest');
   const [filterMonth, setFilterMonth] = useState('all');
   const { isAuthenticated, isLoading: authLoading } = useAuthStore();
@@ -38,6 +40,12 @@ export default function Dashboard() {
       router.replace('/login');
     }
   }, [authLoading, isAuthenticated, router]);
+
+  const showFlash = useCallback((type: 'error' | 'info', msg: string) => {
+    clearTimeout(flashTimer.current);
+    setFlash({ type, msg });
+    flashTimer.current = setTimeout(() => setFlash(null), 4000);
+  }, []);
 
   const fetchJobs = useCallback(async () => {
     setError('');
@@ -67,7 +75,7 @@ export default function Dashboard() {
       );
     } catch (err: any) {
       const msg = err.response?.data?.message || 'Failed to cancel job';
-      alert(msg);
+      showFlash('error', msg);
     }
   }, []);
 
@@ -76,7 +84,7 @@ export default function Dashboard() {
       (j) => j.status === 'pending' || j.status === 'processing'
     );
     if (active.length === 0) {
-      alert('No active jobs to stop.');
+      showFlash('info', 'No active jobs to stop.');
       return;
     }
     if (!confirm(`Stop ${active.length} active job${active.length > 1 ? 's' : ''}?`)) return;
@@ -92,16 +100,16 @@ export default function Dashboard() {
         )
       );
     } catch {
-      alert('Some jobs could not be stopped.');
+      showFlash('error', 'Some jobs could not be stopped.');
     }
-  }, [jobs]);
+  }, [jobs, showFlash]);
 
   const handleClearHistory = useCallback(async () => {
     const deletable = jobs.filter(
       (j) => j.status === 'completed' || j.status === 'failed'
     );
     if (deletable.length === 0) {
-      alert('No completed or failed jobs to clear.');
+      showFlash('info', 'No completed or failed jobs to clear.');
       return;
     }
     if (!confirm(`Delete ${deletable.length} completed/failed job${deletable.length > 1 ? 's' : ''}?`)) return;
@@ -113,9 +121,9 @@ export default function Dashboard() {
         prev.filter((j) => j.status !== 'completed' && j.status !== 'failed')
       );
     } catch {
-      alert('Some jobs could not be deleted.');
+      showFlash('error', 'Some jobs could not be deleted.');
     }
-  }, [jobs]);
+  }, [jobs, showFlash]);
 
   const availableMonths = useMemo(() => {
     const months = new Set<string>();
@@ -216,6 +224,17 @@ export default function Dashboard() {
   return (
     <div className="max-w-7xl mx-auto py-8 px-4">
       <h1 className="text-3xl font-bold text-text-dark dark:text-text-light mb-8">jobs dashboard</h1>
+
+      {flash && (
+        <div className={`mb-4 p-3 rounded-lg flex items-center justify-between text-sm font-medium ${
+          flash.type === 'error'
+            ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400'
+            : 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400'
+        }`}>
+          <span>{flash.msg}</span>
+          <button onClick={() => setFlash(null)} className="ml-4 opacity-60 hover:opacity-100">✕</button>
+        </div>
+      )}
 
       {jobs.length > 0 && (
         <div className="flex flex-wrap items-center gap-4 mb-4">
@@ -355,7 +374,7 @@ export default function Dashboard() {
                           await apiClient.delete(`/jobs/${job.job_id}`);
                           setJobs((prev) => prev.filter((j) => j.job_id !== job.job_id));
                         } catch {
-                          alert('Failed to delete job.');
+                          showFlash('error', 'Failed to delete job.');
                         }
                       }}
                       className="text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 font-semibold"
