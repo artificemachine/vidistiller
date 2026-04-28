@@ -267,6 +267,14 @@ class SentrySettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SENTRY_", env_file=".env", extra="ignore")
 
 
+class ApiKeySettings(BaseSettings):
+    """Machine-to-machine API key for trusted internal services (e.g. Semblar)."""
+
+    vidistiller_api_key: str = Field(default="", validation_alias="VIDISTILLER_API_KEY")
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
 class StorageSettings(BaseSettings):
     """File storage and upload configuration."""
 
@@ -336,6 +344,7 @@ class Settings(BaseSettings):
     email: EmailSettings = EmailSettings()
     password_reset: PasswordResetSettings = PasswordResetSettings()
     storage: StorageSettings = StorageSettings()
+    api_key: ApiKeySettings = ApiKeySettings()
     environment: Environment = Environment.DEVELOPMENT
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")

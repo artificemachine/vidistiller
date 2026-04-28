@@ -7,7 +7,7 @@ Provides endpoints for managing YouTube to documentation conversion jobs:
 - List user's jobs with pagination
 - Delete completed or failed jobs
 
-All routes require authentication via JWT Bearer token.
+All routes require authentication via JWT Bearer token or X-API-Key header.
 """
 
 import base64
@@ -51,7 +51,7 @@ from app.tasks import (
 )
 from app.services.llm import LLMService
 from app.services.job_import import import_job_payload
-from app.routes.auth import get_current_user_from_token
+from app.core.api_key_auth import get_current_user  # supports X-API-Key + JWT
 from app.core.rate_limit import job_submit_rate_limit
 import uuid
 
@@ -84,7 +84,7 @@ def _get_job_for_user(
 def create_job(
     job_data: JobCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
     _rate_limit: None = Depends(job_submit_rate_limit),
 ) -> JobResponse:
     """
@@ -144,7 +144,7 @@ def list_jobs(
     limit: int = Query(10, ge=1, le=100, description="Maximum jobs to return"),
     status_filter: str | None = Query(None, description="Filter by status (pending, processing, completed, failed, cancelled)"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ) -> List[JobStatusResponse]:
     """
     List all processing jobs with optional filtering and pagination.
@@ -202,7 +202,7 @@ def list_jobs(
 def import_job(
     data: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ) -> JobResponse:
     try:
         new_job = import_job_payload(db, data, current_user.id)
@@ -225,7 +225,7 @@ def import_job(
 async def import_job_upload(
     request: Request,
     filename: str = Query("import.json", description="Original filename, used to infer .json/.gz"),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ):
     lower_name = filename.lower()
     if not (lower_name.endswith(".json") or lower_name.endswith(".json.gz") or lower_name.endswith(".gz")):
@@ -271,7 +271,7 @@ async def import_job_upload(
     }
 
 
-def verify_import_task_ownership(task_id: str, current_user: User = Depends(get_current_user_from_token)) -> None:
+def verify_import_task_ownership(task_id: str, current_user: User = Depends(get_current_user)) -> None:
     """Dependency: confirm task_id was created by current_user via Redis lookup."""
     try:
         import redis as _redis
@@ -293,7 +293,7 @@ def verify_import_task_ownership(task_id: str, current_user: User = Depends(get_
 )
 def get_import_upload_status(
     task_id: str,
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
     _ownership: None = Depends(verify_import_task_ownership),
 ):
 
@@ -324,7 +324,7 @@ def get_import_upload_status(
 def get_job(
     job_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ) -> JobResponse:
     """
     Retrieve complete details for a specific job.
@@ -395,7 +395,7 @@ def get_job(
 def get_job_status(
     job_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ) -> JobStatusResponse:
     """
     Retrieve lightweight job status for polling.
@@ -426,7 +426,7 @@ def get_job_status(
 def get_job_videos(
     job_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ) -> List[VideoResponse]:
     """
     Retrieve all video metadata associated with a job.
@@ -457,7 +457,7 @@ def get_job_videos(
 def get_job_transcripts(
     job_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ) -> List[TranscriptResponse]:
     """
     Retrieve all transcripts associated with a job.
@@ -488,7 +488,7 @@ def get_job_transcripts(
 def get_job_snapshots(
     job_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ) -> List[SnapshotResponse]:
     """
     Retrieve all snapshots (key frames) extracted from a job's video.
@@ -522,7 +522,7 @@ def get_job_snapshots(
 def get_job_logs(
     job_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ) -> List[JobLogResponse]:
     """
     Retrieve all log entries for a specific job, ordered by timestamp.
@@ -553,7 +553,7 @@ def get_job_logs(
 def get_job_documents(
     job_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ) -> List[DocumentResponse]:
     """
     Retrieve all generated documentation for a job.
@@ -584,7 +584,7 @@ def get_job_documents(
 def get_job_slides(
     job_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ) -> List[SlideResponse]:
     """
     Retrieve all detected slides for a job.
@@ -631,7 +631,7 @@ def get_job_slides(
 def get_job_slide_metadata(
     job_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ) -> SlideDetectionMetadataResponse:
     """
     Retrieve slide detection metadata for a job.
@@ -666,7 +666,7 @@ def get_job_slide_metadata(
 def export_job(
     job_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ):
     job = _get_job_for_user(db, job_id, current_user)
 
@@ -779,7 +779,7 @@ def summarize_transcript(
     job_id: str,
     force: bool = Query(False, description="Force re-summarization even if cached"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Summarize the job's transcript into structured paragraphs and bullet points.
@@ -836,7 +836,7 @@ def summarize_transcript(
 def cancel_job(
     job_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ) -> JobStatusResponse:
     """
     Cancel a pending/processing job or an in-progress summarization.
@@ -897,7 +897,7 @@ def cancel_job(
 def delete_job(
     job_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(get_current_user),
 ) -> None:
     """
     Delete a processing job and cascade-delete all related data.
