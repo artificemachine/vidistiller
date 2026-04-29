@@ -5,6 +5,8 @@
 #   - image: tags instead of build: directives
 #   - python -m uvicorn / python3 -m celery (binaries not on PATH in --target installs)
 #   - ./app-data bind mount for /data instead of Docker volume
+#   - ./postgres-data bind mount for postgres (preserves data across deploys)
+#   - ./redis-data bind mount for redis (preserves data across deploys)
 #   - ./alembic.ini and ./migrations bind mounts (no source code mounts)
 #   - pg_isready fallback user for servers without DB_USER in .env
 #   - VLLM fleet env vars passed through
@@ -29,7 +31,7 @@ services:
     ports:
       - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
       interval: 10s
@@ -51,7 +53,7 @@ services:
     ports:
       - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
-      - redis_data:/data
+      - ./redis-data:/data
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping"]
       interval: 10s
@@ -200,11 +202,7 @@ services:
     networks:
       - tutorial_network
 
-volumes:
-  postgres_data:
-    driver: local
-  redis_data:
-    driver: local
+volumes: {}
 
 networks:
   tutorial_network:
