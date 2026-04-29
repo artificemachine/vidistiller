@@ -64,3 +64,4 @@ All notable changes to this project will be documented in this file.
 - 2026-04-28: feat: add API key auth for machine-to-machine clients — ApiKeySettings with VIDISTILLER_API_KEY env var, api_key_auth.py dependency (X-API-Key header support with JWT fallback), auto-create semblar service user on first API key call, wire into all /api/jobs routes for Semblar integration
 - 2026-04-29: chore: bump version 0.3.1 → 0.3.2
 - 2026-04-29: fix: docker-compose.prod.yml use bind mounts for postgres and redis to preserve data across deploys
+- 2026-04-29: fix: deploy workflow syncs docker-compose.prod.yml from repo before deploying; migrations run by default with opt-out input

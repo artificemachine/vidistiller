@@ -4,6 +4,13 @@ on:
   push:
     branches: [main, staging]
   workflow_dispatch:
+    inputs:
+      run_migrations:
+        description: 'Run alembic migrations after deploy'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
 
 jobs:
   # ── 1. Backend tests (cloud runner) ────────────────────────────────────────
@@ -83,6 +90,15 @@ jobs:
       cancel-in-progress: false
 
     steps:
+      - name: Sync compose and config files
+        run: |
+          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
+          curl -fsSL \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/${{ github.repository }}/contents/docker-compose.prod.yml?ref=${{ github.sha }}" \
+            -o docker-compose.prod.yml
+
       - name: Enable Sentry if DSN is configured
         if: env.SENTRY_DSN != ''
         env:
@@ -106,10 +122,13 @@ jobs:
           docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
       - name: Run migrations
+        if: ${{ github.event.inputs.run_migrations != 'false' }}
         run: |
           cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
           sleep 8
+          echo "Running alembic upgrade head..."
           docker compose -f docker-compose.prod.yml exec -T api sh -c 'cd /app && python -m alembic upgrade head'
+          echo "Migrations complete."
 
       - name: Health check
         run: |
@@ -140,10 +159,13 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d --remove-orphans
 
       - name: Run migrations
+        if: ${{ github.event.inputs.run_migrations != 'false' }}
         run: |
           cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
           sleep 8
+          echo "Running alembic upgrade head..."
           docker compose -f docker-compose.yml -f docker-compose.staging.yml exec -T api alembic upgrade head
+          echo "Migrations complete."
 
       - name: Health check
         run: |
