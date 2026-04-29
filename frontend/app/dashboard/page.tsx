@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import apiClient from '@/lib/api';
 import Link from 'next/link';
 import { useAuthStore } from '@/lib/authStore';
+import pkg from '@/package.json';
 
 interface Job {
   job_id: string;
@@ -207,7 +208,10 @@ export default function Dashboard() {
   if (error) {
     return (
       <div className="max-w-7xl mx-auto py-8 px-4">
-        <h1 className="text-3xl font-bold text-text-dark dark:text-text-light mb-8">jobs dashboard</h1>
+        <div className="flex items-baseline gap-3 mb-8">
+        <h1 className="text-3xl font-bold text-text-dark dark:text-text-light">jobs dashboard</h1>
+        <span className="text-xs text-text-light/40 dark:text-text-dark/40 font-mono">v{pkg.version}</span>
+      </div>
         <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400 flex items-center justify-between">
           <span>{error}</span>
           <button
@@ -223,7 +227,10 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto py-8 px-4">
-      <h1 className="text-3xl font-bold text-text-dark dark:text-text-light mb-8">jobs dashboard</h1>
+      <div className="flex items-baseline gap-3 mb-8">
+        <h1 className="text-3xl font-bold text-text-dark dark:text-text-light">jobs dashboard</h1>
+        <span className="text-xs text-text-light/40 dark:text-text-dark/40 font-mono">v{pkg.version}</span>
+      </div>
 
       {flash && (
         <div className={`mb-4 p-3 rounded-lg flex items-center justify-between text-sm font-medium ${

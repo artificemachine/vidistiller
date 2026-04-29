@@ -66,3 +66,4 @@ All notable changes to this project will be documented in this file.
 - 2026-04-29: fix: docker-compose.prod.yml use bind mounts for postgres and redis to preserve data across deploys
 - 2026-04-29: fix: deploy workflow syncs docker-compose.prod.yml from repo before deploying; migrations run by default with opt-out input
 - 2026-04-29: fix: set BACKEND_URL=http://api:8000 in web service so Next.js rewrites proxy correctly to API container
+- 2026-04-29: fix: Dockerfile BACKEND_URL default http://backend:8000 → http://api:8000 so Next.js rewrites proxy to correct container; add version badge to dashboard
