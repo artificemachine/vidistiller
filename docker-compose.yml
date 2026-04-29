@@ -222,7 +222,7 @@ services:
       cpus: '2.0'
 
       healthcheck:
-        test: ["CMD-SHELL", "celery -A app.tasks inspect ping --timeout 5 -d celery@$$HOSTNAME || exit 1"]
+        test: ["CMD-SHELL", "python3 -m celery -A app.tasks inspect ping --timeout 5 -d celery@$$HOSTNAME 2>&1 | grep -q pong || exit 1"]
         interval: 30s
         timeout: 15s
         start_period: 40s
@@ -272,7 +272,7 @@ services:
         - "${FRONTEND_PORT}:3000"   # 3000 is Next.js's default dev server port
 
       healthcheck:
-        test: ["CMD-SHELL", "curl -sf http://localhost:3000 || exit 1"]
+        test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
         interval: 30s
         timeout: 10s
         retries: 3
