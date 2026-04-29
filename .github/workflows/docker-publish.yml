@@ -2,7 +2,6 @@ name: Docker Hub Publish
 
 on:
   push:
-    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
