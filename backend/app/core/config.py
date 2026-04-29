@@ -25,6 +25,17 @@ class DatabaseSettings(BaseSettings):
 
 
 # Configure API keys for external services
+class VLLMFleetSettings(BaseSettings):
+    """URLs for self-hosted vLLM fleet nodes. Set via env vars — never hardcode IPs."""
+
+    vm913_url: str = Field(default="", validation_alias="VLLM_VM913_URL")
+    vm903_url: str = Field(default="", validation_alias="VLLM_VM903_URL")
+    vm901_url: str = Field(default="", validation_alias="VLLM_VM901_URL")
+    vm2900_url: str = Field(default="", validation_alias="VLLM_VM2900_URL")
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
 class OllamaSettings(BaseSettings):
     """Ollama LLM service settings."""
 
@@ -336,6 +347,7 @@ class Settings(BaseSettings):
     email: EmailSettings = EmailSettings()
     password_reset: PasswordResetSettings = PasswordResetSettings()
     storage: StorageSettings = StorageSettings()
+    vllm_fleet: VLLMFleetSettings = VLLMFleetSettings()
     environment: Environment = Environment.DEVELOPMENT
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")

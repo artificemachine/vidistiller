@@ -1,7 +1,7 @@
 """
 LLM Provider Abstraction Layer
 
-Provides a unified interface for different LLM providers (Ollama, OpenAI, Anthropic).
+Provides a unified interface for different LLM providers (Ollama, OpenAI, Anthropic, vLLM).
 Each provider is wrapped in a class that implements the generate() method.
 """
 
@@ -145,11 +145,35 @@ class AnthropicProvider(LLMProvider):
         return response.content[0].text if response.content else ""
 
 
+class VLLMProvider(LLMProvider):
+    """Provider for self-hosted vLLM fleet (OpenAI-compatible API, no auth required)."""
+
+    def __init__(self, base_url: str = "http://localhost:8100"):
+        import os
+        import openai
+        api_base = base_url.rstrip("/")
+        if not api_base.endswith("/v1"):
+            api_base = f"{api_base}/v1"
+        # vLLM sidecar doesn't require auth; openai client requires a non-empty string
+        api_key = os.environ.get("VLLM_API_KEY", "no-auth")
+        self.client = openai.OpenAI(base_url=api_base, api_key=api_key)
+
+    def generate(self, prompt: str, model: str, timeout: int = 120, max_tokens: int = 4096) -> str:
+        response = self.client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=timeout,
+            max_tokens=max_tokens,
+        )
+        return response.choices[0].message.content or ""
+
+
 # Default models per provider
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-4o-mini",
     "ollama": None,  # Falls back to settings.ollama.model_name
+    "vllm": "qwopus-27b",
 }
 
 
@@ -162,9 +186,9 @@ def build_provider(
     Factory function to build an LLM provider.
 
     Args:
-        provider_name: Name of the provider ("anthropic", "openai", "ollama")
-        api_key: API key (required for anthropic/openai, ignored for ollama)
-        ollama_base_url: Base URL for Ollama (only used if provider_name is "ollama")
+        provider_name: Name of the provider ("anthropic", "openai", "ollama", "vllm")
+        api_key: API key (required for anthropic/openai, ignored for ollama/vllm)
+        ollama_base_url: Base URL for Ollama or vLLM sidecar (e.g. http://10.255.150.36:8100)
 
     Returns:
         An instance of the appropriate LLMProvider subclass
@@ -187,8 +211,11 @@ def build_provider(
     elif provider_name == "ollama":
         return OllamaProvider(ollama_base_url)
 
+    elif provider_name == "vllm":
+        return VLLMProvider(ollama_base_url)
+
     else:
         raise ValueError(
             f"Unknown provider: {provider_name}. "
-            "Must be one of: 'anthropic', 'openai', 'ollama'"
+            "Must be one of: 'anthropic', 'openai', 'ollama', 'vllm'"
         )

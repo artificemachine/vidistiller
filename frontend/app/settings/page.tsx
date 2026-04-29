@@ -16,7 +16,17 @@ const DEFAULT_MODELS: Record<string, string> = {
   anthropic: 'claude-sonnet-4-6',
   openai: 'gpt-4o-mini',
   ollama: 'qwen3:8b',
+  vllm: 'qwopus-27b',
 };
+
+interface VLLMFleetNode {
+  id: string;
+  label: string;
+  tier: string;
+  desc: string;
+  model: string;
+  url: string;
+}
 
 const INPUT_CLASS = 'px-3 h-10 border border-border-light dark:border-transparent rounded-lg bg-bg-light dark:bg-input-bg text-text-dark dark:text-text-light text-[13px] focus:outline-none focus:ring-2 focus:ring-primary';
 const LABEL_CLASS = 'block text-[13px] font-semibold text-text-dark dark:text-text-light mb-2';
@@ -87,6 +97,9 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [vllmFleet, setVllmFleet] = useState<VLLMFleetNode[]>([]);
+  const [vllmModelFetching, setVllmModelFetching] = useState(false);
+  const [vllmAvailableModels, setVllmAvailableModels] = useState<string[]>([]);
 
   const [form, setForm] = useState<SettingsForm>({
     llm_provider: user?.llm_provider || 'ollama',
@@ -107,15 +120,40 @@ export default function SettingsPage() {
     const fetchSettings = async () => {
       try {
         setLoading(true);
-        const response = await apiClient.get('/settings/me');
-        const settings = response.data;
+        const [settingsRes, fleetRes] = await Promise.allSettled([
+          apiClient.get('/settings/me'),
+          apiClient.get('/settings/vllm/fleet'),
+        ]);
+
+        const settings = settingsRes.status === 'fulfilled' ? settingsRes.value.data : {};
+        const fleet: VLLMFleetNode[] = fleetRes.status === 'fulfilled' ? (fleetRes.value.data.nodes ?? []) : [];
+        setVllmFleet(fleet);
+
+        const provider = settings.llm_provider || 'ollama';
+        const savedUrl = settings.llm_ollama_url || '';
 
         setForm({
-          llm_provider: settings.llm_provider || 'ollama',
-          llm_model: settings.llm_model || DEFAULT_MODELS['ollama'],
+          llm_provider: provider,
+          llm_model: settings.llm_model || DEFAULT_MODELS[provider] || '',
           llm_api_key: '',
-          llm_ollama_url: settings.llm_ollama_url || '',
+          llm_ollama_url: savedUrl,
         });
+
+        if (settingsRes.status !== 'fulfilled') {
+          setError('Failed to load settings');
+        }
+
+        if (provider === 'vllm' && savedUrl) {
+          setVllmModelFetching(true);
+          try {
+            const res = await apiClient.get('/settings/vllm/models', { params: { base_url: savedUrl } });
+            setVllmAvailableModels(res.data.models ?? []);
+          } catch {
+            // sidecar unreachable — text input still shows saved model name
+          } finally {
+            setVllmModelFetching(false);
+          }
+        }
       } catch (err: any) {
         console.error('Failed to load settings:', err);
         setError('Failed to load settings');
@@ -168,8 +206,8 @@ export default function SettingsPage() {
         llm_model: form.llm_model,
       };
 
-      // Include Ollama URL if provider is Ollama and URL is set
-      if (form.llm_provider === 'ollama' && form.llm_ollama_url.trim()) {
+      // Include base URL for providers that need a custom endpoint
+      if ((form.llm_provider === 'ollama' || form.llm_provider === 'vllm') && form.llm_ollama_url.trim()) {
         payload.llm_ollama_url = form.llm_ollama_url;
       }
 
@@ -374,6 +412,105 @@ export default function SettingsPage() {
                     onModelChange={handleModelChange}
                     onClearApiKey={handleClearApiKey}
                   />
+                )}
+              </div>
+
+              <div className={`rounded-xl p-5 flex flex-col gap-4 bg-card-light dark:bg-card-dark transition-colors ${form.llm_provider === 'vllm' ? 'ring-2 ring-primary' : ''}`}>
+                <label className="flex items-center gap-4 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="llm_provider"
+                    value="vllm"
+                    checked={form.llm_provider === 'vllm'}
+                    onChange={() => handleProviderChange('vllm')}
+                    className="sr-only"
+                  />
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${form.llm_provider === 'vllm' ? 'border-primary' : 'border-text-muted'}`}>
+                    {form.llm_provider === 'vllm' && <div className="w-2.5 h-2.5 rounded-full bg-primary" />}
+                  </div>
+                  <div>
+                    <p className="text-[15px] font-semibold text-text-dark dark:text-text-light">vllm</p>
+                    <p className="text-xs text-text-muted">self-hosted vllm fleet, openai-compatible, no api key required</p>
+                  </div>
+                </label>
+                {form.llm_provider === 'vllm' && (
+                  <>
+                    <div className="flex flex-col gap-2">
+                      <label className={LABEL_CLASS}>fleet node</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {vllmFleet.length === 0 && (
+                          <p className="col-span-2 text-[13px] text-text-muted">no fleet nodes configured</p>
+                        )}
+                        {vllmFleet.map((node) => {
+                          const selected = form.llm_ollama_url === node.url;
+                          return (
+                            <button
+                              key={node.id}
+                              type="button"
+                              onClick={async () => {
+                                setForm((prev) => ({ ...prev, llm_ollama_url: node.url, llm_model: '' }));
+                                setVllmAvailableModels([]);
+                                setVllmModelFetching(true);
+                                try {
+                                  const res = await apiClient.get('/settings/vllm/models', { params: { base_url: node.url } });
+                                  const models: string[] = res.data.models ?? [];
+                                  setVllmAvailableModels(models);
+                                  if (models.length === 1) {
+                                    setForm((prev) => ({ ...prev, llm_model: models[0] }));
+                                  }
+                                } catch {
+                                  // sidecar unreachable — leave model empty
+                                } finally {
+                                  setVllmModelFetching(false);
+                                }
+                              }}
+                              className={`text-left px-3 py-2.5 rounded-lg border transition-colors ${
+                                selected
+                                  ? 'border-primary bg-primary/10 text-text-dark dark:text-text-light'
+                                  : 'border-border-light dark:border-transparent bg-bg-light dark:bg-input-bg text-text-dark dark:text-text-light hover:border-primary/50'
+                              }`}
+                            >
+                              <p className="text-[13px] font-semibold">{node.label}</p>
+                              <p className="text-[11px] text-text-muted">{node.tier}</p>
+                              <p className="text-[11px] text-text-muted">{node.desc}</p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {form.llm_ollama_url && (
+                      <div className="flex flex-col gap-2">
+                        <label className={LABEL_CLASS}>model</label>
+                        {vllmModelFetching ? (
+                          <p className="text-[13px] text-text-muted">fetching from sidecar...</p>
+                        ) : vllmAvailableModels.length > 0 && (
+                          <div className="flex flex-col gap-1">
+                            {vllmAvailableModels.map((m) => (
+                              <button
+                                key={m}
+                                type="button"
+                                onClick={() => setForm((prev) => ({ ...prev, llm_model: m }))}
+                                className={`text-left px-3 py-2 rounded-lg border text-[13px] transition-colors ${
+                                  form.llm_model === m
+                                    ? 'border-primary bg-primary/10 text-text-dark dark:text-text-light'
+                                    : 'border-border-light dark:border-transparent bg-bg-light dark:bg-input-bg text-text-dark dark:text-text-light hover:border-primary/50'
+                                }`}
+                              >
+                                {m}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        <input
+                          type="text"
+                          value={form.llm_model}
+                          onChange={handleModelChange}
+                          placeholder="or type a model name to load on first request"
+                          className={`w-full ${INPUT_CLASS}`}
+                        />
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>

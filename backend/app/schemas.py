@@ -580,8 +580,8 @@ class UserSettingsUpdate(BaseModel):
     """Schema for updating user LLM settings."""
     llm_provider: Optional[str] = Field(
         None,
-        description="LLM provider (anthropic, openai, or ollama)",
-        pattern="^(anthropic|openai|ollama)$"
+        description="LLM provider (anthropic, openai, ollama, or vllm)",
+        pattern="^(anthropic|openai|ollama|vllm)$"
     )
     llm_model: Optional[str] = Field(
         None,
@@ -595,7 +595,7 @@ class UserSettingsUpdate(BaseModel):
     llm_ollama_url: Optional[str] = Field(
         None,
         max_length=512,
-        description="Custom Ollama base URL (only used when provider is ollama)"
+        description="Custom base URL for Ollama or vLLM sidecar (e.g. http://10.255.150.36:8100)"
     )
 
     model_config = ConfigDict(

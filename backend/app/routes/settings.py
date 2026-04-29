@@ -4,9 +4,13 @@ Settings API Routes
 Handles user settings including LLM provider preferences, model selection, and API keys.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from urllib.parse import urlparse
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.routes.auth import get_current_user_from_token
 from app.core.crypto import encrypt_field, decrypt_field
@@ -82,6 +86,50 @@ def update_user_settings(
         llm_ollama_url=current_user.llm_ollama_url,
         has_api_key=bool(current_user.llm_api_key_encrypted),
     )
+
+
+@router.get("/vllm/fleet")
+def get_vllm_fleet(
+    current_user: User = Depends(get_current_user_from_token),
+) -> dict:
+    """
+    Return the configured vLLM fleet nodes from server env vars.
+    Only includes nodes whose URL env var is set.
+    """
+    fleet_cfg = get_settings().vllm_fleet
+    _nodes = [
+        {"id": "vm913",  "label": "VM913",  "tier": "opus-class",   "desc": "4× RTX 3090 · 96 GB · TP=2", "model": "qwopus-27b", "url": fleet_cfg.vm913_url},
+        {"id": "vm903",  "label": "VM903",  "tier": "sonnet-class", "desc": "2× RTX 3090 · 48 GB",              "model": "",           "url": fleet_cfg.vm903_url},
+        {"id": "vm901",  "label": "VM901",  "tier": "haiku-class",  "desc": "2× RTX 3080 · 20 GB",              "model": "",           "url": fleet_cfg.vm901_url},
+        {"id": "vm2900", "label": "VM2900", "tier": "small",        "desc": "RTX 3060 Ti · 8 GB usable",            "model": "",           "url": fleet_cfg.vm2900_url},
+    ]
+    return {"nodes": [n for n in _nodes if n["url"]]}
+
+
+@router.get("/vllm/models")
+def get_vllm_models(
+    base_url: str = Query(..., description="vLLM sidecar base URL, e.g. http://10.255.150.36:8100"),
+    current_user: User = Depends(get_current_user_from_token),
+) -> dict:
+    """
+    Proxy call to a vLLM sidecar to discover which model is currently loaded.
+    Returns {"models": ["model-id", ...]}
+    """
+    parsed = urlparse(base_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Invalid base_url")
+
+    sidecar_url = base_url.rstrip("/") + "/v1/models"
+    try:
+        response = httpx.get(sidecar_url, timeout=5.0)
+        response.raise_for_status()
+        data = response.json()
+        models = [m["id"] for m in data.get("data", [])]
+        return {"models": models}
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Sidecar did not respond within 5 s")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach sidecar: {exc}")
 
 
 @router.delete("/me/api-key", response_model=UserSettingsResponse)
