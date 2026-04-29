@@ -64,3 +64,4 @@ All notable changes to this project will be documented in this file.
 - 2026-04-29: feat: add vLLM fleet provider — VLLMProvider (OpenAI-compatible), fleet node selector UI (VM913/VM903/VM901/VM2900), sidecar model discovery endpoint (GET /settings/vllm/models), custom model override input, on-load model fetch for saved vllm config; bump backend 0.2.2 → 0.3.0, frontend 1.2.0 → 1.3.0
 - 2026-04-29: fix: docker-compose healthchecks — use python3 -m celery for worker, wget for frontend (curl not in image)
 - 2026-04-29: chore: bump version 0.3.0 → 0.3.1
+- 2026-04-29: chore: add docker-compose.prod.yml for server deploys — image tags, production mounts, redis requirepass, python -m uvicorn/celery, pg_isready fallback; update deploy workflow to use prod compose
