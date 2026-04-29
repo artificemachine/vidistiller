@@ -61,6 +61,4 @@ All notable changes to this project will be documented in this file.
 - 2026-04-19: chore: bump version 0.2.1 → 0.2.2, frontend 1.1.0 → 1.2.0 (security: Next.js/React/Sentry upgrade)
 - 2026-04-19: chore: replace alert() with in-page flash banner in dashboard; migrate Pydantic V2 class Config → model_config/ConfigDict across config.py, models.py; replace from_orm with model_validate in snapshots.py; migrate FastAPI on_event("startup") → lifespan handler
 - 2026-04-19: fix: deploy workflow — replace git-pull with docker compose pull (server is not a git repo); fix migration command (service: backend, not api); fix health check endpoint to 10.255.181.20:8000; update production image tags to :latest; fix postgres-data uid from 999 → 70 (postgres:15-alpine uses uid=70)
-- 2026-04-29: feat: add vLLM fleet provider — VLLMProvider (OpenAI-compatible), fleet node selector UI (VM913/VM903/VM901/VM2900), sidecar model discovery endpoint (GET /settings/vllm/models), custom model override input, on-load model fetch for saved vllm config; bump backend 0.2.2 → 0.3.0, frontend 1.2.0 → 1.3.0
-- 2026-04-29: fix: docker-compose healthchecks — use python3 -m celery for worker, wget for frontend (curl not in image)
-- 2026-04-29: chore: bump version 0.3.0 → 0.3.1
+- 2026-04-28: feat: add API key auth for machine-to-machine clients — ApiKeySettings with VIDISTILLER_API_KEY env var, api_key_auth.py dependency (X-API-Key header support with JWT fallback), auto-create semblar service user on first API key call, wire into all /api/jobs routes for Semblar integration

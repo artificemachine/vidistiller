@@ -98,17 +98,18 @@ jobs:
       - name: Pull latest images
         run: |
           cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
-          docker compose pull
+          docker compose -f docker-compose.prod.yml pull
 
       - name: Deploy
         run: |
           cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
-          docker compose up -d --remove-orphans
+          docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
       - name: Run migrations
         run: |
+          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
           sleep 8
-          docker compose -f "${VIDISTILLER_DIR:-/opt/vidistiller}/docker-compose.yml" exec -T backend sh -c 'cd /app && python -m alembic upgrade head'
+          docker compose -f docker-compose.prod.yml exec -T api sh -c 'cd /app && python -m alembic upgrade head'
 
       - name: Health check
         run: |

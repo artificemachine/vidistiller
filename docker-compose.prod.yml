@@ -1,0 +1,211 @@
+# Production compose — uses pre-built Docker Hub images, no source bind mounts.
+# Usage on server: docker compose -f docker-compose.prod.yml --env-file .env up -d
+#
+# Differences from docker-compose.yml (dev):
+#   - image: tags instead of build: directives
+#   - python -m uvicorn / python3 -m celery (binaries not on PATH in --target installs)
+#   - ./app-data bind mount for /data instead of Docker volume
+#   - ./alembic.ini and ./migrations bind mounts (no source code mounts)
+#   - pg_isready fallback user for servers without DB_USER in .env
+#   - VLLM fleet env vars passed through
+
+name: vidistiller
+
+services:
+
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    container_name: tutorial_postgres
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-tutorial_db}
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tutorial_network
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    container_name: tutorial_redis
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tutorial_network
+
+  api:
+    image: newblacc/vidistiller-backend:latest
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    container_name: tutorial_api
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      OLLAMA_URL: ${OLLAMA_URL}
+      OLLAMA_MODEL: ${OLLAMA_MODEL}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      API_HOST: 0.0.0.0
+      API_PORT: ${API_PORT:-8000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-[]}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENABLED: ${SENTRY_ENABLED:-false}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+      SENTRY_ENVIRONMENT: ${ENVIRONMENT:-production}
+      DATA_DIR: /data
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY}
+      VLLM_VM913_URL: ${VLLM_VM913_URL:-}
+      VLLM_VM903_URL: ${VLLM_VM903_URL:-}
+      VLLM_VM901_URL: ${VLLM_VM901_URL:-}
+      VLLM_VM2900_URL: ${VLLM_VM2900_URL:-}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app-data:/data
+      - ./alembic.ini:/app/alembic.ini
+      - ./migrations:/app/migrations
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tutorial_network
+
+  celery_worker:
+    image: newblacc/vidistiller-backend:latest
+    command: python3 -m celery -A app.tasks worker --loglevel=${LOG_LEVEL:-info}
+    container_name: tutorial_celery_worker
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      OLLAMA_URL: ${OLLAMA_URL}
+      OLLAMA_MODEL: ${OLLAMA_MODEL}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENABLED: ${SENTRY_ENABLED:-false}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+      SENTRY_ENVIRONMENT: ${ENVIRONMENT:-production}
+      DATA_DIR: /data
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY}
+      VLLM_VM913_URL: ${VLLM_VM913_URL:-}
+      VLLM_VM903_URL: ${VLLM_VM903_URL:-}
+      VLLM_VM901_URL: ${VLLM_VM901_URL:-}
+      VLLM_VM2900_URL: ${VLLM_VM2900_URL:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    mem_limit: 4g
+    cpus: '2.0'
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./app-data:/data
+      - ./alembic.ini:/app/alembic.ini
+      - ./migrations:/app/migrations
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -m celery -A app.tasks inspect ping --timeout 5 -d celery@$$HOSTNAME 2>&1 | grep -q pong || exit 1"]
+      interval: 30s
+      timeout: 15s
+      start_period: 40s
+      retries: 3
+    networks:
+      - tutorial_network
+
+  web:
+    image: newblacc/vidistiller-frontend:latest
+    container_name: tutorial_web
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    environment:
+      NODE_ENV: ${ENVIRONMENT:-production}
+      NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - tutorial_network
+
+  pgadmin:
+    image: dpage/pgadmin4:8.14
+    restart: unless-stopped
+    container_name: tutorial_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+    ports:
+      - "127.0.0.1:${PGADMIN_PORT:-5050}:80"
+    depends_on:
+      - postgres
+    networks:
+      - tutorial_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  tutorial_network:
+    driver: bridge

@@ -51,7 +51,7 @@ services:
       healthcheck:
         # "test:" the command Docker runs inside the container to check health.
         # pg_isready is a PostgreSQL utility that returns 0 (success) when the DB accepts connections.
-        test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+        test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
         # "interval:" how often Docker runs the health check (every 10 seconds).
         interval: 10s
         # "timeout:" if the check command doesn't respond within this time, it counts as a failure.
@@ -198,7 +198,7 @@ services:
 
       # "command:" overrides the default CMD in the Dockerfile.
       # Instead of starting the FastAPI server, this container runs a Celery worker process.
-      command: celery -A app.tasks worker --loglevel=${LOG_LEVEL:-info}
+      command: python3 -m celery -A app.tasks worker --loglevel=${LOG_LEVEL:-info}
 
       environment:
         DATABASE_URL: ${DATABASE_URL}
