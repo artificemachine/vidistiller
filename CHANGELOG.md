@@ -88,3 +88,4 @@ All notable changes to this project will be documented in this file.
 ## v0.4.1 — 2026-05-09
 
 - fix(frontend): add Next.js rewrite for `/static/:path*` so snapshot and slide thumbnails load through the frontend origin (was 404 because only `/api` was rewritten)
+- 2026-05-09: chore(ansible): weekly docker-image-prune systemd timer (Sun 03:30 UTC, until=168h) — prevents prod VM disk from filling with old image layers
