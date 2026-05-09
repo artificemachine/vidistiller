@@ -88,3 +88,44 @@
     path: /etc/fstab
     line: "/swapfile none swap sw 0 0"
     state: present
+
+# Weekly prune of dangling Docker images. Without this the VM disk fills up
+# (each new release leaves behind ~2 GB of old layers); we hit ENOSPC during
+# `docker compose pull` on 2026-05-09.
+- name: Install docker-image-prune systemd service
+  copy:
+    dest: /etc/systemd/system/docker-image-prune.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Prune unused Docker images older than 7 days
+      After=docker.service
+      Requires=docker.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/bin/docker image prune -af --filter "until=168h"
+
+- name: Install docker-image-prune systemd timer
+  copy:
+    dest: /etc/systemd/system/docker-image-prune.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Weekly Docker image prune
+
+      [Timer]
+      OnCalendar=Sun 03:30
+      Persistent=true
+      RandomizedDelaySec=30m
+
+      [Install]
+      WantedBy=timers.target
+  notify: Reload systemd
+
+- name: Enable docker-image-prune timer
+  systemd:
+    name: docker-image-prune.timer
+    enabled: true
+    state: started
+    daemon_reload: true
