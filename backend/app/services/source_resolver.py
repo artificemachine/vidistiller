@@ -50,7 +50,7 @@ _DIRECT_EXTENSIONS = re.compile(
 
 
 def _url_hash(url: str) -> str:
-    return hashlib.md5(url.encode()).hexdigest()[:16]
+    return hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()[:16]
 
 
 class VideoSourceResolver:

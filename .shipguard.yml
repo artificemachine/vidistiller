@@ -27,3 +27,10 @@ disable_rules:
   - JS-006
   # PY-012: NamedTempFile delete=False — in test/utility code with manual cleanup
   - PY-012
+  # PY-007: f-string SQL injection rule in shipguard 0.4.0 matches SQL keyword
+  # substrings ("create", "delete", etc.) inside docstrings, Pydantic
+  # Field(description=...), SQLAlchemy relationship() declarations, and
+  # @patch(create=True). All 53 reported findings audited 2026-05-09 were
+  # false positives; the codebase uses SQLAlchemy ORM end-to-end with no raw
+  # f-string SQL. Re-enable when the rule is corrected upstream.
+  - PY-007

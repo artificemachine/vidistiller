@@ -167,3 +167,7 @@ Dockerfile.backend
 
 # TypeScript incremental build artifact
 frontend/tsconfig.tsbuildinfo
+
+# Additional secret formats
+*.p12
+secrets.json
