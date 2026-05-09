@@ -84,3 +84,7 @@ All notable changes to this project will be documented in this file.
 - chore(security): disable PY-007 (53 audited shipguard 0.4.0 false positives), npm audit fix (axios + fast-uri), add `*.p12`/`secrets.json` to gitignore, mark md5 url-cache hash `usedforsecurity=False`
 - docs: rename LXC_DEPLOYMENT → VM_DEPLOYMENT; update infra references after prod migrated to a Proxmox VM
 - 2026-05-09: fix(frontend): add Next.js rewrite for /static/:path* → backend; snapshot and slide images now load through the frontend origin (was 404 because only /api was rewritten)
+
+## v0.4.1 — 2026-05-09
+
+- fix(frontend): add Next.js rewrite for `/static/:path*` so snapshot and slide thumbnails load through the frontend origin (was 404 because only `/api` was rewritten)
