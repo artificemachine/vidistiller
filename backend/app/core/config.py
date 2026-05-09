@@ -275,6 +275,22 @@ class ApiKeySettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
+class VLLMFleetSettings(BaseSettings):
+    """vLLM sidecar URLs for the on-prem GPU fleet.
+
+    Each VM runs a vLLM-manager sidecar on port 8100 that proxies to vLLM on 8000
+    and exposes /v1/models, /load, /v1/chat/completions. URLs are read from env
+    so the fleet can be reconfigured without code changes.
+    """
+
+    vm913_url: str = Field(default="", validation_alias="VLLM_VM913_URL")
+    vm903_url: str = Field(default="", validation_alias="VLLM_VM903_URL")
+    vm901_url: str = Field(default="", validation_alias="VLLM_VM901_URL")
+    vm2900_url: str = Field(default="", validation_alias="VLLM_VM2900_URL")
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
 class StorageSettings(BaseSettings):
     """File storage and upload configuration."""
 
@@ -345,6 +361,7 @@ class Settings(BaseSettings):
     password_reset: PasswordResetSettings = PasswordResetSettings()
     storage: StorageSettings = StorageSettings()
     api_key: ApiKeySettings = ApiKeySettings()
+    vllm_fleet: VLLMFleetSettings = VLLMFleetSettings()
     environment: Environment = Environment.DEVELOPMENT
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")

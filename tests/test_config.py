@@ -2,6 +2,7 @@
 
 import pytest
 from pydantic import SecretStr, ValidationError
+from app.core.config import ApiKeySettings
 
 from app.core.config import JWTSettings, CorsSettings
 from app.exceptions import (
@@ -95,3 +96,51 @@ class TestExceptionClassHierarchy:
         exc = ResourceNotFoundException("Job")
         assert "Job not found" in exc.message
         assert exc.code == "NOT_FOUND"
+
+
+class TestApiKeySettings:
+    def test_field_exists(self):
+        assert hasattr(ApiKeySettings(), "vidistiller_api_key")
+
+    def test_defaults_to_empty_string(self):
+        s = ApiKeySettings()
+        assert s.vidistiller_api_key == ""
+
+    def test_accepts_value_from_env(self, monkeypatch):
+        monkeypatch.setenv("VIDISTILLER_API_KEY", "test-secret-123")
+        s = ApiKeySettings()
+        assert s.vidistiller_api_key == "test-secret-123"
+
+
+# ===========================================================================
+# VLLM Fleet Settings — reads VLLM_VM{913,903,901,2900}_URL from env
+# ===========================================================================
+
+class TestVLLMFleetSettings:
+    def test_defaults_empty(self, monkeypatch):
+        for var in ("VLLM_VM913_URL", "VLLM_VM903_URL", "VLLM_VM901_URL", "VLLM_VM2900_URL"):
+            monkeypatch.delenv(var, raising=False)
+        from app.core.config import VLLMFleetSettings
+        s = VLLMFleetSettings()
+        assert s.vm913_url == ""
+        assert s.vm903_url == ""
+        assert s.vm901_url == ""
+        assert s.vm2900_url == ""
+
+    def test_reads_from_env(self, monkeypatch):
+        monkeypatch.setenv("VLLM_VM913_URL", "http://10.255.150.36:8100")
+        monkeypatch.setenv("VLLM_VM903_URL", "http://10.255.150.16:8100")
+        monkeypatch.setenv("VLLM_VM901_URL", "http://10.255.150.10:8100")
+        monkeypatch.setenv("VLLM_VM2900_URL", "http://10.255.150.20:8100")
+        from app.core.config import VLLMFleetSettings
+        s = VLLMFleetSettings()
+        assert s.vm913_url == "http://10.255.150.36:8100"
+        assert s.vm903_url == "http://10.255.150.16:8100"
+        assert s.vm901_url == "http://10.255.150.10:8100"
+        assert s.vm2900_url == "http://10.255.150.20:8100"
+
+    def test_settings_exposes_vllm_fleet(self):
+        from app.core.config import Settings
+        s = Settings()
+        assert hasattr(s, "vllm_fleet")
+        assert hasattr(s.vllm_fleet, "vm913_url")
