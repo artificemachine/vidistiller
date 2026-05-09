@@ -1,6 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
+import { loadResume, saveResume, clearResume, pruneOldEntries } from '@/lib/videoResume';
+
+const RESUME_SAVE_INTERVAL_MS = 5000;
+const RESUME_MIN_OFFSET_S = 5;
+const RESUME_END_BUFFER_S = 5;
+const RESUME_MAX_AGE_MS = 90 * 24 * 3600 * 1000;
 
 interface YouTubePlayerProps {
   youtubeUrl: string;
@@ -38,6 +44,7 @@ const YouTubePlayer = forwardRef<YouTubePlayerHandle, YouTubePlayerProps>(
   function YouTubePlayer({ youtubeUrl, onSnapshot, disabled, zoom = 100 }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const playerRef = useRef<any>(null);
+    const saveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const [isReady, setIsReady] = useState(false);
     const [capturing, setCapturing] = useState(false);
 
@@ -57,6 +64,68 @@ const YouTubePlayer = forwardRef<YouTubePlayerHandle, YouTubePlayerProps>(
       },
     }), [isReady]);
 
+    const stopProgressSaver = useCallback(() => {
+      if (saveIntervalRef.current) {
+        clearInterval(saveIntervalRef.current);
+        saveIntervalRef.current = null;
+      }
+    }, []);
+
+    const persistCurrentTime = useCallback(() => {
+      const player = playerRef.current;
+      if (!player || !videoId) return;
+      try {
+        const t = player.getCurrentTime?.() ?? 0;
+        const duration = player.getDuration?.() ?? 0;
+        if (duration > 0 && t >= duration - RESUME_END_BUFFER_S) {
+          clearResume(videoId);
+          return;
+        }
+        if (t >= RESUME_MIN_OFFSET_S) {
+          saveResume(videoId, t);
+        }
+      } catch {
+        // player not ready or destroyed — ignore
+      }
+    }, [videoId]);
+
+    const handleStateChange = useCallback(
+      (event: { data: number }) => {
+        if (!window.YT || !videoId) return;
+        const state = event.data;
+        if (state === window.YT.PlayerState.PLAYING) {
+          stopProgressSaver();
+          saveIntervalRef.current = setInterval(persistCurrentTime, RESUME_SAVE_INTERVAL_MS);
+        } else if (
+          state === window.YT.PlayerState.PAUSED ||
+          state === window.YT.PlayerState.BUFFERING
+        ) {
+          stopProgressSaver();
+          persistCurrentTime();
+        } else if (state === window.YT.PlayerState.ENDED) {
+          stopProgressSaver();
+          clearResume(videoId);
+        }
+      },
+      [videoId, persistCurrentTime, stopProgressSaver]
+    );
+
+    const handleReady = useCallback(() => {
+      setIsReady(true);
+      const player = playerRef.current;
+      if (!player || !videoId) return;
+      const saved = loadResume(videoId);
+      if (saved === null) return;
+      try {
+        const duration = player.getDuration?.() ?? 0;
+        if (saved >= RESUME_MIN_OFFSET_S && (duration === 0 || saved < duration - RESUME_END_BUFFER_S)) {
+          player.seekTo(saved, true);
+        }
+      } catch {
+        // ignore
+      }
+    }, [videoId]);
+
     const initPlayer = useCallback(() => {
       if (!videoId || !containerRef.current || playerRef.current) return;
 
@@ -70,10 +139,15 @@ const YouTubePlayer = forwardRef<YouTubePlayerHandle, YouTubePlayerProps>(
           rel: 0,
         },
         events: {
-          onReady: () => setIsReady(true),
+          onReady: handleReady,
+          onStateChange: handleStateChange,
         },
       });
-    }, [videoId]);
+    }, [videoId, handleReady, handleStateChange]);
+
+    useEffect(() => {
+      pruneOldEntries(RESUME_MAX_AGE_MS);
+    }, []);
 
     useEffect(() => {
       if (window.YT && window.YT.Player) {
@@ -99,6 +173,16 @@ const YouTubePlayer = forwardRef<YouTubePlayerHandle, YouTubePlayerProps>(
         window.onYouTubeIframeAPIReady = undefined;
       };
     }, [initPlayer]);
+
+    useEffect(() => {
+      const onUnload = () => persistCurrentTime();
+      window.addEventListener('beforeunload', onUnload);
+      return () => {
+        window.removeEventListener('beforeunload', onUnload);
+        stopProgressSaver();
+        persistCurrentTime();
+      };
+    }, [persistCurrentTime, stopProgressSaver]);
 
     const handleSnapshot = async () => {
       if (!playerRef.current || !isReady) return;

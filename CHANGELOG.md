@@ -71,3 +71,4 @@ All notable changes to this project will be documented in this file.
 - 2026-05-07: fix: pass VIDISTILLER_API_KEY env var into api container in docker-compose.prod.yml
 - 2026-05-09: fix: deploy workflow chowns app-data to 1001:1001 before compose up so non-root container can write videos/snapshots/slides
 - 2026-05-09: feat: wire vLLM fleet config (VLLMFleetSettings); /settings/vllm/fleet now returns VM913/VM903/VM901/VM2900 nodes from VLLM_VM*_URL env vars
+- 2026-05-09: feat(frontend): YouTubePlayer remembers last playback position (localStorage, keyed by videoId, 90-day TTL); resumes within READY handler
