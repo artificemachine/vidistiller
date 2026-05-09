@@ -160,6 +160,12 @@ jobs:
           cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
           docker compose -f docker-compose.prod.yml pull
 
+      - name: Ensure app-data ownership matches container uid
+        run: |
+          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
+          sudo mkdir -p app-data/videos app-data/snapshots app-data/slides
+          sudo chown -R 1001:1001 app-data
+
       - name: Deploy
         run: |
           cd "${VIDISTILLER_DIR:-/opt/vidistiller}"

@@ -69,3 +69,5 @@ All notable changes to this project will be documented in this file.
 - 2026-04-29: fix: Dockerfile BACKEND_URL default http://backend:8000 → http://api:8000 so Next.js rewrites proxy to correct container; add version badge to dashboard
 - 2026-04-29: fix: absorb Docker Hub publish into deploy.yml as prerequisite job; deploy-production now always pulls fresh image before deploying
 - 2026-05-07: fix: pass VIDISTILLER_API_KEY env var into api container in docker-compose.prod.yml
+- 2026-05-09: fix: deploy workflow chowns app-data to 1001:1001 before compose up so non-root container can write videos/snapshots/slides
+- 2026-05-09: feat: wire vLLM fleet config (VLLMFleetSettings); /settings/vllm/fleet now returns VM913/VM903/VM901/VM2900 nodes from VLLM_VM*_URL env vars
