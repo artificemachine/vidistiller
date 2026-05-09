@@ -74,3 +74,12 @@ All notable changes to this project will be documented in this file.
 - 2026-05-09: feat(frontend): YouTubePlayer remembers last playback position (localStorage, keyed by videoId, 90-day TTL); resumes within READY handler
 - 2026-05-09: chore(security): disable PY-007 (53 audited FPs from buggy shipguard 0.4.0 rule); add *.p12 + secrets.json to .gitignore; mark md5 url-cache hash usedforsecurity=False; npm audit fix (axios + fast-uri highs)
 - 2026-05-09: docs: rename LXC_DEPLOYMENT.md → VM_DEPLOYMENT.md and update infra references; prod migrated from Proxmox LXC to Proxmox VM 900
+
+## v0.4.0 — 2026-05-09
+
+- feat(player): video playback resume (localStorage, keyed by videoId, 90-day TTL)
+- feat(config): wire vLLM fleet settings (`VLLM_VM*_URL`); `/settings/vllm/fleet` now returns four GPU sidecar nodes
+- fix(deploy): chown `app-data` to 1001:1001 before compose up — fixes Permission denied for non-root backend (uid 1001) on bind-mounted host dir
+- fix(api): pass `VIDISTILLER_API_KEY` env var into api container in docker-compose.prod.yml
+- chore(security): disable PY-007 (53 audited shipguard 0.4.0 false positives), npm audit fix (axios + fast-uri), add `*.p12`/`secrets.json` to gitignore, mark md5 url-cache hash `usedforsecurity=False`
+- docs: rename LXC_DEPLOYMENT → VM_DEPLOYMENT; update infra references after prod migrated to a Proxmox VM
