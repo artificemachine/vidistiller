@@ -1,7 +1,7 @@
 # Provision vidistiller-prod on node03-antares
 # Provider: bpg/proxmox ~> 0.74 (same as synod)
 # Clone from Ubuntu 24.04 cloud-init template (VM 9001 on node03-antares)
-# IP: 10.255.181.20 — same subnet as current LXC (10.255.181.10), direct internet
+# IP: 10.255.181.20 (deprecated LXC at 10.255.181.10 lives on the same subnet)
 
 terraform {
   required_version = ">= 1.5.0"

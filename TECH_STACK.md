@@ -119,10 +119,10 @@ This project uses a modern microservices architecture with containerized service
 - **Telmate/proxmox Provider 3.0** - Proxmox provider for Terraform
 
 ### Virtualization
-- **Proxmox VE** - Virtualization platform
-- **LXC Containers** - Linux container technology
-  - **Nesting enabled** - For Docker-in-LXC support
-  - **Keyctl enabled** - For advanced Docker operations
+- **Proxmox VE** — virtualization platform
+- **VM (KVM)** — production runs as Proxmox VM 900 on `node03-antares`
+  (Ubuntu 24.04 cloud-init template). Prod was previously hosted in an LXC and
+  has since been migrated to a VM.
 
 ### Database Administration
 - **pgAdmin 4** - PostgreSQL web interface (latest)
@@ -199,9 +199,9 @@ This project uses a modern microservices architecture with containerized service
 - **redis:7-alpine** - Cache/broker container
 - **dpage/pgadmin4:latest** - Database admin container
 
-### LXC Container
-- **Ubuntu 22.04** - Base OS for Proxmox LXC container
-- **Alpine Linux** - Base for most Docker images (smaller footprint)
+### Host OS
+- **Ubuntu 24.04 LTS** — base OS for the production Proxmox VM
+- **Alpine Linux** — base for most Docker images (smaller footprint)
 
 ---
 
@@ -272,7 +272,7 @@ This project uses a modern microservices architecture with containerized service
 ### Infrastructure
 - Docker & Docker Compose
 - Terraform
-- Proxmox VE & LXC
+- Proxmox VE (KVM/VM)
 
 ### AI/ML
 - OpenAI API

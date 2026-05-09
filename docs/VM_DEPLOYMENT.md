@@ -1,16 +1,26 @@
-# LXC Container Deployment Guide
+# Production VM Deployment Guide
 
 ## Target Environment
-- **Host:** vidistiller-lxc
-- **IP Address:** `<OLLAMA_IP>`
-- **Container Type:** LXC (Linux Container)
-- **Application:** YouTube Tutorial to Documentation Converter
+- **Host:** `vidistiller` (SSH alias) — Proxmox VM 900 on `node03-antares`
+- **IP Address:** `10.255.181.20`
+- **Type:** Proxmox VM (cloud-init Ubuntu 24.04 template)
+- **Application:** Vidistiller — YouTube to Documentation engine
+
+> **History:** prod was previously hosted in an LXC at `10.255.181.10` and was
+> migrated to this VM. See `deploy/ansible/migrate-db.yml` for the DB migration
+> playbook used during the cut-over. The `vidistiller-lxc` host alias still
+> resolves but is no longer the deploy target.
+
+The canonical provisioning flow is `deploy/terraform/vidistiller.tf` (clones the
+Ubuntu 24.04 cloud-init template) followed by the `deploy/ansible` roles. This
+document is the manual fallback — useful for understanding the stack or
+recovering by hand.
 
 ---
 
 ## Table of Contents
 1. [Prerequisites](#prerequisites)
-2. [LXC Container Setup](#lxc-container-setup)
+2. [VM Provisioning](#vm-provisioning)
 3. [System Dependencies](#system-dependencies)
 4. [Application Deployment](#application-deployment)
 5. [Service Configuration](#service-configuration)
@@ -23,16 +33,16 @@
 
 ## Prerequisites
 
-### On Proxmox/LXC Host
-- LXC container support enabled
-- Sufficient resources allocated:
+### On the Proxmox host
+- An Ubuntu 24.04 cloud-init template (referenced by `template_vm_id` in `deploy/terraform/vidistiller.tf`)
+- Sufficient resources allocated to the VM:
   - **CPU:** Minimum 4 cores (8+ recommended for video processing)
-  - **RAM:** Minimum 8GB (16GB+ recommended)
-  - **Disk:** Minimum 50GB (100GB+ recommended for video storage)
-  - **Network:** Bridge network configured
+  - **RAM:** Minimum 8 GB (16 GB+ recommended)
+  - **Disk:** Minimum 50 GB (100 GB+ recommended for video storage)
+  - **Network:** Bridge network on the lab subnet
 
-### Required Software Versions
-- Ubuntu 22.04 LTS (recommended for LXC)
+### Required software versions
+- Ubuntu 24.04 LTS (cloud-init image)
 - Docker 24.0+
 - Docker Compose 2.20+
 - Git 2.0+
@@ -41,51 +51,50 @@
 
 ---
 
-## LXC Container Setup
+## VM Provisioning
 
-### 1. Create LXC Container (on Proxmox host)
+### Preferred: Terraform
 
 ```bash
-# Create Ubuntu 22.04 LXC container
-pct create <CTID> local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst \
-  --hostname vidistiller-lxc \
-  --cores 8 \
-  --memory 16384 \
-  --swap 4096 \
-  --storage local-lvm \
-  --rootfs local-lvm:50 \
-  --net0 name=eth0,bridge=vmbr0,ip=<OLLAMA_IP>/24,gw=<YOUR_GATEWAY_IP> \
-  --nameserver 8.8.8.8 \
-  --features nesting=1,keyctl=1 \
-  --unprivileged 1
-
-# Start container
-pct start <CTID>
-
-# Enter container
-pct enter <CTID>
+cd deploy/terraform
+terraform init
+terraform apply
 ```
 
-**Important LXC Features:**
-- `nesting=1` - **Required for Docker to work inside LXC**
-- `keyctl=1` - Enables keyctl syscall for container management
-- `unprivileged=1` - Security best practice
+See `deploy/terraform/vidistiller.tf` for variables (`vm_id`, `vm_cores`,
+`vm_memory`, `vm_disk_size`, `vm_storage`).
 
-### 2. Initial Container Configuration
+### Manual: Proxmox CLI
 
 ```bash
+# Clone the Ubuntu 24.04 cloud-init template (replace <TPL_ID> and <VMID>)
+qm clone <TPL_ID> <VMID> --name vidistiller-prod --full
+
+# Resize disk and set resources
+qm resize <VMID> scsi0 +50G
+qm set <VMID> --cores 8 --memory 16384 --net0 virtio,bridge=vmbr0
+
+# Configure cloud-init (user, ssh key, static IP)
+qm set <VMID> --ciuser sysadmin --sshkeys ~/.ssh/authorized_keys
+qm set <VMID> --ipconfig0 ip=10.255.181.20/24,gw=<YOUR_GATEWAY_IP>
+
+# Start
+qm start <VMID>
+```
+
+### Initial VM configuration
+
+```bash
+ssh sysadmin@10.255.181.20
+
 # Update system
-apt update && apt upgrade -y
+sudo apt update && sudo apt upgrade -y
 
 # Set timezone
-timedatectl set-timezone America/New_York  # or your timezone
-
-# Create application user
-useradd -m -s /bin/bash appuser
-usermod -aG sudo appuser
+sudo timedatectl set-timezone America/New_York  # or your timezone
 
 # Set hostname
-hostnamectl set-hostname vidistiller-lxc
+sudo hostnamectl set-hostname vidistiller-prod
 ```
 
 ---
@@ -235,7 +244,7 @@ DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
 REDIS_PORT=6379
 REDIS_URL=redis://redis:6379/0
 
-# Ollama Configuration (host.docker.internal for LXC)
+# Ollama Configuration (host.docker.internal resolves to the VM host)
 OLLAMA_PORT=11434
 OLLAMA_BASE_URL=http://host.docker.internal:11434
 
@@ -282,9 +291,10 @@ openssl rand -base64 24
 
 **Update your `.env` file with these generated values.**
 
-### 4. Docker Network Configuration for LXC
+### 4. Docker network configuration
 
-LXC containers need special Docker network configuration to access host services:
+To let containers reach services running directly on the VM host, add a
+`host-gateway` mapping:
 
 ```bash
 # Edit docker-compose.yml to add host.docker.internal mapping
@@ -924,7 +934,7 @@ docker compose down && docker compose up -d
 
 Use this checklist when deploying:
 
-- [ ] LXC container created with nesting=1 and keyctl=1
+- [ ] VM provisioned (terraform apply, or `qm clone` from cloud-init template)
 - [ ] System updated (`apt update && apt upgrade`)
 - [ ] Docker and Docker Compose installed
 - [ ] Ollama installed and Mistral model pulled
@@ -999,6 +1009,6 @@ docker system prune -a
 
 ---
 
-**Deployment Guide Version:** 1.0
-**Last Updated:** February 12, 2026
-**Target Container:** vidistiller-lxc
+**Deployment Guide Version:** 2.0
+**Last Updated:** 2026-05-09 (renamed from LXC_DEPLOYMENT.md after prod migrated to a VM)
+**Target host:** `vidistiller` (Proxmox VM 900 at 10.255.181.20)

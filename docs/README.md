@@ -9,7 +9,7 @@
 
 ## Supplementary Docs
 - [API_DOCUMENTATION.md](API_DOCUMENTATION.md): API overview and endpoint grouping
-- [LXC_DEPLOYMENT.md](LXC_DEPLOYMENT.md): LXC-specific deployment notes
+- [VM_DEPLOYMENT.md](VM_DEPLOYMENT.md): production VM deployment guide (Proxmox VM 900). Prod was previously hosted in an LXC; that target is deprecated.
 - [README.my.notes.md](README.my.notes.md): personal/internal notes
 
 ## Maintenance Rule

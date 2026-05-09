@@ -1,5 +1,10 @@
 # =============================================================================
-# Variables for Proxmox LXC Container
+# DEPRECATED — variables for the old LXC-based deployment.
+#
+# Prod migrated from LXC to a Proxmox VM. The active provisioning lives in
+# `deploy/terraform/vidistiller.tf` (clones an Ubuntu 24.04 cloud-init template
+# into VM 900). This file is kept only so historical tfvars don't break;
+# nothing references it.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
