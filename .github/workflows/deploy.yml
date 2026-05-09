@@ -119,9 +119,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── 5. Deploy to production (self-hosted runner on LXC) ────────────────────
+  # ── 5. Deploy to production (self-hosted runner on the prod VM) ───────────
   #
-  # Runs directly on the LXC — no SSH tunnel needed. The runner has direct
+  # Runs directly on the prod VM — no SSH tunnel needed. The runner has direct
   # access to Docker and the project directory.
   deploy-production:
     name: Deploy → production

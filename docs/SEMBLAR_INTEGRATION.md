@@ -14,7 +14,7 @@ Semblar VM (10.255.181.30)
        │
        │  HTTP to vidistiller API
        ▼
-vidistiller API (LXC on Proxmox cluster)
+vidistiller API (Proxmox VM 900 on the lab cluster)
        │
        │  POST /api/jobs  {"video_url": "..."}
        │  GET  /api/jobs/{job_id}/status   (poll)
@@ -85,7 +85,7 @@ The API key middleware returns this user when `X-API-Key` matches.
 
 N/A for machine-to-machine. Semblar calls vidistiller directly via HTTP from Python -- no browser, no CORS. **No change needed** for this. The CORS middleware only applies to browser-based requests.
 
-**Verify**: Semblar VM (10.255.181.30) can reach vidistiller API port (8000) on the LAN. Both are on the same Proxmox cluster. The vidistiller LXC and Semblar VM should be on reachable subnets.
+**Verify**: Semblar VM (10.255.181.30) can reach vidistiller API port (8000) on the LAN. Both are Proxmox VMs on the same cluster and should sit on reachable subnets.
 
 ### 4. Transcript Endpoint (nice-to-have, not required)
 
