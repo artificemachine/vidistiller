@@ -95,3 +95,7 @@ All notable changes to this project will be documented in this file.
 
 - fix(frontend): extend playback resume to generic VideoPlayer — saves every 5 s to localStorage, restores on ready, mirrors YouTubePlayer behavior (PR #37)
 - 2026-05-10: fix(frontend): guard VideoPlayer resume restore with hasRestoredRef — prevents onReady loop when ReactPlayer re-fires on seek
+
+## v0.4.3 — 2026-05-10
+
+- fix(frontend): prevent resume seek loop in VideoPlayer — hasRestoredRef ensures position is restored only once per mount (PR #39)
