@@ -100,3 +100,7 @@ All notable changes to this project will be documented in this file.
 
 - fix(frontend): prevent resume seek loop in VideoPlayer — hasRestoredRef ensures position is restored only once per mount (PR #39)
 - 2026-05-10: feat(frontend): show app version below title in navbar (v{pkg.version} from package.json)
+
+## v0.5.0 — 2026-05-10
+
+- feat(frontend): show app version below title in navbar on every page (PR #41)
