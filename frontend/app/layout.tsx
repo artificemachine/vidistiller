@@ -7,6 +7,7 @@ import ThemePicker from '@/components/ThemePicker';
 import JobStatusProvider from '@/components/JobStatusProvider';
 import AuthProvider from '@/components/AuthProvider';
 import NavAuthButton from '@/components/NavAuthButton';
+import pkg from '@/package.json';
 
 export const metadata: Metadata = {
   title: 'Vidistiller',
@@ -45,9 +46,14 @@ export default function RootLayout({
               <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex justify-between h-20">
                   <div className="flex items-center">
-                    <h1 className="text-2xl font-bold text-text-dark dark:text-text-light">
-                      vidistiller
-                    </h1>
+                    <div className="flex flex-col">
+                      <h1 className="text-2xl font-bold text-text-dark dark:text-text-light leading-tight">
+                        vidistiller
+                      </h1>
+                      <span className="text-xs font-mono text-text-dark/30 dark:text-text-light/30 leading-none">
+                        v{pkg.version}
+                      </span>
+                    </div>
                   </div>
                   <div className="flex items-center space-x-4">
                     <Link href="/" className="text-text-dark/70 hover:text-text-dark dark:text-text-light/70 dark:hover:text-text-light">
