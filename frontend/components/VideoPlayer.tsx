@@ -28,6 +28,7 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const [isReady, setIsReady] = useState(false);
     const [capturing, setCapturing] = useState(false);
     const saveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const hasRestoredRef = useRef(false);
 
     useImperativeHandle(ref, () => ({
       seekTo: (seconds: number) => {
@@ -63,10 +64,12 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
 
     const handleReady = useCallback(() => {
       setIsReady(true);
+      if (hasRestoredRef.current) return;
       const el = videoRef.current;
       if (!el || !videoUrl) return;
       const saved = loadResume(videoUrl);
       if (saved === null) return;
+      hasRestoredRef.current = true;
       setTimeout(() => {
         if (!el) return;
         const duration = el.duration;
