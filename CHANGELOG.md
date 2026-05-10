@@ -90,3 +90,7 @@ All notable changes to this project will be documented in this file.
 - fix(frontend): add Next.js rewrite for `/static/:path*` so snapshot and slide thumbnails load through the frontend origin (was 404 because only `/api` was rewritten)
 - 2026-05-09: chore(ansible): weekly docker-image-prune systemd timer (Sun 03:30 UTC, until=168h) — prevents prod VM disk from filling with old image layers
 - 2026-05-10: fix(frontend): extend playback resume to generic VideoPlayer — saves every 5 s, restores on ready, mirrors YouTubePlayer behavior
+
+## v0.4.2 — 2026-05-10
+
+- fix(frontend): extend playback resume to generic VideoPlayer — saves every 5 s to localStorage, restores on ready, mirrors YouTubePlayer behavior (PR #37)
