@@ -104,3 +104,7 @@ All notable changes to this project will be documented in this file.
 ## v0.5.0 — 2026-05-10
 
 - feat(frontend): show app version below title in navbar on every page (PR #41)
+
+## Unreleased
+
+- security(backend): bump pillow constraint to >=12.2.0 to cover GHSA-pwv6-vv43-88gr (OOB write via invalid PSD tile extents)
