@@ -123,4 +123,4 @@ def test_build_provider_unknown_raises():
 
 def test_default_models_includes_vllm():
     assert "vllm" in DEFAULT_MODELS
-    assert DEFAULT_MODELS["vllm"] == "qwopus-27b"
+    assert DEFAULT_MODELS["vllm"] == "gemma4-31b"
