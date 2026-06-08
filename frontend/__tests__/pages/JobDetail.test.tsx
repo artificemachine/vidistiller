@@ -224,7 +224,7 @@ describe('JobDetail — summary', () => {
     expect(await screen.findByRole('button', { name: /summary/i })).toBeInTheDocument();
   });
 
-  it('calls POST /jobs/{id}/summarize?force=true on click', async () => {
+  it('calls POST /jobs/{id}/summarize on click', async () => {
     const user = userEvent.setup();
     setupCompletedJob();
     mockPost.mockResolvedValue({ status: 200, data: { content: '## Summary\nDone.' } });
@@ -235,7 +235,7 @@ describe('JobDetail — summary', () => {
 
     await waitFor(() => {
       expect(mockPost).toHaveBeenCalledWith(
-        '/jobs/test-job-uuid/summarize?force=true',
+        '/jobs/test-job-uuid/summarize',
       );
     });
   });

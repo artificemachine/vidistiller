@@ -108,3 +108,14 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 - security(backend): bump pillow constraint to >=12.2.0 to cover GHSA-pwv6-vv43-88gr (OOB write via invalid PSD tile extents)
+- feat(backend): vision pre-pass — VLLMProvider.describe_image() describes snapshot images using fleet vision model (VLLM_VISION_MODEL); descriptions injected into transcript context before summarization; parallel via ThreadPoolExecutor; gracefully skipped if no snapshots or vision model not configured
+- feat(backend): add vision_model field to VLLMFleetSettings (VLLM_VISION_MODEL env var)
+- fix(backend): set broker_transport_options visibility_timeout=86400 to prevent Celery re-queuing long-running summarization tasks
+- fix(backend): LLM_TIMEOUT now passed through docker-compose.prod.yml to api and celery_worker containers
+- fix(backend): vLLM provider auto-detection in summarize task — defaults to fleet when VLLM_VM*_URL configured
+- fix(backend): correct default vLLM model ID (qwopus3.6-27b) in DEFAULT_MODELS
+- fix(backend): vLLM URL fallback in LLMService uses fleet settings instead of Ollama base URL
+- 2026-06-07: refactor(vision): use single multimodal model (self._model) for vision pre-pass; remove VLLM_VISION_MODEL env var; update tests
+- 2026-06-08: fix(vllm): clear stale torch compile cache to fix 'NoneType.size' crash when loading gemma4-31b with image:1; update default vllm model to gemma4-31b
+- 2026-06-08: feat(frontend): v1.6.0 — Obsidian export includes snapshot images (snapproxy route), summarize polling restart + progress bar, logout cookie-clear fix
+- 2026-06-08: security(frontend): add path traversal guard to snapproxy route (JS-002)
