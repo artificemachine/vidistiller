@@ -124,3 +124,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-08: chore(release): bump to v1.7.1 (fix print/PDF layout)
 - 2026-06-08: fix(frontend): strip transcript preamble in print view; show clean timestamped lines only
 - 2026-06-08: chore(release): bump to v1.7.2 (include preamble-strip fix in Docker image)
+- 2026-06-08: fix(frontend): hide navbar on print (print:hidden on nav in layout.tsx)
