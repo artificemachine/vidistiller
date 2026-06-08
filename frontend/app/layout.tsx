@@ -38,7 +38,7 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&display=swap" rel="stylesheet" />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="flex flex-col h-screen overflow-hidden">
+      <body className="flex flex-col h-screen overflow-hidden print:h-auto print:overflow-visible">
         <ThemeProvider>
           <AuthProvider>
           <JobStatusProvider>
@@ -68,7 +68,7 @@ export default function RootLayout({
                 </div>
               </div>
             </nav>
-            <main className="flex-1 overflow-auto">
+            <main className="flex-1 overflow-auto print:overflow-visible">
               {children}
             </main>
           </JobStatusProvider>
