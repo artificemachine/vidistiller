@@ -393,6 +393,48 @@ def _is_cancelled(db, job_id: int) -> bool:
 
 
 # ==============================================================================
+# FLEET RESOLVER — find which VM has a given model loaded
+# ==============================================================================
+
+_FLEET_VMS = [
+    ("vm913", "VLLM_VM913_URL"),
+    ("vm903", "VLLM_VM903_URL"),
+    ("vm901", "VLLM_VM901_URL"),
+    ("vm2900", "VLLM_VM2900_URL"),
+]
+
+
+def _resolve_fleet_url(model_name: str) -> str | None:
+    """
+    Query all vLLM fleet VMs to find which one has *model_name* loaded.
+
+    Calls ``GET /v1/models`` directly on each VM's vLLM port (8000).
+    Returns the vLLM URL of the first match, or None if no VM has it.
+    """
+    import requests as _requests
+
+    for _vm_label, _env_var in _FLEET_VMS:
+        _vllm_url = os.environ.get(_env_var)
+        if not _vllm_url:
+            continue
+        try:
+            _api = _vllm_url.rstrip("/") + "/v1/models"
+            _resp = _requests.get(_api, timeout=3)
+            if _resp.status_code == 200:
+                _models = [m["id"] for m in _resp.json().get("data", [])]
+                if model_name in _models:
+                    logger.info(
+                        "fleet: model %r found on %s (%s)", model_name, _vm_label, _vllm_url
+                    )
+                    return _vllm_url
+        except Exception:
+            continue
+
+    logger.warning("fleet: model %r not loaded on any VM", model_name)
+    return None
+
+
+# ==============================================================================
 # SUMMARIZE TRANSCRIPT TASK
 # ==============================================================================
 
@@ -430,7 +472,23 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         owner = db.query(User).filter(User.id == job.user_id).first() if job.user_id else None
         provider_name = owner.llm_provider if owner and owner.llm_provider else "vllm"
         model_name = owner.llm_model if owner else None
-        _default_url = os.environ.get("VLLM_VM913_URL") or os.environ.get("OLLAMA_URL")
+
+        # Fleet-aware URL: find the VM that actually has the model loaded
+        _resolved_model = model_name
+        if not _resolved_model and provider_name == "vllm":
+            from app.services.llm_providers import DEFAULT_MODELS
+            _resolved_model = DEFAULT_MODELS.get("vllm", "gemma4-31b")
+
+        if provider_name == "vllm" and _resolved_model:
+            _fleet_url = _resolve_fleet_url(_resolved_model)
+        else:
+            _fleet_url = None
+
+        _default_url = (
+            _fleet_url
+            or os.environ.get("VLLM_VM913_URL")
+            or os.environ.get("OLLAMA_URL")
+        )
         ollama_url = (owner.llm_ollama_url if owner and owner.llm_ollama_url else None) or _default_url
         api_key = None
         if owner and owner.llm_api_key_encrypted:
