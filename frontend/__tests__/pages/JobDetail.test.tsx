@@ -122,7 +122,7 @@ describe('JobDetail — save (JSON export)', () => {
     });
 
     render(<JobDetail />);
-    const saveBtn = await screen.findByRole('button', { name: /save/i });
+    const saveBtn = await screen.findByRole('button', { name: /backup json/i });
     await user.click(saveBtn);
 
     await waitFor(() => {
@@ -147,7 +147,7 @@ describe('JobDetail — save (JSON export)', () => {
     });
 
     render(<JobDetail />);
-    const saveBtn = await screen.findByRole('button', { name: /save/i });
+    const saveBtn = await screen.findByRole('button', { name: /backup json/i });
     await user.click(saveBtn);
 
     await waitFor(() => {
@@ -162,7 +162,7 @@ describe('JobDetail — export (Obsidian)', () => {
     setupCompletedJob();
 
     render(<JobDetail />);
-    const exportBtn = await screen.findByRole('button', { name: /export/i });
+    const exportBtn = await screen.findByRole('button', { name: /obsidian/i });
     await user.click(exportBtn);
 
     await waitFor(() => {
@@ -184,7 +184,7 @@ describe('JobDetail — export (Obsidian)', () => {
 
     // With no transcripts, the export button shouldn't even render
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /export/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /obsidian/i })).not.toBeInTheDocument();
     });
   });
 
@@ -205,7 +205,7 @@ describe('JobDetail — export (Obsidian)', () => {
     });
 
     render(<JobDetail />);
-    const exportBtn = await screen.findByRole('button', { name: /export/i });
+    const exportBtn = await screen.findByRole('button', { name: /obsidian/i });
     await user.click(exportBtn);
 
     await waitFor(() => {

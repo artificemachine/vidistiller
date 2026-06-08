@@ -119,3 +119,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-08: fix(vllm): clear stale torch compile cache to fix 'NoneType.size' crash when loading gemma4-31b with image:1; update default vllm model to gemma4-31b
 - 2026-06-08: feat(frontend): v1.6.0 — Obsidian export includes snapshot images (snapproxy route), summarize polling restart + progress bar, logout cookie-clear fix
 - 2026-06-08: security(frontend): add path traversal guard to snapproxy route (JS-002)
+- 2026-06-08: feat(frontend): v1.7.0 — PDF export button (window.print), rename export→obsidian and save→backup json, add @media print CSS
