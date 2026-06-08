@@ -928,20 +928,34 @@ export default function JobDetail() {
     </div>
   );
 
+  const printText = (showSummary && summaryContent)
+    ? summaryContent
+    : job?.transcripts[0]?.full_text || '';
+
   // Desktop: VS Code-like panel layout
   return (
     <>
     {diagModal}
-    <WorkspaceLayout
-      sidebar={sidebarContent ?? transcriptContent}
-      main={playerContent}
-      logs={bottomContent}
-      logsCollapsed={!logsOpen}
-      bottom={logsContent ?? undefined}
-      sidebarActions={sidebarActions}
-      sidebarTitle={showSummary ? 'summary' : 'transcript'}
-      slideText={isSlideMode ? slideTextContent : undefined}
-    />
+
+    {/* Print-only view: clean transcript/summary for window.print() */}
+    <div className="hidden print:block p-8 max-w-4xl mx-auto">
+      <h1 className="text-2xl font-bold mb-1">{job?.videos[0]?.title ?? 'transcript'}</h1>
+      <p className="text-sm text-gray-500 mb-6">{job?.video_url}</p>
+      <div className="whitespace-pre-wrap text-sm leading-relaxed">{printText}</div>
+    </div>
+
+    <div className="print:hidden">
+      <WorkspaceLayout
+        sidebar={sidebarContent ?? transcriptContent}
+        main={playerContent}
+        logs={bottomContent}
+        logsCollapsed={!logsOpen}
+        bottom={logsContent ?? undefined}
+        sidebarActions={sidebarActions}
+        sidebarTitle={showSummary ? 'summary' : 'transcript'}
+        slideText={isSlideMode ? slideTextContent : undefined}
+      />
+    </div>
     </>
   );
 }
