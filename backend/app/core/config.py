@@ -276,11 +276,12 @@ class ApiKeySettings(BaseSettings):
 
 
 class VLLMFleetSettings(BaseSettings):
-    """vLLM sidecar URLs for the on-prem GPU fleet.
+    """vLLM server URLs for the on-prem GPU fleet.
 
-    Each VM runs a vLLM-manager sidecar on port 8100 that proxies to vLLM on 8000
-    and exposes /v1/models, /load, /v1/chat/completions. URLs are read from env
-    so the fleet can be reconfigured without code changes.
+    Each VM runs vLLM directly on port 8000 (OpenAI-compatible /v1/chat/completions).
+    vllm-manager on port 8100 is used only for model discovery/swapping, NOT for
+    inference requests — it blocks /v1/chat/completions with 409.
+    URLs are read from env so the fleet can be reconfigured without code changes.
     """
 
     vm913_url: str = Field(default="", validation_alias="VLLM_VM913_URL")
