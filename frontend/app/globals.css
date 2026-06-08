@@ -118,25 +118,11 @@ pre code {
 }
 
 @media print {
-  /* Hide everything except the main content panel */
-  nav,
-  header,
-  [data-testid="sidebar"],
-  [data-testid="sidebar-actions"],
-  [data-panel-group-id],
-  [data-resize-handle],
-  button,
-  .no-print {
-    display: none !important;
-  }
-
-  /* Make the content area fill the page */
   body, html {
     background: white !important;
     color: black !important;
   }
 
-  /* Ensure prose content is readable */
   * {
     text-transform: none !important;
   }
@@ -149,5 +135,11 @@ pre code {
   pre, code {
     white-space: pre-wrap;
     word-break: break-word;
+    background: #f5f5f5 !important;
+    color: black !important;
+  }
+
+  .print-content {
+    display: block !important;
   }
 }
