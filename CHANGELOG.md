@@ -133,3 +133,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-08: fix(backend): default LLM provider to vLLM fleet; fall back to VLLM_VM913_URL env var
 - 2026-06-08: chore(release): bump to v1.7.5 (default LLM to vLLM fleet)
 - 2026-06-08: fix(config): correct VLLM_VM913_URL port 8100→8000 in .env.example; update VLLMFleetSettings docstring to reflect direct vLLM (no proxy); add docker compose down --remove-orphans before up in CI deploy
+- 2026-06-08: fix(config): change default vLLM model from qwopus-27b (typo/nonexistent) to gemma4-31b (loaded on vm913 GPUs 4-7)
