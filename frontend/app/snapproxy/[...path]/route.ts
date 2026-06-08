@@ -10,7 +10,18 @@ export async function GET(
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   const { path } = await params;
-  const upstreamUrl = `${BACKEND_BASE}/${path.join('/')}`;
+
+  // Reject any traversal attempt — segments must be plain filenames/IDs
+  if (path.some((seg) => seg === '..' || seg === '.' || seg.includes('/'))) {
+    return new NextResponse(null, { status: 400 });
+  }
+
+  const joined = path.join('/');
+  if (!joined.startsWith('static/snapshots/')) {
+    return new NextResponse(null, { status: 403 });
+  }
+
+  const upstreamUrl = `${BACKEND_BASE}/${joined}`;
 
   let res: Response;
   try {
