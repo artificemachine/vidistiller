@@ -136,3 +136,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-08: fix(config): change default vLLM model from qwopus-27b (typo/nonexistent) to gemma4-31b (loaded on vm913 GPUs 4-7)
 - 2026-06-08: feat(backend): fleet-aware summarize — queries all VMs /v1/models to find which one has the requested model loaded instead of hardcoding vm913
 - 2026-06-08: fix(test): update vLLM default model assertion to match gemma4-31b
+- 2026-06-08: chore(release): bump to v1.8.0 (fleet-aware summarization + model/default fixes)
