@@ -169,6 +169,7 @@ jobs:
       - name: Deploy
         run: |
           cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
+          docker compose -f docker-compose.prod.yml down --remove-orphans
           docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
       - name: Run migrations
@@ -206,6 +207,7 @@ jobs:
       - name: Deploy staging
         run: |
           cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
+          docker compose -f docker-compose.yml -f docker-compose.staging.yml down --remove-orphans
           docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d --remove-orphans
 
       - name: Run migrations
