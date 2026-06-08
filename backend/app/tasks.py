@@ -428,9 +428,10 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
 
         # Resolve user's LLM provider preferences
         owner = db.query(User).filter(User.id == job.user_id).first() if job.user_id else None
-        provider_name = owner.llm_provider if owner and owner.llm_provider else "ollama"
+        provider_name = owner.llm_provider if owner and owner.llm_provider else "vllm"
         model_name = owner.llm_model if owner else None
-        ollama_url = owner.llm_ollama_url if owner and owner.llm_ollama_url else None
+        _default_url = os.environ.get("VLLM_VM913_URL") or os.environ.get("OLLAMA_URL")
+        ollama_url = (owner.llm_ollama_url if owner and owner.llm_ollama_url else None) or _default_url
         api_key = None
         if owner and owner.llm_api_key_encrypted:
             try:

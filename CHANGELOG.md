@@ -130,3 +130,5 @@ All notable changes to this project will be documented in this file.
 - 2026-06-08: chore(release): bump to v1.7.3 (print transcript matches sidebar/MD export format)
 - 2026-06-08: fix(frontend): pdf export renders all pages; strip preamble from print transcript
 - 2026-06-08: chore(release): bump to v1.7.4 (pdf multi-page + preamble strip)
+- 2026-06-08: fix(backend): default LLM provider to vLLM fleet; fall back to VLLM_VM913_URL env var
+- 2026-06-08: chore(release): bump to v1.7.5 (default LLM to vLLM fleet)
