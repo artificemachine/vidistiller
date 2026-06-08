@@ -173,7 +173,7 @@ DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-4o-mini",
     "ollama": None,  # Falls back to settings.ollama.model_name
-    "vllm": "qwopus-27b",
+    "vllm": "gemma4-31b",
 }
 
 

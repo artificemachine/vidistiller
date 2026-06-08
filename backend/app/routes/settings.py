@@ -98,7 +98,7 @@ def get_vllm_fleet(
     """
     fleet_cfg = get_settings().vllm_fleet
     _nodes = [
-        {"id": "vm913",  "label": "VM913",  "tier": "opus-class",   "desc": "4× RTX 3090 · 96 GB · TP=2", "model": "qwopus-27b", "url": fleet_cfg.vm913_url},
+        {"id": "vm913",  "label": "VM913",  "tier": "opus-class",   "desc": "4× RTX 3090 · 96 GB · TP=2", "model": "gemma4-31b", "url": fleet_cfg.vm913_url},
         {"id": "vm903",  "label": "VM903",  "tier": "sonnet-class", "desc": "2× RTX 3090 · 48 GB",              "model": "",           "url": fleet_cfg.vm903_url},
         {"id": "vm901",  "label": "VM901",  "tier": "haiku-class",  "desc": "2× RTX 3080 · 20 GB",              "model": "",           "url": fleet_cfg.vm901_url},
         {"id": "vm2900", "label": "VM2900", "tier": "small",        "desc": "RTX 3060 Ti · 8 GB usable",            "model": "",           "url": fleet_cfg.vm2900_url},

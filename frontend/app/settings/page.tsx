@@ -16,7 +16,7 @@ const DEFAULT_MODELS: Record<string, string> = {
   anthropic: 'claude-sonnet-4-6',
   openai: 'gpt-4o-mini',
   ollama: 'qwen3:8b',
-  vllm: 'qwopus-27b',
+  vllm: 'gemma4-31b',
 };
 
 interface VLLMFleetNode {
