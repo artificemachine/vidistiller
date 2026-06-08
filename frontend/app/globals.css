@@ -121,6 +121,8 @@ pre code {
   body, html {
     background: white !important;
     color: black !important;
+    height: auto !important;
+    overflow: visible !important;
   }
 
   * {

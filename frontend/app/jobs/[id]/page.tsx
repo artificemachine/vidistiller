@@ -929,9 +929,10 @@ export default function JobDetail() {
   );
 
   const printLines = (() => {
-    if (showSummary && summaryContent) return null; // summary rendered separately
+    if (showSummary && summaryContent) return null;
     const raw = job?.transcripts[0]?.full_text || '';
-    return raw.split('\n');
+    const firstTs = raw.search(/\[\d{2}:\d{2}:\d{2}\]/);
+    return (firstTs >= 0 ? raw.slice(firstTs) : raw).split('\n');
   })();
 
   // Desktop: VS Code-like panel layout

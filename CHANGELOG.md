@@ -128,3 +128,5 @@ All notable changes to this project will be documented in this file.
 - 2026-06-08: fix(frontend): print view renders transcript line-by-line matching sidebar/MD format; hide navbar on print
 - 2026-06-08: fix(frontend): print view renders transcript line-by-line matching sidebar/MD format; hide navbar on print
 - 2026-06-08: chore(release): bump to v1.7.3 (print transcript matches sidebar/MD export format)
+- 2026-06-08: fix(frontend): pdf export renders all pages; strip preamble from print transcript
+- 2026-06-08: chore(release): bump to v1.7.4 (pdf multi-page + preamble strip)
