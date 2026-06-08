@@ -121,3 +121,5 @@ All notable changes to this project will be documented in this file.
 - 2026-06-08: security(frontend): add path traversal guard to snapproxy route (JS-002)
 - 2026-06-08: feat(frontend): v1.7.0 — PDF export button (window.print), rename export→obsidian and save→backup json, add @media print CSS
 - 2026-06-08: fix(frontend): print/PDF now renders clean transcript-only view; hide interactive layout on print
+- 2026-06-08: chore(release): bump to v1.7.1 (fix print/PDF layout)
+- 2026-06-08: fix(frontend): strip transcript preamble in print view; show clean timestamped lines only
