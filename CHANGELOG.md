@@ -127,3 +127,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-08: fix(frontend): hide navbar on print (print:hidden on nav in layout.tsx)
 - 2026-06-08: fix(frontend): print view renders transcript line-by-line matching sidebar/MD format; hide navbar on print
 - 2026-06-08: fix(frontend): print view renders transcript line-by-line matching sidebar/MD format; hide navbar on print
+- 2026-06-08: chore(release): bump to v1.7.3 (print transcript matches sidebar/MD export format)
