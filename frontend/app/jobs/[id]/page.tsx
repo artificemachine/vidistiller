@@ -928,13 +928,10 @@ export default function JobDetail() {
     </div>
   );
 
-  const printText = (() => {
-    if (showSummary && summaryContent) return summaryContent;
+  const printLines = (() => {
+    if (showSummary && summaryContent) return null; // summary rendered separately
     const raw = job?.transcripts[0]?.full_text || '';
-    // full_text starts with "# Title\n\nSource: url\n\n" — strip it since
-    // we render title/URL as styled elements above the content block
-    const firstTimestamp = raw.search(/\[0\d:\d\d:\d\d\]/);
-    return firstTimestamp > 0 ? raw.slice(firstTimestamp) : raw;
+    return raw.split('\n');
   })();
 
   // Desktop: VS Code-like panel layout
@@ -942,11 +939,33 @@ export default function JobDetail() {
     <>
     {diagModal}
 
-    {/* Print-only view: clean transcript/summary for window.print() */}
+    {/* Print-only view: matches sidebar rendering — bold timestamps, spaced lines */}
     <div className="hidden print:block p-8 max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-1">{job?.videos[0]?.title ?? 'transcript'}</h1>
-      <p className="text-sm text-gray-400 mb-6 text-xs">{job?.video_url}</p>
-      <div className="whitespace-pre-wrap text-sm leading-relaxed font-mono">{printText}</div>
+      <p className="text-xs text-gray-400 mb-6">{job?.video_url}</p>
+      {showSummary && summaryContent ? (
+        <div className="whitespace-pre-wrap text-sm leading-relaxed">{summaryContent}</div>
+      ) : printLines ? (
+        <div className="text-sm leading-loose">
+          {printLines.map((line, i) => {
+            const chapter = line.match(/^## \[(\d{2}:\d{2}:\d{2})\]\s?(.+)/);
+            if (chapter) return (
+              <div key={i} className="mt-4 mb-1 font-bold border-b border-gray-300 pb-0.5">
+                [{chapter[1]}] {chapter[2].trim()}
+              </div>
+            );
+            const ts = line.match(/^(\[\d{2}:\d{2}:\d{2}\])\s?(.*)/);
+            if (ts) return (
+              <div key={i} className="flex gap-3 py-0.5">
+                <span className="font-mono font-bold text-gray-600 shrink-0">{ts[1]}</span>
+                <span>{ts[2]}</span>
+              </div>
+            );
+            if (!line.trim()) return null;
+            return <p key={i} className="py-0.5 text-gray-500">{line}</p>;
+          })}
+        </div>
+      ) : null}
     </div>
 
     <div className="print:hidden">
