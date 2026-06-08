@@ -239,6 +239,10 @@ export default function JobDetail() {
     playerRef.current?.seekTo(seconds);
   }, []);
 
+  const handlePrintPDF = useCallback(() => {
+    window.print();
+  }, []);
+
   const handleExportObsidian = useCallback(async () => {
     if (!job) return;
     const title = job.videos[0]?.title || 'video';
@@ -891,23 +895,35 @@ export default function JobDetail() {
           <button
             onClick={handleExportObsidian}
             className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-border-light text-text-dark hover:bg-border-light/80 dark:bg-border-dark dark:text-text-light dark:hover:bg-border-dark/80 transition-colors"
+            title="Export to Obsidian ZIP"
           >
             <svg width="12" height="12" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M7 1v8M7 9L4 6M7 9l3-3M2 11h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            export
+            obsidian
+          </button>
+          <button
+            onClick={handlePrintPDF}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-border-light text-text-dark hover:bg-border-light/80 dark:bg-border-dark dark:text-text-light dark:hover:bg-border-dark/80 transition-colors"
+            title="Print / Save as PDF"
+          >
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M3 5V2h8v3M3 10H1V5h12v5h-2M3 8h8v4H3z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            pdf
           </button>
         </>
       )}
       <button
         onClick={handleSaveJob}
         className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-border-light text-text-dark hover:bg-border-light/80 dark:bg-border-dark dark:text-text-light dark:hover:bg-border-dark/80 transition-colors"
+        title="Download job data as JSON backup"
       >
         <svg width="12" height="12" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M11 13H3a1 1 0 01-1-1V2a1 1 0 011-1h6l3 3v8a1 1 0 01-1 1z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
           <path d="M9 1v3h3M5 9h4M5 11h2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        save
+        backup json
       </button>
     </div>
   );

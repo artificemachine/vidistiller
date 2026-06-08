@@ -116,3 +116,38 @@ pre code {
 [data-separator]:active {
   background-color: rgb(var(--color-primary) / 0.2);
 }
+
+@media print {
+  /* Hide everything except the main content panel */
+  nav,
+  header,
+  [data-testid="sidebar"],
+  [data-testid="sidebar-actions"],
+  [data-panel-group-id],
+  [data-resize-handle],
+  button,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Make the content area fill the page */
+  body, html {
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Ensure prose content is readable */
+  * {
+    text-transform: none !important;
+  }
+
+  a {
+    text-decoration: none;
+    color: inherit;
+  }
+
+  pre, code {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}
