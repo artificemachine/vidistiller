@@ -42,7 +42,7 @@ export default function RootLayout({
         <ThemeProvider>
           <AuthProvider>
           <JobStatusProvider>
-            <nav className="bg-card-light dark:bg-card-dark shadow dark:shadow-gray-900 shrink-0">
+            <nav className="bg-card-light dark:bg-card-dark shadow dark:shadow-gray-900 shrink-0 print:hidden">
               <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex justify-between h-20">
                   <div className="flex items-center">
