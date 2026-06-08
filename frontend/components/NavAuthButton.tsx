@@ -184,7 +184,7 @@ export default function NavAuthButton() {
                     localStorage.removeItem('vidistiller-theme');
                     localStorage.removeItem('theme');
                     localStorage.removeItem('vidistiller-workspace-state');
-                    window.location.href = '/login';
+                    window.location.href = '/api/auth/logout';
                   }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-text-light/50 hover:text-destructive hover:bg-border-dark transition-colors"
                 >

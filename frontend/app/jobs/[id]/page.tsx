@@ -14,7 +14,7 @@ import JobLogs from '@/components/JobLogs';
 import type { LogEntry } from '@/components/JobLogs';
 import { useJobStatus } from '@/components/JobStatusProvider';
 import { parseTimestamp, buildSnapshotMap, toSnakeCase } from '@/lib/utils';
-import { exportToObsidian } from '@/lib/exportObsidian';
+import { exportToObsidian, exportSummaryToObsidian } from '@/lib/exportObsidian';
 import OllamaDiagModal from '@/components/OllamaDiagModal';
 
 interface SnapshotItem {
@@ -106,6 +106,8 @@ export default function JobDetail() {
   // }, [job?.status]);
   const [summaryContent, setSummaryContent] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryProgress, setSummaryProgress] = useState(0);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const [ollamaDiag, setOllamaDiag] = useState<any | null>(null);
   const playerRef = useRef<VideoPlayerHandle>(null);
   const isMobile = useIsMobile();
@@ -120,16 +122,48 @@ export default function JobDetail() {
     return () => setJobStatus(null);
   }, [job?.status, setJobStatus]);
 
-  useEffect(() => {
-    const fetchLogs = async () => {
-      try {
-        const res = await apiClient.get(`/jobs/${jobId}/logs`);
-        setLogs(res.data);
-      } catch {
-        // logs fetch is best-effort
-      }
-    };
+  const fetchLogs = useCallback(async () => {
+    try {
+      const res = await apiClient.get(`/jobs/${jobId}/logs`);
+      setLogs(res.data);
+    } catch {
+      // logs fetch is best-effort
+    }
+  }, [jobId]);
 
+  const pollJob = useCallback(async () => {
+    try {
+      const response = await apiClient.get(`/jobs/${jobId}`);
+      setJob(response.data);
+      if (response.data.snapshots) {
+        setSnapshots(
+          response.data.snapshots.map((s: any) => ({
+            id: s.id,
+            image_url: s.image_url || s.file_path,
+            timestamp: s.timestamp,
+            detected_text: s.detected_text,
+          }))
+        );
+      }
+      if (response.data.slides) {
+        setSlides(response.data.slides);
+      }
+      await fetchLogs();
+      // Stop polling only when job is terminal AND no summarization is in flight
+      const jobDone = response.data.status === 'completed' || response.data.status === 'failed';
+      const summarizeSettled = response.data.summarize_status !== 'processing';
+      if (jobDone && summarizeSettled) {
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+      }
+    } catch (err: any) {
+      console.error('Error polling job status:', err);
+    }
+  }, [jobId, fetchLogs]);
+
+  useEffect(() => {
     const fetchJob = async () => {
       try {
         const response = await apiClient.get(`/jobs/${jobId}`);
@@ -158,37 +192,15 @@ export default function JobDetail() {
     if (!jobId) return;
 
     fetchJob();
-    intervalRef.current = setInterval(async () => {
-      try {
-        const response = await apiClient.get(`/jobs/${jobId}`);
-        setJob(response.data);
-        if (response.data.snapshots) {
-          setSnapshots(
-            response.data.snapshots.map((s: any) => ({
-              id: s.id,
-              image_url: s.image_url || s.file_path,
-              timestamp: s.timestamp,
-              detected_text: s.detected_text,
-            }))
-          );
-        }
-        if (response.data.slides) {
-          setSlides(response.data.slides);
-        }
-        await fetchLogs();
-        // Stop polling on terminal state
-        if (response.data.status === 'completed' || response.data.status === 'failed') {
-          if (intervalRef.current) clearInterval(intervalRef.current);
-        }
-      } catch (err: any) {
-        console.error('Error polling job status:', err);
-      }
-    }, 5000);
+    intervalRef.current = setInterval(pollJob, 5000);
 
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
     };
-  }, [jobId]);
+  }, [jobId, pollJob, fetchLogs]);
 
   const handleSnapshot = useCallback(async (timestamp: number) => {
     if (!job) return;
@@ -228,10 +240,17 @@ export default function JobDetail() {
   }, []);
 
   const handleExportObsidian = useCallback(async () => {
-    if (!job || job.transcripts.length === 0) return;
+    if (!job) return;
+    const title = job.videos[0]?.title || 'video';
+    // Export summary when available, transcript otherwise
+    if (summaryContent) {
+      await exportSummaryToObsidian({ title, summaryContent, baseUrl });
+      return;
+    }
+    if (job.transcripts.length === 0) return;
     const transcript = job.transcripts[0];
     await exportToObsidian({
-      title: job.videos[0]?.title || 'video',
+      title,
       videoUrl: job.video_url || '',
       transcriptText: transcript.full_text,
       snapshots: snapshots.map((s) => ({ timestamp: s.timestamp, image_url: s.image_url })),
@@ -245,7 +264,7 @@ export default function JobDetail() {
         transcript_text: s.transcript_text,
       })),
     });
-  }, [job, snapshots, slides, baseUrl]);
+  }, [job, summaryContent, snapshots, slides, baseUrl]);
 
   // Auto-load cached summary from job.documents; also detect when background
   // summarization completes (summarize_status transitions to 'completed')
@@ -255,11 +274,15 @@ export default function JobDetail() {
     if (cached) {
       setSummaryContent(cached.content);
       if (job.summarize_status === 'completed' && summaryLoading) {
+        setSummaryProgress(100);
         setSummaryLoading(false);
+        setSummaryError(null);
       }
     }
     if (job.summarize_status === 'failed' && summaryLoading) {
+      setSummaryProgress(0);
       setSummaryLoading(false);
+      setSummaryError('summarization failed — check that the vLLM fleet is reachable.');
     }
     // If job loaded while summarization is already in progress, show loading/stop
     if (job.summarize_status === 'processing' && !summaryLoading) {
@@ -270,19 +293,28 @@ export default function JobDetail() {
 
   const handleSummarize = useCallback(async () => {
     if (!job) return;
-    // If already showing summary, just switch back to transcript
+    // Toggle: if summary is showing, switch back to transcript
     if (showSummary) {
       setShowSummary(false);
       return;
     }
-    // Always re-fetch summary (snapshots may have changed)
+    // If content already loaded, just show it — don't re-generate
+    if (summaryContent) {
+      setShowSummary(true);
+      return;
+    }
     setSummaryLoading(true);
+    setSummaryError(null);
     try {
-      const res = await apiClient.post(`/jobs/${job.job_id}/summarize?force=true`);
+      const res = await apiClient.post(`/jobs/${job.job_id}/summarize`);
       if (res.status === 202) {
-        // Summarization dispatched as background task; polling will pick up result
+        // Summarization dispatched as background task; restart polling if it stopped
         setSummaryLoading(true);
+        setSummaryError(null);
         setShowSummary(true);
+        if (!intervalRef.current) {
+          intervalRef.current = setInterval(pollJob, 5000);
+        }
       } else {
         setSummaryContent(res.data.content);
         setShowSummary(true);
@@ -302,7 +334,21 @@ export default function JobDetail() {
       }
       setSummaryLoading(false);
     }
-  }, [job, showSummary]);
+  }, [job, showSummary, pollJob]);
+
+  // Animate progress bar while summarizing; reset on completion/error
+  useEffect(() => {
+    if (!summaryLoading) return;
+    const text = job?.transcripts[0]?.full_text || '';
+    const totalSections = Math.max(1, (text.match(/^## \[/gm) || []).length);
+    const estimatedMs = totalSections * 4000;
+    const start = Date.now();
+    const tick = setInterval(() => {
+      const elapsed = Date.now() - start;
+      setSummaryProgress(Math.min(92, Math.round((elapsed / estimatedMs) * 100)));
+    }, 500);
+    return () => clearInterval(tick);
+  }, [summaryLoading, job?.transcripts]);
 
   const handleSaveJob = useCallback(async () => {
     if (!job) return;
@@ -447,8 +493,40 @@ export default function JobDetail() {
 
   const showPlayer = job.status === 'completed' && job.video_url;
 
-  // Sidebar content: summary or transcript
-  const sidebarContent = showSummary && summaryContent ? renderSummary(summaryContent) : undefined;
+  // Sidebar content: progress bar, summary, or transcript
+  const sidebarSectionCount = (() => {
+    const text = job?.transcripts[0]?.full_text || '';
+    return Math.max(1, (text.match(/^## \[/gm) || []).length);
+  })();
+  const sidebarContent =
+    showSummary && summaryError
+      ? (
+        <div className="p-4">
+          <p className="text-xs text-red-500 dark:text-red-400">{summaryError}</p>
+        </div>
+      )
+      : showSummary && summaryLoading
+        ? (
+          <div className="p-4 space-y-3">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              summarizing {sidebarSectionCount} section{sidebarSectionCount !== 1 ? 's' : ''}...
+            </p>
+            <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-500 ease-out"
+                style={{ width: `${summaryProgress}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-gray-400 dark:text-gray-500">
+              est. {sidebarSectionCount * 4 >= 60
+                ? `${Math.floor(sidebarSectionCount * 4 / 60)}m ${sidebarSectionCount * 4 % 60}s`
+                : `${sidebarSectionCount * 4}s`}
+            </p>
+          </div>
+        )
+      : showSummary && summaryContent
+        ? renderSummary(summaryContent)
+        : undefined;
 
   // Transcript sidebar content
   const transcriptContent = (

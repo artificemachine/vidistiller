@@ -180,6 +180,79 @@ async function fetchSlideImages(
   return results;
 }
 
+interface SummaryExportOptions {
+  title: string;
+  summaryContent: string;
+  baseUrl: string;
+}
+
+export async function exportSummaryToObsidian(options: SummaryExportOptions): Promise<void> {
+  const { title, summaryContent, baseUrl } = options;
+  const snakeName = toSnakeCase(title);
+
+  // Extract all image references from the summary markdown
+  const imageRefRe = /!\[([^\]]*)\]\(([^)]+)\)/g;
+  const imageRefs: { alt: string; url: string; filename: string }[] = [];
+  let match;
+  while ((match = imageRefRe.exec(summaryContent)) !== null) {
+    const url = match[2];
+    if (url.startsWith('/static/')) {
+      const filename = url.split('/').pop()!;
+      imageRefs.push({ alt: match[1], url, filename });
+    }
+  }
+  // Rewrite image URLs to relative ./images/ paths
+  let markdown = summaryContent;
+  for (const ref of imageRefs) {
+    markdown = markdown.replace(
+      new RegExp(`\\(${ref.url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)`, 'g'),
+      `(./images/${ref.filename})`,
+    );
+  }
+
+  // Fetch images referenced in summary — use same-origin proxy to avoid cross-origin fetch blocks
+  const images = new Map<string, Blob>();
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < imageRefs.length; i += BATCH_SIZE) {
+    const batch = imageRefs.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(
+      batch.map(async (ref) => {
+        try {
+          const proxyUrl = `/snapproxy${ref.url}`;
+          const res = await fetchWithRetry(proxyUrl);
+          const blob = await res.blob();
+          return { filename: ref.filename, blob };
+        } catch (err) {
+          console.warn(`[export] failed to fetch ${ref.url}:`, err);
+          return null;
+        }
+      }),
+    );
+    for (const r of results) {
+      if (r) images.set(r.filename, r.blob);
+    }
+  }
+  const zip = new JSZip();
+  const rootFolder = zip.folder(snakeName)!;
+  rootFolder.file(`${snakeName}.md`, markdown);
+
+  if (images.size > 0) {
+    const imagesFolder = rootFolder.folder('images')!;
+    for (const [name, blob] of images) {
+      imagesFolder.file(name, blob);
+    }
+  }
+
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${snakeName}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
 export async function exportToObsidian(options: ExportOptions): Promise<void> {
   const { title, videoUrl, transcriptText, snapshots, baseUrl, slides } = options;
   const lines = transcriptText.split('\n');
@@ -191,9 +264,7 @@ export async function exportToObsidian(options: ExportOptions): Promise<void> {
     markdown += buildSlidesSection(slides);
   }
 
-  console.log(`[export] ${snapshots.length} snapshots to fetch`);
   const images = await fetchImages(snapshots, baseUrl);
-  console.log(`[export] ${images.size} images fetched successfully`);
 
   const snakeName = toSnakeCase(title);
 
