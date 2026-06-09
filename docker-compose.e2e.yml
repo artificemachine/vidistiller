@@ -69,7 +69,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: e2e_celery_worker
-    command: celery -A app.tasks worker --loglevel=warning
+    command: python3 -m celery -A app.tasks worker --loglevel=warning
     environment:
       DATABASE_URL: ${E2E_DATABASE_URL}
       REDIS_URL: redis://redis:6379/0
