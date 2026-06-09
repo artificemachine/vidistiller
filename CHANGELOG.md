@@ -139,3 +139,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-08: chore(release): bump to v1.8.0 (fleet-aware summarization + model/default fixes)
 - 2026-06-09: fix(llm): extract JSON array from Pass 1 response before parsing to handle trailing text
 - 2026-06-09: chore(release): bump to v1.8.1 (two-pass JSON trailing-text fix)
+- 2026-06-09: test(frontend): add polling-restart and failed-status tests for summarize button; add ops-runbook.md
