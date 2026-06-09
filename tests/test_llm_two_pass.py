@@ -153,6 +153,49 @@ class TestParseAnalysisResponse:
         with pytest.raises(ValueError, match="empty or non-array"):
             service._parse_analysis_response('{"key": "value"}')
 
+    def test_trailing_text_after_json(self, service: LLMService) -> None:
+        inner = json.dumps([{
+            "title": "X",
+            "start_timestamp": "00:00:00",
+            "end_timestamp": "00:01:00",
+            "content_type": "intro",
+            "key_topics": [],
+        }])
+        raw = inner + "\nHere is the analysis."
+        result = service._parse_analysis_response(raw)
+        assert len(result) == 1
+        assert result[0].title == "X"
+
+    def test_fenced_json_with_trailing_text(self, service: LLMService) -> None:
+        inner = json.dumps([{
+            "title": "Fenced",
+            "start_timestamp": "00:00:00",
+            "end_timestamp": "00:02:00",
+            "content_type": "demo_tutorial",
+            "key_topics": ["a"],
+        }])
+        raw = f"```json\n{inner}\n```\nHope this helps!"
+        result = service._parse_analysis_response(raw)
+        assert len(result) == 1
+        assert result[0].title == "Fenced"
+
+    def test_nested_objects_in_array(self, service: LLMService) -> None:
+        raw = json.dumps([{
+            "title": "Nested",
+            "start_timestamp": "00:00:00",
+            "end_timestamp": "00:01:00",
+            "content_type": "general",
+            "key_topics": ["a", "b"],
+            "extra": {"foo": [1, 2]},
+        }])
+        result = service._parse_analysis_response(raw)
+        assert len(result) == 1
+        assert result[0].title == "Nested"
+
+    def test_no_brackets_falls_through(self, service: LLMService) -> None:
+        with pytest.raises(ValueError, match="invalid JSON"):
+            service._parse_analysis_response("no brackets here at all")
+
 
 # ---------------------------------------------------------------------------
 # TestBuildAnalysisPrompt

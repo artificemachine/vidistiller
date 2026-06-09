@@ -28,6 +28,26 @@ from app.db.models import Document
 logger = logging.getLogger(__name__)
 
 
+def _extract_json_array(text: str) -> str:
+    """Return the outermost [...] substring from *text*, tracking nesting depth.
+
+    Scans character-by-character so nested objects/arrays inside the outer
+    array don't confuse bracket counting.  Returns an empty string if no
+    complete top-level array is found.
+    """
+    depth = 0
+    start = -1
+    for i, ch in enumerate(text):
+        if ch == "[":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0 and start != -1:
+                return text[start:i + 1]
+    return ""
+
 
 _ABBREVIATIONS: frozenset[str] = frozenset({
     "mr.", "mrs.", "ms.", "dr.", "prof.", "sr.", "jr.",
@@ -909,17 +929,20 @@ Documentation:"""
             ValueError: If JSON is invalid or result is empty
         """
         # Strip markdown code fences if present
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            # Remove opening fence (```json or ```)
-            first_newline = cleaned.index("\n")
-            cleaned = cleaned[first_newline + 1:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
+        stripped = raw.strip()
+        if stripped.startswith("```"):
+            first_newline = stripped.index("\n")
+            stripped = stripped[first_newline + 1:]
+        if stripped.endswith("```"):
+            stripped = stripped[:-3]
+        stripped = stripped.strip()
+
+        # Extract the outermost [...] to tolerate trailing text after the array
+        extracted = _extract_json_array(stripped)
+        to_parse = extracted if extracted else stripped
 
         try:
-            data = json.loads(cleaned)
+            data = json.loads(to_parse)
         except json.JSONDecodeError as e:
             raise ValueError(f"Pass 1 returned invalid JSON: {e}")
 
