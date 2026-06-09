@@ -923,7 +923,7 @@ export default function JobDetail() {
           <path d="M11 13H3a1 1 0 01-1-1V2a1 1 0 011-1h6l3 3v8a1 1 0 01-1 1z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
           <path d="M9 1v3h3M5 9h4M5 11h2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        backup json
+        backup
       </button>
     </div>
   );

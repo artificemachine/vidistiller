@@ -122,7 +122,7 @@ describe('JobDetail — save (JSON export)', () => {
     });
 
     render(<JobDetail />);
-    const saveBtn = await screen.findByRole('button', { name: /backup json/i });
+    const saveBtn = await screen.findByRole('button', { name: /backup/i });
     await user.click(saveBtn);
 
     await waitFor(() => {
@@ -147,7 +147,7 @@ describe('JobDetail — save (JSON export)', () => {
     });
 
     render(<JobDetail />);
-    const saveBtn = await screen.findByRole('button', { name: /backup json/i });
+    const saveBtn = await screen.findByRole('button', { name: /backup/i });
     await user.click(saveBtn);
 
     await waitFor(() => {
