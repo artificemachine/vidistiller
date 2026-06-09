@@ -36,8 +36,9 @@ services:
 
   api:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     container_name: e2e_api
     environment:
       DATABASE_URL: ${E2E_DATABASE_URL}
@@ -66,10 +67,10 @@ services:
 
   celery_worker:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: e2e_celery_worker
-    command: celery -A app.tasks worker --loglevel=warning
+    command: python3 -m celery -A app.tasks worker --loglevel=warning
     environment:
       DATABASE_URL: ${E2E_DATABASE_URL}
       REDIS_URL: redis://redis:6379/0

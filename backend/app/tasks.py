@@ -668,6 +668,7 @@ def process_slides(self, job_id: int):
             logger.error(f"Slide task: Job {job_id} has no video file")
             _add_log(db, job_id, "No video file for slide detection", "error", "slide_detect")
             job.status = ProcessingStatus.COMPLETED
+            job.slide_status = "skipped"
             db.commit()
             return {"error": "No video file"}
 
@@ -688,13 +689,19 @@ def process_slides(self, job_id: int):
         if provider is None:
             _add_log(db, job_id, "No LLM provider available; slide disambiguation will be skipped", "warning", "slide_detect")
 
+        def _finish(slide_status: str) -> None:
+            """Mark the job COMPLETED with the given slide_status and clear the task ID."""
+            j = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+            if j:
+                j.status = ProcessingStatus.COMPLETED
+                j.slide_status = slide_status
+                j.celery_task_id = None
+                db.commit()
+
         service = SlideDetectionService()
         service.run_full_pipeline(db, job, cancel_check, provider=provider, model=llm_model)
 
-        # Mark job as completed
-        job.status = ProcessingStatus.COMPLETED
-        job.celery_task_id = None
-        db.commit()
+        _finish("completed")
         _add_log(db, job_id, "Job completed successfully (with slides)", "info", "complete")
         logger.info(f"Slide detection completed for job {job_id}")
 
@@ -704,11 +711,7 @@ def process_slides(self, job_id: int):
         logger.info(f"Slide task cancelled for job {job_id}")
         _add_log(db, job_id, "Slide detection cancelled", "warning", "slide_detect")
         try:
-            job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
-            if job:
-                job.status = ProcessingStatus.COMPLETED
-                job.celery_task_id = None
-                db.commit()
+            _finish("skipped")
         except Exception:
             pass
         return {"status": "cancelled"}
@@ -718,12 +721,7 @@ def process_slides(self, job_id: int):
         logger.error(f"Slide task failed for job {job_id}: {e}")
         _add_log(db, job_id, f"Slide detection failed (non-fatal): {e}", "warning", "slide_detect")
         try:
-            job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
-            if job:
-                # Mark as completed anyway — slides are optional enrichment
-                job.status = ProcessingStatus.COMPLETED
-                job.celery_task_id = None
-                db.commit()
+            _finish("failed")
         except Exception:
             pass
         return {"error": str(e)}

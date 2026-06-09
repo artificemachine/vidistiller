@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings, Settings, Environment
+from sqlalchemy import text
 from app.db.session import health_check, engine, Base
 from app.routes import router as api_router
 from app.middleware import RequestLoggingMiddleware
@@ -104,6 +105,18 @@ async def lifespan(app: FastAPI):
 
     import app.db.models  # noqa: F401 — register models with Base metadata
     Base.metadata.create_all(bind=engine)
+
+    # Ensure nullable columns added after initial schema creation exist on older DBs.
+    # create_all() does not ALTER existing tables, so we add missing columns explicitly.
+    with engine.connect() as conn:
+        for col_def in [
+            "ALTER TABLE processing_jobs ADD COLUMN slide_status VARCHAR(20)",
+        ]:
+            try:
+                conn.execute(text(col_def))
+                conn.commit()
+            except Exception:
+                pass  # column already exists
 
     yield
 

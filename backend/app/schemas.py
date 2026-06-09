@@ -405,6 +405,7 @@ class JobStatusResponse(BaseSchema):
     status: ProcessingStatusEnum = Field(..., description="Current processing status")
     error_message: Optional[str] = Field(None, description="Error message if failed")
     summarize_status: Optional[str] = Field(None, description="Summarization status (processing/completed/failed)")
+    slide_status: Optional[str] = Field(None, description="Slide detection status (completed/skipped/failed); null for non-slide jobs")
     processing_mode: Optional[str] = Field(None, description="Processing mode (standard or slide_aware)")
     video_url: Optional[str] = Field(None, description="Original video URL")
     source_type: Optional[str] = Field(None, description="Source platform (youtube, vimeo, twitch, etc.)")
@@ -421,6 +422,7 @@ class JobStatusResponse(BaseSchema):
                 "status": "processing",
                 "error_message": None,
                 "summarize_status": None,
+                "slide_status": None,
                 "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
                 "source_type": "youtube",
                 "video_title": "Sample Tutorial Video",
@@ -439,6 +441,7 @@ class JobResponse(BaseSchema):
     status: ProcessingStatusEnum = Field(..., description="Current processing status")
     error_message: Optional[str] = Field(None, description="Error message if failed")
     summarize_status: Optional[str] = Field(None, description="Summarization status (processing/completed/failed)")
+    slide_status: Optional[str] = Field(None, description="Slide detection status (completed/skipped/failed); null for non-slide jobs")
     processing_mode: Optional[str] = Field(None, description="Processing mode (standard or slide_aware)")
     video_url: Optional[str] = Field(None, description="Original video URL")
     source_type: Optional[str] = Field(None, description="Source platform (youtube, vimeo, twitch, etc.)")

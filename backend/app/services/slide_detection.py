@@ -195,6 +195,7 @@ class SlideDetectionService:
 
         model = model or self.slide_settings.llm_model
         timeout = self.slide_settings.llm_timeout
+        incremental_threshold = self.slide_settings.incremental_ssim_threshold
         classified = 0
 
         for pair in pairs:
@@ -205,6 +206,13 @@ class SlideDetectionService:
                 continue
 
             ssim_val = pair.get("ssim", 0)
+
+            # Fast-path: high-confidence incremental bypasses LLM entirely
+            if ssim_val >= incremental_threshold:
+                pair["llm_classification"] = "incremental"
+                classified += 1
+                continue
+
             text_before = (pair.get("ocr_text_before") or "")[:500]
             text_after = (pair.get("ocr_text_after") or "")[:500]
 
@@ -249,13 +257,14 @@ class SlideDetectionService:
         """
         min_duration = self.slide_settings.min_slide_duration
 
-        # Filter to actual transitions (not incremental builds)
+        # Separate real transitions from incremental builds
         real_transitions = []
+        incremental_transitions = []
         for t in transitions:
-            classification = t.get("llm_classification", t.get("classification", "transition"))
-            if classification == "incremental":
-                continue
-            real_transitions.append(t)
+            if self._final_classification(t) == "incremental":
+                incremental_transitions.append(t)
+            else:
+                real_transitions.append(t)
 
         # Sort by timestamp
         real_transitions.sort(key=lambda x: x["timestamp"])
@@ -312,7 +321,27 @@ class SlideDetectionService:
             for i, s in enumerate(slides):
                 s["slide_number"] = i + 1
 
-        logger.info(f"Grouped into {len(slides)} slides")
+        # Attach incremental builds as child slides with parent links
+        child_num = len(slides) + 1
+        for t in sorted(incremental_transitions, key=lambda x: x["timestamp"]):
+            ts = t["timestamp"]
+            parent_num = None
+            for s in reversed(slides):
+                if not s.get("is_incremental_build") and s["start_timestamp"] <= ts:
+                    parent_num = s["slide_number"]
+                    break
+            slides.append({
+                "slide_number": child_num,
+                "start_timestamp": ts,
+                "end_timestamp": video_duration,
+                "ssim_transition_score": t.get("ssim", 0.0),
+                "is_incremental_build": True,
+                "parent_slide_number": parent_num,
+            })
+            child_num += 1
+
+        non_incr = sum(1 for s in slides if not s["is_incremental_build"])
+        logger.info(f"Grouped into {len(slides)} slides ({non_incr} non-incremental, {len(incremental_transitions)} incremental)")
         return slides
 
     # ------------------------------------------------------------------
@@ -632,6 +661,11 @@ class SlideDetectionService:
                 t["ocr_text_after"] = self._extract_ocr_text(after_frame)
 
         cap.release()
+
+    @staticmethod
+    def _final_classification(transition: Dict) -> str:
+        """Resolve the final classification for a transition dict (llm_classification wins over classification)."""
+        return transition.get("llm_classification", transition.get("classification", "transition"))
 
     @staticmethod
     def _make_log_fn(db, job_id: int):

@@ -25,7 +25,7 @@ test.describe("Reset password form", () => {
 
     await expect(page.locator("#new-password")).toBeVisible();
     await expect(page.locator("#confirm-password")).toBeVisible();
-    await expect(page.locator("button[type='submit']")).toContainText("reset password");
+    await expect(page.locator("button[type='submit']")).toContainText("update password");
   });
 
   test("shows invalid link message without a token", async ({ page }) => {

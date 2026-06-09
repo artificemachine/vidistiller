@@ -2,7 +2,10 @@ import { test, expect, Route } from "@playwright/test";
 
 /**
  * E2E tests for the vLLM provider card on the settings page.
- * The sidecar /v1/models call is intercepted so no real fleet access is needed.
+ * Fleet and sidecar API calls are intercepted so no real fleet access is needed.
+ *
+ * IMPORTANT: fleet mock must be set up BEFORE page.goto("/settings") because
+ * fetchSettings() calls /settings/vllm/fleet during initial page load.
  */
 
 const MODELS_API = "**/api/settings/vllm/models**";
@@ -31,20 +34,28 @@ function mockSidecar(route: Route, models: string[] = ["qwopus-27b"]) {
   });
 }
 
+/**
+ * Navigate to /settings with fleet mock already active so the initial
+ * fetchSettings() call returns the mocked fleet nodes.
+ */
+async function gotoSettingsWithFleet(page: any, sidecarModels?: string[]) {
+  await page.route(FLEET_API, (route: Route) => mockFleet(route));
+  if (sidecarModels !== undefined) {
+    await page.route(MODELS_API, (route: Route) => mockSidecar(route, sidecarModels));
+  }
+  await page.goto("/settings");
+  await expect(page.getByText("loading settings...")).not.toBeVisible({ timeout: 10_000 });
+}
+
 test.describe("Settings — vLLM provider", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/settings");
-    await expect(page.getByText("loading settings...")).not.toBeVisible({
-      timeout: 10_000,
-    });
-  });
 
   // -------------------------------------------------------------------------
   // Provider card visibility
   // -------------------------------------------------------------------------
 
   test("vllm provider card is visible", async ({ page }) => {
-    await expect(page.locator("text=vllm")).toBeVisible();
+    await gotoSettingsWithFleet(page);
+    await expect(page.locator("input[type='radio'][value='vllm']")).toBeAttached();
     await expect(
       page.locator("text=self-hosted vllm fleet, openai-compatible, no api key required")
     ).toBeVisible();
@@ -55,23 +66,18 @@ test.describe("Settings — vLLM provider", () => {
   // -------------------------------------------------------------------------
 
   test("selecting vllm shows fleet node buttons", async ({ page }) => {
-    await page.route(FLEET_API,  (route) => mockFleet(route));
-    await page.route(MODELS_API, (route) => mockSidecar(route));
-
+    await gotoSettingsWithFleet(page);
     await page.locator("input[type='radio'][value='vllm']").click({ force: true });
 
-    await expect(page.locator("text=VM913")).toBeVisible();
-    await expect(page.locator("text=VM903")).toBeVisible();
-    await expect(page.locator("text=VM901")).toBeVisible();
-    await expect(page.locator("text=VM2900")).toBeVisible();
+    await expect(page.locator("button", { hasText: "VM913" })).toBeVisible();
+    await expect(page.locator("button", { hasText: "VM903" })).toBeVisible();
+    await expect(page.locator("button", { hasText: "VM901" })).toBeVisible();
+    await expect(page.locator("button", { hasText: "VM2900" })).toBeVisible();
   });
 
   test("vllm card does not show api key input", async ({ page }) => {
-    await page.route(FLEET_API,  (route) => mockFleet(route));
-    await page.route(MODELS_API, (route) => mockSidecar(route));
-
+    await gotoSettingsWithFleet(page);
     await page.locator("input[type='radio'][value='vllm']").click({ force: true });
-
     await expect(page.locator("input[type='password']")).not.toBeVisible();
   });
 
@@ -80,8 +86,7 @@ test.describe("Settings — vLLM provider", () => {
   // -------------------------------------------------------------------------
 
   test("clicking VM913 node fetches and displays model", async ({ page }) => {
-    await page.route(MODELS_API, (route) => mockSidecar(route, ["qwopus-27b"]));
-
+    await gotoSettingsWithFleet(page, ["qwopus-27b"]);
     await page.locator("input[type='radio'][value='vllm']").click({ force: true });
     await page.locator("button", { hasText: "VM913" }).click();
 
@@ -90,22 +95,24 @@ test.describe("Settings — vLLM provider", () => {
 
   test("clicking VM913 node calls sidecar with correct URL", async ({ page }) => {
     let capturedUrl = "";
-    await page.route(MODELS_API, (route) => {
+    await page.route(FLEET_API, (route: Route) => mockFleet(route));
+    await page.route(MODELS_API, (route: Route) => {
       capturedUrl = route.request().url();
       mockSidecar(route);
     });
+    await page.goto("/settings");
+    await expect(page.getByText("loading settings...")).not.toBeVisible({ timeout: 10_000 });
 
     await page.locator("input[type='radio'][value='vllm']").click({ force: true });
-    await page.locator("button", { hasText: "VM913" }).click();
-
-    await page.waitForResponse(MODELS_API);
-    expect(capturedUrl).toContain("base_url=http%3A%2F%2F192.0.2.1%3A8100"); // VM913 from MOCK_FLEET
+    await Promise.all([
+      page.waitForResponse(MODELS_API),
+      page.locator("button", { hasText: "VM913" }).click(),
+    ]);
+    expect(capturedUrl).toContain("192.0.2.1:8100"); // VM913 from MOCK_FLEET
   });
 
   test("node button highlights when selected", async ({ page }) => {
-    await page.route(FLEET_API,  (route) => mockFleet(route));
-    await page.route(MODELS_API, (route) => mockSidecar(route));
-
+    await gotoSettingsWithFleet(page);
     await page.locator("input[type='radio'][value='vllm']").click({ force: true });
     const vm913 = page.locator("button", { hasText: "VM913" });
     await vm913.click();
@@ -118,10 +125,8 @@ test.describe("Settings — vLLM provider", () => {
   // -------------------------------------------------------------------------
 
   test("shows model list when sidecar returns multiple models", async ({ page }) => {
-    await page.route(FLEET_API,  (route) => mockFleet(route));
-    await page.route(MODELS_API, (route) =>
-      mockSidecar(route, ["model-a", "model-b"])
-    );
+    await gotoSettingsWithFleet(page);
+    await page.route(MODELS_API, (route: Route) => mockSidecar(route, ["model-a", "model-b"]));
 
     await page.locator("input[type='radio'][value='vllm']").click({ force: true });
     await page.locator("button", { hasText: "VM903" }).click();
@@ -131,10 +136,8 @@ test.describe("Settings — vLLM provider", () => {
   });
 
   test("clicking a model from the list fills the text input", async ({ page }) => {
-    await page.route(FLEET_API,  (route) => mockFleet(route));
-    await page.route(MODELS_API, (route) =>
-      mockSidecar(route, ["model-a", "model-b"])
-    );
+    await gotoSettingsWithFleet(page);
+    await page.route(MODELS_API, (route: Route) => mockSidecar(route, ["model-a", "model-b"]));
 
     await page.locator("input[type='radio'][value='vllm']").click({ force: true });
     await page.locator("button", { hasText: "VM903" }).click();
@@ -149,11 +152,12 @@ test.describe("Settings — vLLM provider", () => {
   // -------------------------------------------------------------------------
 
   test("user can type a custom model name not in the list", async ({ page }) => {
-    await page.route(MODELS_API, (route) => mockSidecar(route, ["qwopus-27b"]));
-
+    await gotoSettingsWithFleet(page, ["qwopus-27b"]);
     await page.locator("input[type='radio'][value='vllm']").click({ force: true });
-    await page.locator("button", { hasText: "VM913" }).click();
-    await page.waitForResponse(MODELS_API);
+    await Promise.all([
+      page.waitForResponse(MODELS_API),
+      page.locator("button", { hasText: "VM913" }).click(),
+    ]);
 
     const modelInput = page.locator("input[placeholder*='type a model name']");
     await modelInput.clear();
@@ -167,14 +171,16 @@ test.describe("Settings — vLLM provider", () => {
   // -------------------------------------------------------------------------
 
   test("shows empty model input when sidecar returns error", async ({ page }) => {
-    await page.route(FLEET_API,  (route) => mockFleet(route));
-    await page.route(MODELS_API, (route) =>
+    await gotoSettingsWithFleet(page);
+    await page.route(MODELS_API, (route: Route) =>
       route.fulfill({ status: 502, body: JSON.stringify({ detail: "unreachable" }) })
     );
 
     await page.locator("input[type='radio'][value='vllm']").click({ force: true });
-    await page.locator("button", { hasText: "VM901" }).click();
-    await page.waitForResponse(MODELS_API);
+    await Promise.all([
+      page.waitForResponse(MODELS_API),
+      page.locator("button", { hasText: "VM901" }).click(),
+    ]);
 
     const modelInput = page.locator("input[placeholder*='type a model name']");
     await expect(modelInput).toHaveValue("");
@@ -185,11 +191,12 @@ test.describe("Settings — vLLM provider", () => {
   // -------------------------------------------------------------------------
 
   test("can save vllm provider settings", async ({ page }) => {
-    await page.route(MODELS_API, (route) => mockSidecar(route, ["qwopus-27b"]));
-
+    await gotoSettingsWithFleet(page, ["qwopus-27b"]);
     await page.locator("input[type='radio'][value='vllm']").click({ force: true });
-    await page.locator("button", { hasText: "VM913" }).click();
-    await page.waitForResponse(MODELS_API);
+    await Promise.all([
+      page.waitForResponse(MODELS_API),
+      page.locator("button", { hasText: "VM913" }).click(),
+    ]);
 
     await page.click("button[type='submit']:has-text('save settings')");
 

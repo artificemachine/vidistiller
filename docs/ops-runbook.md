@@ -37,9 +37,9 @@ docker compose -f docker-compose.prod.yml up -d
 
 `docker rm -f` by name handles running, exited, and `Created`-state containers in one shot — which is what makes it reliable where `down --remove-orphans` + a `status=created` sweep is not.
 
-### Permanent fix (TODO)
+### Permanent fix (done — 2026-06-09)
 
-Add the force-remove-by-name step to the deploy script so it runs automatically before every `up -d`.
+`scripts/deploy.sh` runs `docker rm -f tutorial_*` before every `up -d`. Use `--dry-run` to preview without mutating.
 
 ---
 

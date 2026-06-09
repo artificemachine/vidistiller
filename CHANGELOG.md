@@ -148,3 +148,22 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: chore: remove 52 empty scaffolding stub files (never populated since initial commit); fix ops-runbook orphan-container note
 - 2026-06-09: chore(e2e): add playwright.config.ts + global-setup.ts so the e2e specs are runnable again; fix stale command + test-count references in CLAUDE.md
 - 2026-06-09: chore(e2e): avoid path.join in global-setup (shipguard JS-002 false positive); use template literal
+- 2026-06-09: ci: bump actions to Node 24-compatible versions ahead of 2026-06-16 cutover
+- 2026-06-09: chore(deploy): add orphan-safe deploy script (rm -f tutorial_* -> pull -> up)
+- 2026-06-09: feat(slides): add slide_status to distinguish failed/skipped slide runs
+- 2026-06-09: fix(slides): use incremental_ssim_threshold as non-LLM fast-path; record parent links
+- 2026-06-09: test(e2e): add CI e2e job (docker-compose.e2e.yml + playwright chromium)
+- 2026-06-09: chore: bump version to 1.9.0 (feat/slides minor bump)
+- 2026-06-09: fix(ci): quote shell array in deploy.sh; fix e2e build context to repo root
+- 2026-06-09: fix(e2e): use python3 -m celery for worker (celery not in PATH in runtime image)
+- 2026-06-09: fix(e2e): override api command to python -m uvicorn (matches prod; bins not on PATH)
+- 2026-06-09: fix(e2e): use postgres:5432 (compose service name) not localhost in DATABASE_URL
+- 2026-06-09: fix(docker): mkdir /data + chown appuser in Dockerfile for e2e startup
+- 2026-06-09: fix(e2e): set NODE_PATH so @playwright/test resolves from e2e/playwright.config.ts
+- 2026-06-09: fix(ci): bump e2e-tests timeout-minutes 8→20 (docker build takes ~7m in CI)
+- 2026-06-09: fix(e2e): wait for port 3000 (web) in boot step before running playwright tests
+- 2026-06-09: fix(e2e): global-setup: use dashboard link as auth indicator; handle middleware /login→/ redirect
+- 2026-06-09: fix(e2e): replace Logout button checks with dashboard link (logout is in collapsed dropdown)
+- 2026-06-09: ci(e2e): increase job timeout to 35min + 2 parallel workers to prevent timeout on 35-test suite
+- 2026-06-09: fix(e2e): update settings and password-reset tests for redesigned UI (radio cards, updated button text)
+- 2026-06-09: fix(e2e): use Promise.all for waitForResponse to eliminate race conditions in vllm tests
