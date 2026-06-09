@@ -120,16 +120,18 @@ class TestSlideGrouping:
         assert 11.0 not in timestamps
         assert 12.0 not in timestamps
 
-    def test_incremental_builds_skipped(self, service):
-        """Transitions classified as incremental should not create new slides."""
+    def test_incremental_builds_linked_as_children(self, service):
+        """Transitions classified as incremental become child slides, not top-level slides."""
         transitions = [
             {"timestamp": 30.0, "ssim": 0.5, "classification": "transition"},
             {"timestamp": 60.0, "ssim": 0.9, "llm_classification": "incremental"},
             {"timestamp": 90.0, "ssim": 0.5, "classification": "transition"},
         ]
         slides = service.slide_grouping(transitions, video_duration=120.0)
-        # Incremental at 60s should be skipped
-        assert len(slides) == 3  # initial + 30s + 90s
+        non_incr = [s for s in slides if not s["is_incremental_build"]]
+        assert len(non_incr) == 3  # initial + 30s + 90s (unchanged)
+        incr = [s for s in slides if s["is_incremental_build"]]
+        assert len(incr) == 1  # incremental at 60s is now a child, not dropped
 
     def test_slides_numbered_sequentially(self, service):
         """Slides should have sequential slide_number."""
@@ -291,3 +293,177 @@ class TestLLMAmbiguityClassification:
             service.llm_ambiguity_classification(
                 pairs, cancel_check=lambda: True, provider=provider, model="x"
             )
+
+
+# ==============================================================================
+# Iteration 4: incremental_ssim_threshold fast-path + parent-slide linking
+# ==============================================================================
+
+
+class TestFastPathIncrementalClassification:
+    """Unit: SSIM fast-path in llm_ambiguity_classification."""
+
+    @staticmethod
+    def _pair(ssim: float):
+        return {"classification": "ambiguous", "ssim": ssim, "ocr_text_before": "a", "ocr_text_after": "a b"}
+
+    def test_high_ssim_classified_incremental_without_llm(self, service):
+        """SSIM >= incremental_ssim_threshold → incremental with zero LLM calls."""
+        provider = MagicMock()
+        pairs = [self._pair(ssim=0.97)]
+        result = service.llm_ambiguity_classification(pairs, provider=provider, model="m")
+        assert result[0]["llm_classification"] == "incremental"
+        provider.generate.assert_not_called()
+
+    def test_below_threshold_still_uses_llm(self, service):
+        """SSIM below incremental_ssim_threshold → LLM called as before."""
+        provider = MagicMock()
+        provider.generate.return_value = "TRANSITION"
+        pairs = [self._pair(ssim=0.88)]
+        service.llm_ambiguity_classification(pairs, provider=provider, model="m")
+        provider.generate.assert_called_once()
+
+    def test_llm_call_count_drops_for_high_ssim_set(self, service):
+        """Only below-threshold pairs cost an LLM call; high-SSIM pairs are free."""
+        provider = MagicMock()
+        provider.generate.return_value = "TRANSITION"
+        pairs = [
+            self._pair(ssim=0.97),  # fast-path
+            self._pair(ssim=0.96),  # fast-path
+            self._pair(ssim=0.88),  # calls LLM
+        ]
+        service.llm_ambiguity_classification(pairs, provider=provider, model="m")
+        assert provider.generate.call_count == 1
+
+    def test_fast_path_unaffected_by_failing_provider(self, service):
+        """Fast-path does not call provider.generate; provider error is irrelevant."""
+        provider = MagicMock()
+        provider.generate.side_effect = RuntimeError("fleet down")
+        pairs = [self._pair(ssim=0.97)]
+        result = service.llm_ambiguity_classification(pairs, provider=provider, model="m")
+        assert result[0]["llm_classification"] == "incremental"
+        provider.generate.assert_not_called()
+
+
+class TestSlideGroupingIncrementalParent:
+    """Unit: slide_grouping records incremental builds as linked children."""
+
+    def test_incremental_build_records_parent_slide_number(self, service):
+        """Incremental transition produces a child slide with parent_slide_number set."""
+        transitions = [
+            {"timestamp": 30.0, "ssim": 0.5, "classification": "transition"},
+            {"timestamp": 60.0, "ssim": 0.97, "llm_classification": "incremental"},
+            {"timestamp": 90.0, "ssim": 0.5, "classification": "transition"},
+        ]
+        slides = service.slide_grouping(transitions, video_duration=120.0)
+        incremental = [s for s in slides if s["is_incremental_build"]]
+        assert len(incremental) == 1
+        assert incremental[0]["parent_slide_number"] is not None
+
+    def test_incremental_parent_is_preceding_slide(self, service):
+        """Incremental build's parent_slide_number points to the slide before it."""
+        transitions = [
+            {"timestamp": 30.0, "ssim": 0.5, "classification": "transition"},
+            {"timestamp": 60.0, "ssim": 0.97, "llm_classification": "incremental"},
+        ]
+        slides = service.slide_grouping(transitions, video_duration=120.0)
+        non_incr = [s for s in slides if not s["is_incremental_build"]]
+        incr = [s for s in slides if s["is_incremental_build"]]
+        assert len(incr) == 1
+        parent_num = incr[0]["parent_slide_number"]
+        parent = next(s for s in non_incr if s["slide_number"] == parent_num)
+        assert parent["start_timestamp"] == 30.0
+
+    def test_incremental_build_has_is_incremental_flag(self, service):
+        """Child slide must have is_incremental_build=True."""
+        transitions = [
+            {"timestamp": 30.0, "ssim": 0.5, "classification": "transition"},
+            {"timestamp": 50.0, "ssim": 0.97, "llm_classification": "incremental"},
+        ]
+        slides = service.slide_grouping(transitions, video_duration=100.0)
+        incr = [s for s in slides if s["is_incremental_build"]]
+        assert len(incr) == 1
+        assert incr[0]["is_incremental_build"] is True
+
+
+class TestSlideGroupingIncrementalStateMachine:
+    """State machine: incremental → has parent; real transition → no parent."""
+
+    def test_real_transitions_have_no_parent(self, service):
+        """Non-incremental slides must always have parent_slide_number=None."""
+        transitions = [
+            {"timestamp": 20.0, "ssim": 0.5, "classification": "transition"},
+            {"timestamp": 50.0, "ssim": 0.97, "llm_classification": "incremental"},
+        ]
+        slides = service.slide_grouping(transitions, video_duration=100.0)
+        non_incr = [s for s in slides if not s["is_incremental_build"]]
+        assert all(s["parent_slide_number"] is None for s in non_incr)
+
+    def test_incrementals_always_have_parent(self, service):
+        """Every incremental slide must have a non-None parent_slide_number."""
+        transitions = [
+            {"timestamp": 10.0, "ssim": 0.5, "classification": "transition"},
+            {"timestamp": 20.0, "ssim": 0.97, "llm_classification": "incremental"},
+            {"timestamp": 40.0, "ssim": 0.97, "llm_classification": "incremental"},
+        ]
+        slides = service.slide_grouping(transitions, video_duration=60.0)
+        incr = [s for s in slides if s["is_incremental_build"]]
+        assert len(incr) == 2
+        assert all(s["parent_slide_number"] is not None for s in incr)
+
+
+class TestSlideGroupingIncrementalContract:
+    """Contract: incremental slide dicts have all required fields."""
+
+    def test_incremental_slide_has_required_fields(self, service):
+        """Child slide must expose the same fields as a real slide."""
+        transitions = [
+            {"timestamp": 10.0, "ssim": 0.5, "classification": "transition"},
+            {"timestamp": 20.0, "ssim": 0.97, "llm_classification": "incremental"},
+        ]
+        slides = service.slide_grouping(transitions, video_duration=40.0)
+        incr = next(s for s in slides if s["is_incremental_build"])
+        required = {"slide_number", "start_timestamp", "end_timestamp",
+                    "ssim_transition_score", "is_incremental_build", "parent_slide_number"}
+        assert required <= set(incr.keys())
+
+
+class TestSlideGroupingIncrementalRegression:
+    """Regression: non-incremental slides are numbered correctly even with incrementals."""
+
+    def test_slide_numbers_unaffected_by_incrementals(self, service):
+        """Adding incrementals must not change non-incremental slide numbering."""
+        transitions = [
+            {"timestamp": 20.0, "ssim": 0.5, "classification": "transition"},
+            {"timestamp": 35.0, "ssim": 0.97, "llm_classification": "incremental"},
+            {"timestamp": 60.0, "ssim": 0.5, "classification": "transition"},
+        ]
+        slides = service.slide_grouping(transitions, video_duration=100.0)
+        non_incr = sorted([s for s in slides if not s["is_incremental_build"]], key=lambda x: x["slide_number"])
+        numbers = [s["slide_number"] for s in non_incr]
+        assert numbers == list(range(1, len(non_incr) + 1))
+
+    def test_incremental_count_excluded_from_non_incremental_count(self, service):
+        """Updating the existing test: incremental builds are now children, not dropped."""
+        transitions = [
+            {"timestamp": 30.0, "ssim": 0.5, "classification": "transition"},
+            {"timestamp": 60.0, "ssim": 0.9, "llm_classification": "incremental"},
+            {"timestamp": 90.0, "ssim": 0.5, "classification": "transition"},
+        ]
+        slides = service.slide_grouping(transitions, video_duration=120.0)
+        non_incr = [s for s in slides if not s["is_incremental_build"]]
+        assert len(non_incr) == 3  # initial + 30s + 90s (same as before)
+        incr = [s for s in slides if s["is_incremental_build"]]
+        assert len(incr) == 1  # incremental at 60s now a child, not dropped
+
+
+class TestFastPathChaos:
+    """Chaos: provider failures below threshold don't affect fast-path."""
+
+    def test_provider_error_below_threshold_falls_back_to_transition(self, service):
+        """Provider error on low-SSIM pair falls back to transition (existing chaos test)."""
+        provider = MagicMock()
+        provider.generate.side_effect = RuntimeError("fleet unreachable")
+        pairs = [{"classification": "ambiguous", "ssim": 0.88, "ocr_text_before": "a", "ocr_text_after": "b"}]
+        result = service.llm_ambiguity_classification(pairs, provider=provider, model="x")
+        assert result[0]["llm_classification"] == "transition"

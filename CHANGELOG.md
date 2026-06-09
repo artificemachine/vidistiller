@@ -151,3 +151,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: ci: bump actions to Node 24-compatible versions ahead of 2026-06-16 cutover
 - 2026-06-09: chore(deploy): add orphan-safe deploy script (rm -f tutorial_* -> pull -> up)
 - 2026-06-09: feat(slides): add slide_status to distinguish failed/skipped slide runs
+- 2026-06-09: fix(slides): use incremental_ssim_threshold as non-LLM fast-path; record parent links
