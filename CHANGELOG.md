@@ -148,3 +148,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: chore: remove 52 empty scaffolding stub files (never populated since initial commit); fix ops-runbook orphan-container note
 - 2026-06-09: chore(e2e): add playwright.config.ts + global-setup.ts so the e2e specs are runnable again; fix stale command + test-count references in CLAUDE.md
 - 2026-06-09: chore(e2e): avoid path.join in global-setup (shipguard JS-002 false positive); use template literal
+- 2026-06-09: ci: bump actions to Node 24-compatible versions ahead of 2026-06-16 cutover
