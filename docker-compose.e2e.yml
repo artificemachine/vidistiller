@@ -36,8 +36,8 @@ services:
 
   api:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: e2e_api
     environment:
       DATABASE_URL: ${E2E_DATABASE_URL}
@@ -66,8 +66,8 @@ services:
 
   celery_worker:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: e2e_celery_worker
     command: celery -A app.tasks worker --loglevel=warning
     environment:

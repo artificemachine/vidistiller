@@ -154,3 +154,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: fix(slides): use incremental_ssim_threshold as non-LLM fast-path; record parent links
 - 2026-06-09: test(e2e): add CI e2e job (docker-compose.e2e.yml + playwright chromium)
 - 2026-06-09: chore: bump version to 1.9.0 (feat/slides minor bump)
+- 2026-06-09: fix(ci): quote shell array in deploy.sh; fix e2e build context to repo root

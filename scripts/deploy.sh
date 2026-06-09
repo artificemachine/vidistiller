@@ -19,24 +19,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 force_remove_project_containers() {
-  local raw names
-  raw=$(docker container ls -a --no-trunc --format '{{.Names}}' 2>/dev/null) || true
-  names=$(printf '%s\n' "$raw" | grep '^tutorial_' || true)
+  local -a name_arr
+  mapfile -t name_arr < <(docker container ls -a --no-trunc --format '{{.Names}}' 2>/dev/null | grep '^tutorial_' || true)
 
-  if [[ -z "$names" ]]; then
+  if [[ ${#name_arr[@]} -eq 0 ]]; then
     echo "[deploy] No tutorial_ containers found — skipping force-remove"
     return
   fi
 
-  local names_inline
-  names_inline=$(printf '%s' "$names" | tr '\n' ' ')
-
   if [[ "$DRY_RUN" == "true" ]]; then
-    # shellcheck disable=SC2086
-    echo "[DRY-RUN] docker rm -f $names_inline"
+    echo "[DRY-RUN] docker rm -f ${name_arr[*]}"
   else
-    # shellcheck disable=SC2086
-    docker rm -f $names_inline
+    docker rm -f "${name_arr[@]}"
   fi
 }
 
