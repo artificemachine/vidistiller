@@ -353,6 +353,7 @@ class SlideDetectionService:
         video_path: str,
         slides: List[Dict],
         output_dir: str,
+        frame_ocr_cache: Optional[Dict[int, Optional[str]]] = None,
     ) -> List[Dict]:
         """
         Extract frame at end - 0.5s for each slide, save JPEG, run OCR.
@@ -393,7 +394,10 @@ class SlideDetectionService:
 
             # OCR
             if ocr_enabled:
-                slide["ocr_text"] = self._extract_ocr_text(frame)
+                if frame_ocr_cache is not None and frame_idx in frame_ocr_cache:
+                    slide["ocr_text"] = frame_ocr_cache[frame_idx]
+                else:
+                    slide["ocr_text"] = self._extract_ocr_text(frame)
 
         cap.release()
         return slides
@@ -481,7 +485,7 @@ class SlideDetectionService:
 
         # 2. Get video duration
         cap = cv2.VideoCapture(video_path)
-        video_duration = cap.get(cv2.CAP_PROP_FRAME_COUNT) / max(cap.get(cv2.CAP_PROP_FPS), 1.0)
+        video_duration = self._get_video_duration(cap)
         cap.release()
 
         # 3. SSIM transition scan
@@ -496,10 +500,11 @@ class SlideDetectionService:
         # 4. LLM classification for ambiguous transitions
         ambiguous_count = sum(1 for t in transitions if t.get("classification") == "ambiguous")
         llm_classifications = 0
+        frame_ocr_cache: Dict[int, Optional[str]] = {}
         if ambiguous_count > 0:
             _add_log(f"Classifying {ambiguous_count} ambiguous transitions with LLM...", "info", "slide_llm")
-            # Get OCR text for ambiguous frames to help LLM classify
-            self._add_ocr_context_to_transitions(video_path, transitions, layout)
+            # Get OCR text for ambiguous frames; cache is reused by final_state_capture
+            frame_ocr_cache = self._add_ocr_context_to_transitions(video_path, transitions, layout)
             transitions = self.llm_ambiguity_classification(
                 transitions, cancel_check, provider=provider, model=model
             )
@@ -516,7 +521,7 @@ class SlideDetectionService:
         _add_log("Capturing final-state frames and running OCR...", "info", "slide_capture")
         if cancel_check and cancel_check():
             raise CancelledException()
-        slide_dicts = self.final_state_capture(video_path, slide_dicts, output_dir)
+        slide_dicts = self.final_state_capture(video_path, slide_dicts, output_dir, frame_ocr_cache=frame_ocr_cache)
 
         # 7. Transcript alignment
         segments = []
@@ -583,6 +588,21 @@ class SlideDetectionService:
     # Helpers
     # ------------------------------------------------------------------
 
+    def _get_video_duration(self, cap) -> float:
+        """Derive video duration in seconds from an open VideoCapture.
+
+        Falls back to a seek-to-end + POS_MSEC read for containers (VBR,
+        streaming) where CAP_PROP_FRAME_COUNT reports 0.
+        """
+        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 1.0
+        duration = frame_count / fps
+        if duration > 0:
+            return duration
+        cap.set(cv2.CAP_PROP_POS_AVI_RATIO, 1.0)
+        duration_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+        return duration_ms / 1000.0
+
     def _crop_content_region(self, gray: np.ndarray, layout: str) -> np.ndarray:
         """Crop frame to content region based on layout type."""
         h, w = gray.shape[:2]
@@ -633,11 +653,16 @@ class SlideDetectionService:
 
     def _add_ocr_context_to_transitions(
         self, video_path: str, transitions: List[Dict], layout: str
-    ) -> None:
-        """Add OCR text context to ambiguous transitions for LLM classification."""
+    ) -> Dict[int, Optional[str]]:
+        """Add OCR text context to ambiguous transitions for LLM classification.
+
+        Returns a frame_index → ocr_text cache so final_state_capture can skip
+        re-running Tesseract on frames already processed here.
+        """
+        frame_ocr_cache: Dict[int, Optional[str]] = {}
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            return
+            return frame_ocr_cache
 
         video_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
 
@@ -647,20 +672,25 @@ class SlideDetectionService:
 
             frame_idx = t["frame_index"]
 
-            # Get frame before transition
+            # Get frame before transition (deduplicated via cache)
             before_idx = max(0, frame_idx - int(video_fps / self.slide_settings.sampling_fps))
-            cap.set(cv2.CAP_PROP_POS_FRAMES, before_idx)
-            ret, before_frame = cap.read()
-            if ret:
-                t["ocr_text_before"] = self._extract_ocr_text(before_frame)
+            if before_idx not in frame_ocr_cache:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, before_idx)
+                ret, before_frame = cap.read()
+                ocr = self._extract_ocr_text(before_frame) if ret else None
+                frame_ocr_cache[before_idx] = ocr
+            t["ocr_text_before"] = frame_ocr_cache[before_idx]
 
-            # Get frame at transition
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-            ret, after_frame = cap.read()
-            if ret:
-                t["ocr_text_after"] = self._extract_ocr_text(after_frame)
+            # Get frame at transition (deduplicated via cache)
+            if frame_idx not in frame_ocr_cache:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, after_frame = cap.read()
+                ocr = self._extract_ocr_text(after_frame) if ret else None
+                frame_ocr_cache[frame_idx] = ocr
+            t["ocr_text_after"] = frame_ocr_cache[frame_idx]
 
         cap.release()
+        return frame_ocr_cache
 
     @staticmethod
     def _final_classification(transition: Dict) -> str:

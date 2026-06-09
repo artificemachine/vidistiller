@@ -167,3 +167,10 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: ci(e2e): increase job timeout to 35min + 2 parallel workers to prevent timeout on 35-test suite
 - 2026-06-09: fix(e2e): update settings and password-reset tests for redesigned UI (radio cards, updated button text)
 - 2026-06-09: fix(e2e): use Promise.all for waitForResponse to eliminate race conditions in vllm tests
+- 2026-06-09: fix(slides): cancel_check must signal on CANCELLED status not FAILED
+- 2026-06-09: test(slides): unit coverage for ssim_transition_scan and layout_detection
+- 2026-06-09: test(slides): integration tests for run_full_pipeline orchestration
+- 2026-06-09: fix(slides): reliable video_duration fallback + OCR frame-index cache
+- 2026-06-09: test(frontend): assert slide mode toggle sets is_slide_mode in API payload
+- 2026-06-09: chore(release): bump to v1.9.1 (cancel signal fix, SSIM/layout/pipeline tests, video_duration fallback, OCR cache, frontend toggle test)
+- 2026-06-09: fix(e2e): narrow password-reset locator to avoid strict-mode violation

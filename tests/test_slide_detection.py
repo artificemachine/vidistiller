@@ -467,3 +467,363 @@ class TestFastPathChaos:
         pairs = [{"classification": "ambiguous", "ssim": 0.88, "ocr_text_before": "a", "ocr_text_after": "b"}]
         result = service.llm_ambiguity_classification(pairs, provider=provider, model="x")
         assert result[0]["llm_classification"] == "transition"
+
+
+# ==============================================================================
+# Iteration 2 — ssim_transition_scan + layout_detection contour-voting
+# ==============================================================================
+
+class TestSSIMTransitionScan:
+    """Unit: ssim_transition_scan classifies frame pairs by SSIM band."""
+
+    def _make_cap(self, n_frames, video_fps=30.0):
+        """Mock VideoCapture yielding n_frames BGR frames then (False, None)."""
+        cap = MagicMock()
+        cap.isOpened.return_value = True
+        cap.get.return_value = video_fps
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        cap.read.side_effect = [(True, frame)] * n_frames + [(False, None)]
+        cap.release.return_value = None
+        return cap
+
+    def test_cannot_open_video_raises(self, service):
+        """Bad video path → SlideDetectionException, not a silent fallback."""
+        from app.exceptions import SlideDetectionException
+        cap = MagicMock()
+        cap.isOpened.return_value = False
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=cap):
+            with pytest.raises(SlideDetectionException):
+                service.ssim_transition_scan("/nonexistent.mp4", 1.0, "full_frame")
+
+    def test_identical_frames_produce_no_transitions(self, service):
+        """Frames with SSIM=1.0 are classified 'same' and not stored."""
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_compute_ssim", return_value=1.0):
+            transitions, sampled = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
+        assert transitions == []
+        assert sampled > 0
+
+    def test_low_ssim_produces_transition_classification(self, service):
+        """SSIM below ssim_threshold (0.85) → 'transition' classification."""
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_compute_ssim", return_value=0.5):
+            transitions, _ = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
+        assert len(transitions) > 0
+        assert all(t["classification"] == "transition" for t in transitions)
+
+    def test_ambiguous_ssim_produces_ambiguous_classification(self, service):
+        """SSIM in [ssim_ambiguous_low, ssim_ambiguous_high] → 'ambiguous' classification."""
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_compute_ssim", return_value=0.89):
+            transitions, _ = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
+        assert len(transitions) > 0
+        assert all(t["classification"] == "ambiguous" for t in transitions)
+
+    def test_frame_skip_limits_frames_sampled(self, service):
+        """video_fps=30, sampling_fps=1 → frame_skip=30, exactly 2 frames sampled in a 60-frame clip."""
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60, video_fps=30.0)), \
+             patch.object(service, "_compute_ssim", return_value=1.0):
+            _, sampled = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
+        assert sampled == 2
+
+
+class TestLayoutDetectionContourVoting:
+    """Unit: layout_detection votes correctly from contour analysis."""
+
+    def _make_cap(self, n_frames=5, w=1000, h=1000):
+        """Mock VideoCapture returning n_frames identical blank frames."""
+        cap = MagicMock()
+        cap.isOpened.return_value = True
+        cap.get.return_value = float(n_frames)
+        frame = np.zeros((h, w, 3), dtype=np.uint8)
+        cap.read.return_value = (True, frame)
+        cap.set.return_value = None
+        cap.release.return_value = None
+        return cap
+
+    def test_pip_speaker_box_votes_detected(self, service):
+        """Contour with small-corner bounding rect on all frames → pip_speaker."""
+        fake_cnt = MagicMock()
+        cap = self._make_cap()
+        # 200x200 box at (50,50): area_ratio=0.04, aspect=1.0, x=50<300 (corner) → pip vote
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=cap), \
+             patch("app.services.slide_detection.cv2.cvtColor",
+                   return_value=np.zeros((1000, 1000), dtype=np.uint8)), \
+             patch("app.services.slide_detection.cv2.Canny",
+                   return_value=np.zeros((1000, 1000), dtype=np.uint8)), \
+             patch("app.services.slide_detection.cv2.findContours",
+                   return_value=([fake_cnt], None)), \
+             patch("app.services.slide_detection.cv2.boundingRect",
+                   return_value=(50, 50, 200, 200)):
+            result = service.layout_detection("/fake.mp4")
+        assert result == "pip_speaker"
+
+    def test_split_panel_contour_votes_detected(self, service):
+        """Contour covering ~half the frame on all frames → split_panel."""
+        fake_cnt = MagicMock()
+        cap = self._make_cap()
+        # 700x700 box: area_ratio=0.49, aspect=1.0 → split vote; not a pip (area_ratio>0.15)
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=cap), \
+             patch("app.services.slide_detection.cv2.cvtColor",
+                   return_value=np.zeros((1000, 1000), dtype=np.uint8)), \
+             patch("app.services.slide_detection.cv2.Canny",
+                   return_value=np.zeros((1000, 1000), dtype=np.uint8)), \
+             patch("app.services.slide_detection.cv2.findContours",
+                   return_value=([fake_cnt], None)), \
+             patch("app.services.slide_detection.cv2.boundingRect",
+                   return_value=(0, 0, 700, 700)):
+            result = service.layout_detection("/fake.mp4")
+        assert result == "split_panel"
+
+    def test_no_voting_contours_returns_full_frame(self, service):
+        """Empty contour list → no votes → full_frame default."""
+        cap = self._make_cap()
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=cap), \
+             patch("app.services.slide_detection.cv2.cvtColor",
+                   return_value=np.zeros((1000, 1000), dtype=np.uint8)), \
+             patch("app.services.slide_detection.cv2.Canny",
+                   return_value=np.zeros((1000, 1000), dtype=np.uint8)), \
+             patch("app.services.slide_detection.cv2.findContours",
+                   return_value=([], None)):
+            result = service.layout_detection("/fake.mp4")
+        assert result == "full_frame"
+
+
+# ==============================================================================
+# Iteration 3 — run_full_pipeline orchestration integration tests
+# ==============================================================================
+
+class TestRunFullPipeline:
+    """Integration: run_full_pipeline orchestrates all stages in the correct order."""
+
+    def _slide_dict(self, num, is_incremental=False, parent_num=None):
+        return {
+            "slide_number": num,
+            "start_timestamp": float(num * 30),
+            "end_timestamp": float(num * 30 + 30),
+            "ssim_transition_score": 0.5,
+            "is_incremental_build": is_incremental,
+            "parent_slide_number": parent_num,
+            "final_frame_path": None,
+            "ocr_text": None,
+            "transcript_text": None,
+            "image_width": None,
+            "image_height": None,
+            "file_size": None,
+        }
+
+    def test_missing_video_raises_slide_detection_exception(self, service):
+        """No video file path → SlideDetectionException before any stage runs."""
+        from app.exceptions import SlideDetectionException
+
+        db = MagicMock()
+        job = MagicMock()
+        job.video_file_path = None
+
+        with pytest.raises(SlideDetectionException):
+            service.run_full_pipeline(db, job, None)
+
+    def test_pipeline_calls_all_steps_in_order(self, service, tmp_path):
+        """Happy path: stages run in order (layout→ssim→grouping→capture)."""
+        video_file = tmp_path / "fake.mp4"
+        video_file.write_bytes(b"FAKE")
+
+        db = MagicMock()
+        job = MagicMock()
+        job.video_file_path = str(video_file)
+        job.job_id = "order-test-uuid"
+        job.id = 1
+        job.transcripts = []
+
+        call_order = []
+
+        with patch.object(service, "layout_detection",
+                          side_effect=lambda *a: call_order.append("layout") or "full_frame"), \
+             patch.object(service, "ssim_transition_scan",
+                          side_effect=lambda *a, **kw: call_order.append("ssim") or ([], 0)), \
+             patch.object(service, "slide_grouping",
+                          side_effect=lambda *a: call_order.append("grouping") or [self._slide_dict(1)]), \
+             patch.object(service, "final_state_capture",
+                          side_effect=lambda *a, **kw: call_order.append("capture") or [self._slide_dict(1)]), \
+             patch("app.services.slide_detection.cv2.VideoCapture") as MockCap:
+            MockCap.return_value.get.return_value = 30.0
+            service.run_full_pipeline(db, job, None)
+
+        # No ambiguous transitions → LLM step skipped. No transcript segments → alignment skipped.
+        assert call_order == ["layout", "ssim", "grouping", "capture"]
+
+    def test_cancel_mid_pipeline_raises_cancelled_exception(self, service, tmp_path):
+        """cancel_check returning True after layout detection raises CancelledException."""
+        from app.services.llm import CancelledException
+
+        video_file = tmp_path / "fake.mp4"
+        video_file.write_bytes(b"FAKE")
+
+        db = MagicMock()
+        job = MagicMock()
+        job.video_file_path = str(video_file)
+        job.job_id = "cancel-test-uuid"
+        job.id = 2
+
+        call_count = {"n": 0}
+
+        def cancel_after_layout():
+            call_count["n"] += 1
+            return call_count["n"] >= 2  # False on 1st, True on 2nd
+
+        with patch.object(service, "layout_detection", return_value="full_frame"), \
+             patch("app.services.slide_detection.cv2.VideoCapture") as MockCap:
+            MockCap.return_value.get.return_value = 30.0
+            with pytest.raises(CancelledException):
+                service.run_full_pipeline(db, job, cancel_after_layout)
+
+    def test_incremental_builds_linked_via_parent_slide_id(self, service, test_db, test_user, tmp_path):
+        """Incremental slide has parent_slide_id pointing to the correct parent row."""
+        from app.db.models import (
+            ProcessingJob, ProcessingMode, ProcessingStatus, Slide,
+        )
+
+        video_file = tmp_path / "fake.mp4"
+        video_file.write_bytes(b"FAKE")
+
+        job = ProcessingJob(
+            job_id="incr-parent-test-uuid",
+            status=ProcessingStatus.PROCESSING,
+            video_url="https://youtube.com/watch?v=fake",
+            video_file_path=str(video_file),
+            processing_mode=ProcessingMode.SLIDE_AWARE.value,
+            user_id=test_user.id,
+        )
+        test_db.add(job)
+        test_db.flush()
+
+        non_incr = self._slide_dict(1, is_incremental=False)
+        incr = self._slide_dict(2, is_incremental=True, parent_num=1)
+
+        with patch.object(service, "layout_detection", return_value="full_frame"), \
+             patch.object(service, "ssim_transition_scan", return_value=([], 0)), \
+             patch.object(service, "slide_grouping", return_value=[non_incr, incr]), \
+             patch.object(service, "final_state_capture", return_value=[non_incr, incr]), \
+             patch.object(service, "transcript_alignment",
+                          side_effect=lambda slides, *a: slides), \
+             patch("app.services.slide_detection.cv2.VideoCapture") as MockCap:
+            MockCap.return_value.get.return_value = 30.0
+            service.run_full_pipeline(test_db, job, None)
+
+        slides = test_db.query(Slide).filter(Slide.job_id == job.id).all()
+        parent_slides = [s for s in slides if not s.is_incremental_build]
+        incremental_slides = [s for s in slides if s.is_incremental_build]
+
+        assert len(parent_slides) == 1, "Expected 1 non-incremental slide"
+        assert len(incremental_slides) == 1, "Expected 1 incremental slide"
+        assert incremental_slides[0].parent_slide_id == parent_slides[0].id
+
+    def test_metadata_row_committed(self, service, test_db, test_user, tmp_path):
+        """After a successful run, a SlideDetectionMetadata row is persisted."""
+        from app.db.models import (
+            ProcessingJob, ProcessingMode, ProcessingStatus, SlideDetectionMetadata,
+        )
+
+        video_file = tmp_path / "fake.mp4"
+        video_file.write_bytes(b"FAKE")
+
+        job = ProcessingJob(
+            job_id="metadata-test-uuid",
+            status=ProcessingStatus.PROCESSING,
+            video_url="https://youtube.com/watch?v=fake2",
+            video_file_path=str(video_file),
+            processing_mode=ProcessingMode.SLIDE_AWARE.value,
+            user_id=test_user.id,
+        )
+        test_db.add(job)
+        test_db.flush()
+
+        with patch.object(service, "layout_detection", return_value="full_frame"), \
+             patch.object(service, "ssim_transition_scan", return_value=([], 0)), \
+             patch.object(service, "slide_grouping", return_value=[self._slide_dict(1)]), \
+             patch.object(service, "final_state_capture", return_value=[self._slide_dict(1)]), \
+             patch("app.services.slide_detection.cv2.VideoCapture") as MockCap:
+            MockCap.return_value.get.return_value = 30.0
+            service.run_full_pipeline(test_db, job, None)
+
+        metadata = (
+            test_db.query(SlideDetectionMetadata)
+            .filter(SlideDetectionMetadata.job_id == job.id)
+            .first()
+        )
+        assert metadata is not None
+        assert metadata.total_slides == 1
+
+    def test_video_duration_nonzero_when_frame_count_zero(self, service, tmp_path):
+        """VBR containers report FRAME_COUNT==0; _get_video_duration must fall back to POS_MSEC/1000."""
+        import cv2 as _cv2
+
+        video_file = tmp_path / "vbr.mp4"
+        video_file.write_bytes(b"FAKE")
+
+        db = MagicMock()
+        job = MagicMock()
+        job.video_file_path = str(video_file)
+        job.job_id = "vbr-duration-uuid"
+        job.id = 10
+        job.transcripts = []
+
+        captured_duration = {}
+
+        def capture_grouping(transitions, duration):
+            captured_duration["v"] = duration
+            return [self._slide_dict(1)]
+
+        def mock_get(prop):
+            if prop == _cv2.CAP_PROP_FRAME_COUNT:
+                return 0.0
+            if prop == _cv2.CAP_PROP_FPS:
+                return 30.0
+            if prop == _cv2.CAP_PROP_POS_MSEC:
+                return 60000.0
+            return 0.0
+
+        with patch.object(service, "layout_detection", return_value="full_frame"), \
+             patch.object(service, "ssim_transition_scan", return_value=([], 0)), \
+             patch.object(service, "slide_grouping", side_effect=capture_grouping), \
+             patch.object(service, "final_state_capture", return_value=[self._slide_dict(1)]), \
+             patch("app.services.slide_detection.cv2.VideoCapture") as MockCap:
+            mock_cap = MagicMock()
+            mock_cap.get.side_effect = mock_get
+            MockCap.return_value = mock_cap
+            service.run_full_pipeline(db, job, None)
+
+        assert captured_duration.get("v") == 60.0
+
+
+class TestAddOcrContext:
+    """Unit: _add_ocr_context_to_transitions builds an OCR cache; final_state_capture reuses it."""
+
+    def test_ocr_not_called_twice_for_ambiguous_frame(self, service, tmp_path):
+        """OCR for a transition frame is cached; final_state_capture must not re-OCR the same frame index."""
+        fake_frame = np.zeros((100, 100, 3), dtype=np.uint8)
+
+        def make_cap():
+            cap = MagicMock()
+            cap.isOpened.return_value = True
+            cap.get.side_effect = lambda p: 30.0
+            cap.read.return_value = (True, fake_frame)
+            return cap
+
+        # Ambiguous transition at frame 30; final_state_capture targets frame 30
+        # (end_ts=1.5 → capture_ts=1.0 → frame_idx=int(1.0*30)=30)
+        transition = {"classification": "ambiguous", "frame_index": 30, "timestamp": 1.0}
+        slides = [{"slide_number": 1, "start_timestamp": 0.0, "end_timestamp": 1.5}]
+        output_dir = str(tmp_path / "slides")
+
+        with patch("app.services.slide_detection.cv2.VideoCapture", side_effect=lambda *a: make_cap()), \
+             patch.object(service, "_extract_ocr_text", return_value="cached text") as mock_ocr:
+            cache = service._add_ocr_context_to_transitions("/fake/video.mp4", [transition], "full_frame")
+            ocr_count_after_first_pass = mock_ocr.call_count
+
+            service.final_state_capture("/fake/video.mp4", slides, output_dir, frame_ocr_cache=cache)
+
+        assert mock_ocr.call_count == ocr_count_after_first_pass, (
+            f"_extract_ocr_text was called {mock_ocr.call_count - ocr_count_after_first_pass} extra time(s) "
+            "in final_state_capture — frame OCR cache was not applied"
+        )
