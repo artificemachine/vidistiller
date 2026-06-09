@@ -11,14 +11,14 @@ Project-specific rules and conventions. For global rules, see `~/.claude/CLAUDE.
 ---
 
 ## Quick Commands
-- **Start app**: `bash scripts/start-app.sh --force`
+- **Start app (full stack)**: `docker compose up -d`
 - **Frontend dev**: `cd frontend && npm run dev`
 - **Build**: `cd frontend && npm run build`
 - **Test frontend**: `cd frontend && npm test`
 - **Test backend**: `PYTHONPATH=backend .venv/bin/python -m pytest tests/ -v`
-- **Test E2E**: `cd frontend && npx playwright test --config=../e2e/playwright.config.ts`
+- **Test E2E**: `docker compose -f docker-compose.e2e.yml up -d` then `cd frontend && npm run test:e2e`
 - **Lint**: `cd frontend && npm run lint`
-- **Ship**: `bash scripts/ship.sh "commit message"`
+- **Ship**: `/ship` (slash command)
 
 ---
 
@@ -28,8 +28,8 @@ Project-specific rules and conventions. For global rules, see `~/.claude/CLAUDE.
 - `services/` — Reusable service modules (youtube, transcript, snapshot, llm)
 - `scripts/` — Automation scripts (start-app, ship, deploy)
 - `migrations/` — Alembic database migrations
-- `e2e/` — Playwright E2E tests (89 tests across 13 suites)
-- Frontend unit tests: 137 tests across 18 suites (Vitest + RTL)
+- `e2e/` — Playwright E2E tests (35 tests across 6 suites; run against `docker-compose.e2e.yml`)
+- Frontend unit tests: 221 tests across 22 suites (Vitest + RTL)
 
 ---
 
