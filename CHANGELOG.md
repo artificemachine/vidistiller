@@ -145,3 +145,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: fix(slides): route presentation-mode LLM disambiguation through the provider abstraction (vLLM fleet) instead of dead localhost Ollama
 - 2026-06-09: feat(frontend): rename 'obsidian' export button and landing chip to 'markdown'
 - 2026-06-09: chore(release): bump to v1.8.3 (presentation-mode LLM fix + markdown rename)
+- 2026-06-09: chore: remove 52 empty scaffolding stub files (never populated since initial commit); fix ops-runbook orphan-container note
