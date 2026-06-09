@@ -22,6 +22,10 @@ def service():
         settings.slide_detection.ocr_enabled = True
         settings.slide_detection.layout_sample_count = 5
         settings.slide_detection.incremental_ssim_threshold = 0.95
+        settings.slide_detection.pip_speaker_ssim_threshold = 0.65
+        settings.slide_detection.pip_speaker_ssim_ambiguous_low = 0.65
+        settings.slide_detection.pip_speaker_ssim_ambiguous_high = 0.80
+        settings.slide_detection.pip_speaker_min_slide_duration = 20.0
         settings.ollama.base_url = "http://localhost:11434"
         mock_settings.return_value = settings
         svc = SlideDetectionService()
@@ -526,6 +530,42 @@ class TestSSIMTransitionScan:
             _, sampled = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
         assert sampled == 2
 
+    def test_pip_speaker_uses_lower_thresholds(self, service):
+        """pip_speaker layout uses pip_speaker_ssim_* thresholds, not the full_frame ones.
+        SSIM=0.83: below full_frame threshold (0.85) → transition.
+        SSIM=0.83: above pip_speaker_ssim_ambiguous_high (0.80) → same → no transition stored.
+        """
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_compute_ssim", return_value=0.83):
+            full_transitions, _ = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
+        assert len(full_transitions) > 0, "full_frame should flag 0.83 as transition"
+
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_compute_ssim", return_value=0.83):
+            pip_transitions, _ = service.ssim_transition_scan("/fake.mp4", 1.0, "pip_speaker")
+        assert len(pip_transitions) == 0, "pip_speaker should treat 0.83 as same-content"
+
+    def test_pip_speaker_grouping_uses_longer_min_duration(self, service):
+        """slide_grouping with layout=pip_speaker enforces 20s minimum, not 3s.
+        Transitions at 5s, 10s, 15s, 25s: only t=25 passes the 20s gap from 0.
+        An initial slide is inserted at 0.0 (covers 0-25s), then the 25s slide.
+        Compare: full_frame (3s min) would produce a slide at each transition.
+        """
+        transitions = [
+            {"timestamp": 5.0, "ssim": 0.5, "classification": "transition", "llm_classification": "transition"},
+            {"timestamp": 10.0, "ssim": 0.5, "classification": "transition", "llm_classification": "transition"},
+            {"timestamp": 15.0, "ssim": 0.5, "classification": "transition", "llm_classification": "transition"},
+            {"timestamp": 25.0, "ssim": 0.5, "classification": "transition", "llm_classification": "transition"},
+        ]
+        pip_slides = service.slide_grouping(transitions, video_duration=60.0, layout="pip_speaker")
+        full_slides = service.slide_grouping(transitions, video_duration=60.0, layout="full_frame")
+        # pip_speaker: initial (0→25) + one real transition at 25s = 2 slides
+        assert len(pip_slides) == 2
+        assert pip_slides[0]["start_timestamp"] == 0.0
+        assert pip_slides[1]["start_timestamp"] == 25.0
+        # full_frame: all 4 transitions pass the 3s minimum → 4 slides (+ initial at 0.0 = 5)
+        assert len(full_slides) > len(pip_slides)
+
 
 class TestLayoutDetectionContourVoting:
     """Unit: layout_detection votes correctly from contour analysis."""
@@ -770,7 +810,7 @@ class TestRunFullPipeline:
 
         captured_duration = {}
 
-        def capture_grouping(transitions, duration):
+        def capture_grouping(transitions, duration, layout="full_frame"):
             captured_duration["v"] = duration
             return [self._slide_dict(1)]
 

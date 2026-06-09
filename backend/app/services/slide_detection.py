@@ -115,9 +115,14 @@ class SlideDetectionService:
         frame_idx = 0
         frames_sampled = 0
 
-        threshold = self.slide_settings.ssim_threshold
-        ambig_low = self.slide_settings.ssim_ambiguous_low
-        ambig_high = self.slide_settings.ssim_ambiguous_high
+        if layout == "pip_speaker":
+            threshold = self.slide_settings.pip_speaker_ssim_threshold
+            ambig_low = self.slide_settings.pip_speaker_ssim_ambiguous_low
+            ambig_high = self.slide_settings.pip_speaker_ssim_ambiguous_high
+        else:
+            threshold = self.slide_settings.ssim_threshold
+            ambig_low = self.slide_settings.ssim_ambiguous_low
+            ambig_high = self.slide_settings.ssim_ambiguous_high
 
         while True:
             ret, frame = cap.read()
@@ -245,7 +250,7 @@ class SlideDetectionService:
     # ------------------------------------------------------------------
 
     def slide_grouping(
-        self, transitions: List[Dict], video_duration: float
+        self, transitions: List[Dict], video_duration: float, layout: str = "full_frame"
     ) -> List[Dict]:
         """
         Merge incremental builds, enforce minimum duration, and assign slide numbers.
@@ -255,7 +260,10 @@ class SlideDetectionService:
              "ssim_transition_score": float, "is_incremental_build": bool,
              "parent_slide_number": Optional[int]}
         """
-        min_duration = self.slide_settings.min_slide_duration
+        if layout == "pip_speaker":
+            min_duration = self.slide_settings.pip_speaker_min_slide_duration
+        else:
+            min_duration = self.slide_settings.min_slide_duration
 
         # Separate real transitions from incremental builds
         real_transitions = []
@@ -514,7 +522,7 @@ class SlideDetectionService:
         _add_log("Grouping transitions into slides...", "info", "slide_grouping")
         if cancel_check and cancel_check():
             raise CancelledException()
-        slide_dicts = self.slide_grouping(transitions, video_duration)
+        slide_dicts = self.slide_grouping(transitions, video_duration, layout)
         _add_log(f"Grouped into {len(slide_dicts)} slides", "info", "slide_grouping")
 
         # 6. Final state capture + OCR
