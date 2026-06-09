@@ -122,7 +122,7 @@ export default function Home() {
               timestamped transcripts
             </span>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-card-light dark:bg-card-dark text-text-dark dark:text-text-light border border-border-light dark:border-border-dark">
-              obsidian export
+              markdown export
             </span>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-card-light dark:bg-card-dark text-text-dark dark:text-text-light border border-border-light dark:border-border-dark">
               slide detection

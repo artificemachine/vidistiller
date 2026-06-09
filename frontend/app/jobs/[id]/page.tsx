@@ -895,12 +895,12 @@ export default function JobDetail() {
           <button
             onClick={handleExportObsidian}
             className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-border-light text-text-dark hover:bg-border-light/80 dark:bg-border-dark dark:text-text-light dark:hover:bg-border-dark/80 transition-colors"
-            title="Export to Obsidian ZIP"
+            title="Export to Markdown ZIP"
           >
             <svg width="12" height="12" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M7 1v8M7 9L4 6M7 9l3-3M2 11h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            obsidian
+            markdown
           </button>
           <button
             onClick={handlePrintPDF}

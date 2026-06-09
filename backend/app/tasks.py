@@ -434,6 +434,52 @@ def _resolve_fleet_url(model_name: str) -> str | None:
     return None
 
 
+def _resolve_job_llm(db, job):
+    """
+    Resolve the LLM provider + model for a job's owner (fleet-aware).
+
+    Mirrors the resolution summarization uses so background tasks share one code
+    path: honour the owner's configured provider/model, default to the vLLM fleet,
+    and pick the VM that actually has the model loaded.
+
+    Returns:
+        (provider, model_name) — provider is an LLMProvider, or (None, None) if
+        a provider could not be built.
+    """
+    from app.db.models import User
+    from app.core.crypto import decrypt_field
+    from app.services.llm_providers import build_provider, DEFAULT_MODELS
+
+    owner = db.query(User).filter(User.id == job.user_id).first() if job.user_id else None
+    provider_name = owner.llm_provider if owner and owner.llm_provider else "vllm"
+    model_name = owner.llm_model if owner and owner.llm_model else None
+
+    resolved_model = model_name or DEFAULT_MODELS.get(provider_name) or "gemma4-31b"
+
+    fleet_url = _resolve_fleet_url(resolved_model) if provider_name == "vllm" else None
+    default_url = fleet_url or os.environ.get("VLLM_VM913_URL") or os.environ.get("OLLAMA_URL")
+    base_url = (owner.llm_ollama_url if owner and owner.llm_ollama_url else None) or default_url
+
+    api_key = None
+    if owner and owner.llm_api_key_encrypted:
+        try:
+            api_key = decrypt_field(owner.llm_api_key_encrypted)
+        except Exception as e:
+            logger.warning(f"Failed to decrypt API key for job {job.id}: {e}")
+
+    try:
+        provider = build_provider(
+            provider_name,
+            api_key=api_key,
+            ollama_base_url=base_url or "http://localhost:11434",
+        )
+    except Exception as e:
+        logger.warning(f"Could not build LLM provider for job {job.id}: {e}")
+        return None, None
+
+    return provider, resolved_model
+
+
 # ==============================================================================
 # SUMMARIZE TRANSCRIPT TASK
 # ==============================================================================
@@ -638,8 +684,12 @@ def process_slides(self, job_id: int):
                 return True
             return j.status == ProcessingStatus.FAILED
 
+        provider, llm_model = _resolve_job_llm(db, job)
+        if provider is None:
+            _add_log(db, job_id, "No LLM provider available; slide disambiguation will be skipped", "warning", "slide_detect")
+
         service = SlideDetectionService()
-        service.run_full_pipeline(db, job, cancel_check)
+        service.run_full_pipeline(db, job, cancel_check, provider=provider, model=llm_model)
 
         # Mark job as completed
         job.status = ProcessingStatus.COMPLETED
