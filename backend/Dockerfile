@@ -37,13 +37,14 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 # Non-root user for runtime security
 RUN groupadd --gid 1001 appgroup && \
-    useradd --uid 1001 --gid appgroup --create-home --shell /usr/sbin/nologin appuser
+    useradd --uid 1001 --gid appgroup --create-home --shell /usr/sbin/nologin appuser && \
+    mkdir -p /data
 
 # Copy application source
 COPY backend/ ./
 COPY services/ /services/
 
-RUN chown -R appuser:appgroup /app /services
+RUN chown -R appuser:appgroup /app /services /data
 
 USER appuser
 
