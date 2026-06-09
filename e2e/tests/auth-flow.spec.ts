@@ -15,8 +15,9 @@ test.describe("Registration flow", () => {
     await page.click("button[type='submit']");
 
     // After successful registration + auto-login, user should be authenticated.
-    // Wait for the navbar to show the logged-in state (username or Dashboard link).
-    await expect(page.getByRole("button", { name: "Logout" })).toBeVisible({
+    // The nav always shows a "dashboard" link when logged in. The "logout" text
+    // lives inside a collapsed dropdown and is never visible by default.
+    await expect(page.getByRole("link", { name: "dashboard" })).toBeVisible({
       timeout: 15_000,
     });
   });
@@ -33,8 +34,10 @@ test.describe("Login flow", () => {
 
     await page.click("button[type='submit']");
 
-    // Wait for authentication state to update in the navbar
-    await expect(page.locator("button:has-text('Logout')")).toBeVisible({
+    // Wait for authentication state to update in the navbar.
+    // The "dashboard" link is always visible when logged in; the logout text
+    // is inside a collapsed dropdown and is never visible by default.
+    await expect(page.getByRole("link", { name: "dashboard" })).toBeVisible({
       timeout: 15_000,
     });
   });

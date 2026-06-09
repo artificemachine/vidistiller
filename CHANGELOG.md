@@ -163,3 +163,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: fix(ci): bump e2e-tests timeout-minutes 8→20 (docker build takes ~7m in CI)
 - 2026-06-09: fix(e2e): wait for port 3000 (web) in boot step before running playwright tests
 - 2026-06-09: fix(e2e): global-setup: use dashboard link as auth indicator; handle middleware /login→/ redirect
+- 2026-06-09: fix(e2e): replace Logout button checks with dashboard link (logout is in collapsed dropdown)
