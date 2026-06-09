@@ -141,3 +141,51 @@ describe('Home — import job', () => {
     expect(await screen.findByText('importing...')).toBeInTheDocument();
   });
 });
+
+describe('Home — slide mode toggle', () => {
+  it('defaults to transcript mode (is_slide_mode off)', () => {
+    render(<Home />);
+    // "transcript mode" button is the default active selection
+    expect(screen.getByRole('button', { name: /transcript mode/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /presentation mode/i })).toBeInTheDocument();
+  });
+
+  it('sends is_slide_mode: true when presentation mode is selected', async () => {
+    const user = userEvent.setup();
+    mockPost.mockResolvedValue({ data: { job_id: 'slide-job-1' } });
+
+    render(<Home />);
+
+    const urlInput = document.querySelector('input[type="url"]') as HTMLInputElement;
+    await user.type(urlInput, 'https://youtube.com/watch?v=abc');
+
+    await user.click(screen.getByRole('button', { name: /presentation mode/i }));
+    await user.click(screen.getByRole('button', { name: /create document/i }));
+
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith(
+        '/jobs',
+        expect.objectContaining({ is_slide_mode: true }),
+      );
+    });
+  });
+
+  it('sends is_slide_mode: false when transcript mode is selected (default)', async () => {
+    const user = userEvent.setup();
+    mockPost.mockResolvedValue({ data: { job_id: 'transcript-job-1' } });
+
+    render(<Home />);
+
+    const urlInput = document.querySelector('input[type="url"]') as HTMLInputElement;
+    await user.type(urlInput, 'https://youtube.com/watch?v=def');
+
+    await user.click(screen.getByRole('button', { name: /create document/i }));
+
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith(
+        '/jobs',
+        expect.objectContaining({ is_slide_mode: false }),
+      );
+    });
+  });
+});

@@ -171,3 +171,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: test(slides): unit coverage for ssim_transition_scan and layout_detection
 - 2026-06-09: test(slides): integration tests for run_full_pipeline orchestration
 - 2026-06-09: fix(slides): reliable video_duration fallback + OCR frame-index cache
+- 2026-06-09: test(frontend): assert slide mode toggle sets is_slide_mode in API payload
