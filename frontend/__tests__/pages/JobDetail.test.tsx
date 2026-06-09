@@ -370,3 +370,89 @@ describe('JobDetail — cancel summarization', () => {
     });
   });
 });
+
+describe('JobDetail — summary polling restart', () => {
+  // Fake timers + RTL: findByRole/waitFor use setTimeout internally and hang with fake timers.
+  // Fix: wrap render in act() to flush the initial fetch, then use synchronous getByRole/getByText.
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('restarts polling on 202 for completed job and shows result', async () => {
+    let phase = 0; // 0=initial, 1=processing, 2=completed
+    mockGet.mockImplementation((url: string) => {
+      if (url.includes('/logs')) return Promise.resolve({ data: [] });
+      if (phase === 0) return Promise.resolve(mockJobResponse());
+      if (phase === 1) return Promise.resolve(mockJobResponse({ summarize_status: 'processing' }));
+      return Promise.resolve(
+        mockJobResponse({
+          summarize_status: 'completed',
+          documents: [{ id: 10, title: 'Summary', content: '## Result\nDone.', format: 'summary' }],
+        })
+      );
+    });
+    mockPost.mockResolvedValue({ status: 202, data: {} });
+
+    // Wrap render in act() so the initial fetchJob() promise resolves before we proceed
+    await act(async () => {
+      render(<JobDetail />);
+    });
+    const summaryBtn = screen.getByRole('button', { name: /^summary$/i });
+
+    // Fire initial interval tick → stop condition (jobDone && summarizeSettled) → intervalRef = null
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    // Click summarize: POST → 202 → interval restarted from null ref
+    phase = 1;
+    await act(async () => {
+      summaryBtn.click();
+    });
+    expect(screen.getByRole('button', { name: /summarizing\.\.\./i })).toBeInTheDocument();
+
+    // Advance to next tick; backend delivers completed result
+    phase = 2;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(screen.queryByRole('button', { name: /summarizing\.\.\./i })).not.toBeInTheDocument();
+  });
+
+  it('shows error message in sidebar when summarize_status is failed', async () => {
+    let phase = 0;
+    mockGet.mockImplementation((url: string) => {
+      if (url.includes('/logs')) return Promise.resolve({ data: [] });
+      if (phase === 0) return Promise.resolve(mockJobResponse());
+      if (phase === 1) return Promise.resolve(mockJobResponse({ summarize_status: 'processing' }));
+      return Promise.resolve(mockJobResponse({ summarize_status: 'failed' }));
+    });
+    mockPost.mockResolvedValue({ status: 202, data: {} });
+
+    await act(async () => {
+      render(<JobDetail />);
+    });
+    const summaryBtn = screen.getByRole('button', { name: /^summary$/i });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    phase = 1;
+    await act(async () => {
+      summaryBtn.click();
+    });
+    expect(screen.getByRole('button', { name: /summarizing\.\.\./i })).toBeInTheDocument();
+
+    phase = 2;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(screen.getByText(/summarization failed/i)).toBeInTheDocument();
+  });
+});
