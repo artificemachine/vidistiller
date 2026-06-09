@@ -12,9 +12,9 @@ test.describe("Forgot password form", () => {
     await page.fill("#email", "e2e@test.local");
     await page.click("button[type='submit']");
 
-    // Should show a success or error message (no crash)
+    // Should show success (green) or error (red) feedback div — not the button or Next.js announcer
     await expect(
-      page.locator("text=reset link").or(page.locator('[role="alert"]'))
+      page.locator(".bg-green-50, .bg-red-50")
     ).toBeVisible({ timeout: 5_000 });
   });
 });
