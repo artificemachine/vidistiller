@@ -587,3 +587,169 @@ class TestLayoutDetectionContourVoting:
                    return_value=([], None)):
             result = service.layout_detection("/fake.mp4")
         assert result == "full_frame"
+
+
+# ==============================================================================
+# Iteration 3 — run_full_pipeline orchestration integration tests
+# ==============================================================================
+
+class TestRunFullPipeline:
+    """Integration: run_full_pipeline orchestrates all stages in the correct order."""
+
+    def _slide_dict(self, num, is_incremental=False, parent_num=None):
+        return {
+            "slide_number": num,
+            "start_timestamp": float(num * 30),
+            "end_timestamp": float(num * 30 + 30),
+            "ssim_transition_score": 0.5,
+            "is_incremental_build": is_incremental,
+            "parent_slide_number": parent_num,
+            "final_frame_path": None,
+            "ocr_text": None,
+            "transcript_text": None,
+            "image_width": None,
+            "image_height": None,
+            "file_size": None,
+        }
+
+    def test_missing_video_raises_slide_detection_exception(self, service):
+        """No video file path → SlideDetectionException before any stage runs."""
+        from app.exceptions import SlideDetectionException
+
+        db = MagicMock()
+        job = MagicMock()
+        job.video_file_path = None
+
+        with pytest.raises(SlideDetectionException):
+            service.run_full_pipeline(db, job, None)
+
+    def test_pipeline_calls_all_steps_in_order(self, service, tmp_path):
+        """Happy path: stages run in order (layout→ssim→grouping→capture)."""
+        video_file = tmp_path / "fake.mp4"
+        video_file.write_bytes(b"FAKE")
+
+        db = MagicMock()
+        job = MagicMock()
+        job.video_file_path = str(video_file)
+        job.job_id = "order-test-uuid"
+        job.id = 1
+        job.transcripts = []
+
+        call_order = []
+
+        with patch.object(service, "layout_detection",
+                          side_effect=lambda *a: call_order.append("layout") or "full_frame"), \
+             patch.object(service, "ssim_transition_scan",
+                          side_effect=lambda *a, **kw: call_order.append("ssim") or ([], 0)), \
+             patch.object(service, "slide_grouping",
+                          side_effect=lambda *a: call_order.append("grouping") or [self._slide_dict(1)]), \
+             patch.object(service, "final_state_capture",
+                          side_effect=lambda *a: call_order.append("capture") or [self._slide_dict(1)]), \
+             patch("app.services.slide_detection.cv2.VideoCapture") as MockCap:
+            MockCap.return_value.get.return_value = 30.0
+            service.run_full_pipeline(db, job, None)
+
+        # No ambiguous transitions → LLM step skipped. No transcript segments → alignment skipped.
+        assert call_order == ["layout", "ssim", "grouping", "capture"]
+
+    def test_cancel_mid_pipeline_raises_cancelled_exception(self, service, tmp_path):
+        """cancel_check returning True after layout detection raises CancelledException."""
+        from app.services.llm import CancelledException
+
+        video_file = tmp_path / "fake.mp4"
+        video_file.write_bytes(b"FAKE")
+
+        db = MagicMock()
+        job = MagicMock()
+        job.video_file_path = str(video_file)
+        job.job_id = "cancel-test-uuid"
+        job.id = 2
+
+        call_count = {"n": 0}
+
+        def cancel_after_layout():
+            call_count["n"] += 1
+            return call_count["n"] >= 2  # False on 1st, True on 2nd
+
+        with patch.object(service, "layout_detection", return_value="full_frame"), \
+             patch("app.services.slide_detection.cv2.VideoCapture") as MockCap:
+            MockCap.return_value.get.return_value = 30.0
+            with pytest.raises(CancelledException):
+                service.run_full_pipeline(db, job, cancel_after_layout)
+
+    def test_incremental_builds_linked_via_parent_slide_id(self, service, test_db, test_user, tmp_path):
+        """Incremental slide has parent_slide_id pointing to the correct parent row."""
+        from app.db.models import (
+            ProcessingJob, ProcessingMode, ProcessingStatus, Slide,
+        )
+
+        video_file = tmp_path / "fake.mp4"
+        video_file.write_bytes(b"FAKE")
+
+        job = ProcessingJob(
+            job_id="incr-parent-test-uuid",
+            status=ProcessingStatus.PROCESSING,
+            video_url="https://youtube.com/watch?v=fake",
+            video_file_path=str(video_file),
+            processing_mode=ProcessingMode.SLIDE_AWARE.value,
+            user_id=test_user.id,
+        )
+        test_db.add(job)
+        test_db.flush()
+
+        non_incr = self._slide_dict(1, is_incremental=False)
+        incr = self._slide_dict(2, is_incremental=True, parent_num=1)
+
+        with patch.object(service, "layout_detection", return_value="full_frame"), \
+             patch.object(service, "ssim_transition_scan", return_value=([], 0)), \
+             patch.object(service, "slide_grouping", return_value=[non_incr, incr]), \
+             patch.object(service, "final_state_capture", return_value=[non_incr, incr]), \
+             patch.object(service, "transcript_alignment",
+                          side_effect=lambda slides, *a: slides), \
+             patch("app.services.slide_detection.cv2.VideoCapture") as MockCap:
+            MockCap.return_value.get.return_value = 30.0
+            service.run_full_pipeline(test_db, job, None)
+
+        slides = test_db.query(Slide).filter(Slide.job_id == job.id).all()
+        parent_slides = [s for s in slides if not s.is_incremental_build]
+        incremental_slides = [s for s in slides if s.is_incremental_build]
+
+        assert len(parent_slides) == 1, "Expected 1 non-incremental slide"
+        assert len(incremental_slides) == 1, "Expected 1 incremental slide"
+        assert incremental_slides[0].parent_slide_id == parent_slides[0].id
+
+    def test_metadata_row_committed(self, service, test_db, test_user, tmp_path):
+        """After a successful run, a SlideDetectionMetadata row is persisted."""
+        from app.db.models import (
+            ProcessingJob, ProcessingMode, ProcessingStatus, SlideDetectionMetadata,
+        )
+
+        video_file = tmp_path / "fake.mp4"
+        video_file.write_bytes(b"FAKE")
+
+        job = ProcessingJob(
+            job_id="metadata-test-uuid",
+            status=ProcessingStatus.PROCESSING,
+            video_url="https://youtube.com/watch?v=fake2",
+            video_file_path=str(video_file),
+            processing_mode=ProcessingMode.SLIDE_AWARE.value,
+            user_id=test_user.id,
+        )
+        test_db.add(job)
+        test_db.flush()
+
+        with patch.object(service, "layout_detection", return_value="full_frame"), \
+             patch.object(service, "ssim_transition_scan", return_value=([], 0)), \
+             patch.object(service, "slide_grouping", return_value=[self._slide_dict(1)]), \
+             patch.object(service, "final_state_capture", return_value=[self._slide_dict(1)]), \
+             patch("app.services.slide_detection.cv2.VideoCapture") as MockCap:
+            MockCap.return_value.get.return_value = 30.0
+            service.run_full_pipeline(test_db, job, None)
+
+        metadata = (
+            test_db.query(SlideDetectionMetadata)
+            .filter(SlideDetectionMetadata.job_id == job.id)
+            .first()
+        )
+        assert metadata is not None
+        assert metadata.total_slides == 1
