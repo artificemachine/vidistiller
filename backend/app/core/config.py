@@ -326,6 +326,13 @@ class SlideDetectionSettings(BaseSettings):
     layout_sample_count: int = 5
     incremental_ssim_threshold: float = 0.95
 
+    # pip_speaker (screencasting) tuning: screen motion scores 0.80-0.90 naturally,
+    # so real transitions need a lower floor and slides need a longer minimum duration.
+    pip_speaker_ssim_threshold: float = 0.65
+    pip_speaker_ssim_ambiguous_low: float = 0.65
+    pip_speaker_ssim_ambiguous_high: float = 0.80
+    pip_speaker_min_slide_duration: float = 20.0
+
     model_config = SettingsConfigDict(env_prefix="SLIDE_", case_sensitive=False, env_file=".env", extra="ignore")
 
 
