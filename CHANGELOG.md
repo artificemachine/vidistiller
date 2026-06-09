@@ -166,3 +166,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: fix(e2e): replace Logout button checks with dashboard link (logout is in collapsed dropdown)
 - 2026-06-09: ci(e2e): increase job timeout to 35min + 2 parallel workers to prevent timeout on 35-test suite
 - 2026-06-09: fix(e2e): update settings and password-reset tests for redesigned UI (radio cards, updated button text)
+- 2026-06-09: fix(e2e): use Promise.all for waitForResponse to eliminate race conditions in vllm tests

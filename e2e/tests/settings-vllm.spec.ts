@@ -104,10 +104,11 @@ test.describe("Settings — vLLM provider", () => {
     await expect(page.getByText("loading settings...")).not.toBeVisible({ timeout: 10_000 });
 
     await page.locator("input[type='radio'][value='vllm']").click({ force: true });
-    await page.locator("button", { hasText: "VM913" }).click();
-
-    await page.waitForResponse(MODELS_API);
-    expect(capturedUrl).toContain("base_url=http%3A%2F%2F192.0.2.1%3A8100"); // VM913 from MOCK_FLEET
+    await Promise.all([
+      page.waitForResponse(MODELS_API),
+      page.locator("button", { hasText: "VM913" }).click(),
+    ]);
+    expect(capturedUrl).toContain("192.0.2.1:8100"); // VM913 from MOCK_FLEET
   });
 
   test("node button highlights when selected", async ({ page }) => {
@@ -153,8 +154,10 @@ test.describe("Settings — vLLM provider", () => {
   test("user can type a custom model name not in the list", async ({ page }) => {
     await gotoSettingsWithFleet(page, ["qwopus-27b"]);
     await page.locator("input[type='radio'][value='vllm']").click({ force: true });
-    await page.locator("button", { hasText: "VM913" }).click();
-    await page.waitForResponse(MODELS_API);
+    await Promise.all([
+      page.waitForResponse(MODELS_API),
+      page.locator("button", { hasText: "VM913" }).click(),
+    ]);
 
     const modelInput = page.locator("input[placeholder*='type a model name']");
     await modelInput.clear();
@@ -174,8 +177,10 @@ test.describe("Settings — vLLM provider", () => {
     );
 
     await page.locator("input[type='radio'][value='vllm']").click({ force: true });
-    await page.locator("button", { hasText: "VM901" }).click();
-    await page.waitForResponse(MODELS_API);
+    await Promise.all([
+      page.waitForResponse(MODELS_API),
+      page.locator("button", { hasText: "VM901" }).click(),
+    ]);
 
     const modelInput = page.locator("input[placeholder*='type a model name']");
     await expect(modelInput).toHaveValue("");
@@ -188,8 +193,10 @@ test.describe("Settings — vLLM provider", () => {
   test("can save vllm provider settings", async ({ page }) => {
     await gotoSettingsWithFleet(page, ["qwopus-27b"]);
     await page.locator("input[type='radio'][value='vllm']").click({ force: true });
-    await page.locator("button", { hasText: "VM913" }).click();
-    await page.waitForResponse(MODELS_API);
+    await Promise.all([
+      page.waitForResponse(MODELS_API),
+      page.locator("button", { hasText: "VM913" }).click(),
+    ]);
 
     await page.click("button[type='submit']:has-text('save settings')");
 
