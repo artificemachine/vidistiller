@@ -467,3 +467,123 @@ class TestFastPathChaos:
         pairs = [{"classification": "ambiguous", "ssim": 0.88, "ocr_text_before": "a", "ocr_text_after": "b"}]
         result = service.llm_ambiguity_classification(pairs, provider=provider, model="x")
         assert result[0]["llm_classification"] == "transition"
+
+
+# ==============================================================================
+# Iteration 2 — ssim_transition_scan + layout_detection contour-voting
+# ==============================================================================
+
+class TestSSIMTransitionScan:
+    """Unit: ssim_transition_scan classifies frame pairs by SSIM band."""
+
+    def _make_cap(self, n_frames, video_fps=30.0):
+        """Mock VideoCapture yielding n_frames BGR frames then (False, None)."""
+        cap = MagicMock()
+        cap.isOpened.return_value = True
+        cap.get.return_value = video_fps
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        cap.read.side_effect = [(True, frame)] * n_frames + [(False, None)]
+        cap.release.return_value = None
+        return cap
+
+    def test_cannot_open_video_raises(self, service):
+        """Bad video path → SlideDetectionException, not a silent fallback."""
+        from app.exceptions import SlideDetectionException
+        cap = MagicMock()
+        cap.isOpened.return_value = False
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=cap):
+            with pytest.raises(SlideDetectionException):
+                service.ssim_transition_scan("/nonexistent.mp4", 1.0, "full_frame")
+
+    def test_identical_frames_produce_no_transitions(self, service):
+        """Frames with SSIM=1.0 are classified 'same' and not stored."""
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_compute_ssim", return_value=1.0):
+            transitions, sampled = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
+        assert transitions == []
+        assert sampled > 0
+
+    def test_low_ssim_produces_transition_classification(self, service):
+        """SSIM below ssim_threshold (0.85) → 'transition' classification."""
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_compute_ssim", return_value=0.5):
+            transitions, _ = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
+        assert len(transitions) > 0
+        assert all(t["classification"] == "transition" for t in transitions)
+
+    def test_ambiguous_ssim_produces_ambiguous_classification(self, service):
+        """SSIM in [ssim_ambiguous_low, ssim_ambiguous_high] → 'ambiguous' classification."""
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_compute_ssim", return_value=0.89):
+            transitions, _ = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
+        assert len(transitions) > 0
+        assert all(t["classification"] == "ambiguous" for t in transitions)
+
+    def test_frame_skip_limits_frames_sampled(self, service):
+        """video_fps=30, sampling_fps=1 → frame_skip=30, exactly 2 frames sampled in a 60-frame clip."""
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60, video_fps=30.0)), \
+             patch.object(service, "_compute_ssim", return_value=1.0):
+            _, sampled = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
+        assert sampled == 2
+
+
+class TestLayoutDetectionContourVoting:
+    """Unit: layout_detection votes correctly from contour analysis."""
+
+    def _make_cap(self, n_frames=5, w=1000, h=1000):
+        """Mock VideoCapture returning n_frames identical blank frames."""
+        cap = MagicMock()
+        cap.isOpened.return_value = True
+        cap.get.return_value = float(n_frames)
+        frame = np.zeros((h, w, 3), dtype=np.uint8)
+        cap.read.return_value = (True, frame)
+        cap.set.return_value = None
+        cap.release.return_value = None
+        return cap
+
+    def test_pip_speaker_box_votes_detected(self, service):
+        """Contour with small-corner bounding rect on all frames → pip_speaker."""
+        fake_cnt = MagicMock()
+        cap = self._make_cap()
+        # 200x200 box at (50,50): area_ratio=0.04, aspect=1.0, x=50<300 (corner) → pip vote
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=cap), \
+             patch("app.services.slide_detection.cv2.cvtColor",
+                   return_value=np.zeros((1000, 1000), dtype=np.uint8)), \
+             patch("app.services.slide_detection.cv2.Canny",
+                   return_value=np.zeros((1000, 1000), dtype=np.uint8)), \
+             patch("app.services.slide_detection.cv2.findContours",
+                   return_value=([fake_cnt], None)), \
+             patch("app.services.slide_detection.cv2.boundingRect",
+                   return_value=(50, 50, 200, 200)):
+            result = service.layout_detection("/fake.mp4")
+        assert result == "pip_speaker"
+
+    def test_split_panel_contour_votes_detected(self, service):
+        """Contour covering ~half the frame on all frames → split_panel."""
+        fake_cnt = MagicMock()
+        cap = self._make_cap()
+        # 700x700 box: area_ratio=0.49, aspect=1.0 → split vote; not a pip (area_ratio>0.15)
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=cap), \
+             patch("app.services.slide_detection.cv2.cvtColor",
+                   return_value=np.zeros((1000, 1000), dtype=np.uint8)), \
+             patch("app.services.slide_detection.cv2.Canny",
+                   return_value=np.zeros((1000, 1000), dtype=np.uint8)), \
+             patch("app.services.slide_detection.cv2.findContours",
+                   return_value=([fake_cnt], None)), \
+             patch("app.services.slide_detection.cv2.boundingRect",
+                   return_value=(0, 0, 700, 700)):
+            result = service.layout_detection("/fake.mp4")
+        assert result == "split_panel"
+
+    def test_no_voting_contours_returns_full_frame(self, service):
+        """Empty contour list → no votes → full_frame default."""
+        cap = self._make_cap()
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=cap), \
+             patch("app.services.slide_detection.cv2.cvtColor",
+                   return_value=np.zeros((1000, 1000), dtype=np.uint8)), \
+             patch("app.services.slide_detection.cv2.Canny",
+                   return_value=np.zeros((1000, 1000), dtype=np.uint8)), \
+             patch("app.services.slide_detection.cv2.findContours",
+                   return_value=([], None)):
+            result = service.layout_detection("/fake.mp4")
+        assert result == "full_frame"

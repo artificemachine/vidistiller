@@ -168,3 +168,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: fix(e2e): update settings and password-reset tests for redesigned UI (radio cards, updated button text)
 - 2026-06-09: fix(e2e): use Promise.all for waitForResponse to eliminate race conditions in vllm tests
 - 2026-06-09: fix(slides): cancel_check must signal on CANCELLED status not FAILED
+- 2026-06-09: test(slides): unit coverage for ssim_transition_scan and layout_detection
