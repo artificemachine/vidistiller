@@ -167,3 +167,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: ci(e2e): increase job timeout to 35min + 2 parallel workers to prevent timeout on 35-test suite
 - 2026-06-09: fix(e2e): update settings and password-reset tests for redesigned UI (radio cards, updated button text)
 - 2026-06-09: fix(e2e): use Promise.all for waitForResponse to eliminate race conditions in vllm tests
+- 2026-06-09: fix(slides): cancel_check must signal on CANCELLED status not FAILED

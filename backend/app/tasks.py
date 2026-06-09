@@ -392,6 +392,21 @@ def _is_cancelled(db, job_id: int) -> bool:
     return job.summarize_status != "processing"
 
 
+def _is_slide_cancelled(db, job_id: int) -> bool:
+    """Check if a slide processing task has been cancelled (fresh DB read).
+
+    Returns True only when the job status is CANCELLED — the signal set by
+    the cancel API route. FAILED is a genuine pipeline error and must NOT
+    trigger the cancel path.
+    """
+    from app.db.models import ProcessingJob, ProcessingStatus
+    db.expire_all()
+    job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+    if not job:
+        return True
+    return job.status == ProcessingStatus.CANCELLED
+
+
 # ==============================================================================
 # FLEET RESOLVER — find which VM has a given model loaded
 # ==============================================================================
@@ -679,11 +694,7 @@ def process_slides(self, job_id: int):
         _add_log(db, job_id, "Starting slide detection pipeline...", "info", "slide_detect")
 
         def cancel_check() -> bool:
-            db.expire_all()
-            j = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
-            if not j:
-                return True
-            return j.status == ProcessingStatus.FAILED
+            return _is_slide_cancelled(db, job_id)
 
         provider, llm_model = _resolve_job_llm(db, job)
         if provider is None:
