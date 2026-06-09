@@ -82,6 +82,7 @@ jobs:
           E2E_TEST_USERNAME: e2e_testuser
           E2E_TEST_PASSWORD: E2ePassword1!
           E2E_TEST_EMAIL: e2e_testuser@example.com
+          NODE_PATH: ${{ github.workspace }}/frontend/node_modules
         run: cd e2e && ../frontend/node_modules/.bin/playwright test --reporter=github
 
       - name: Tear down e2e stack

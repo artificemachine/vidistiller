@@ -159,3 +159,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: fix(e2e): override api command to python -m uvicorn (matches prod; bins not on PATH)
 - 2026-06-09: fix(e2e): use postgres:5432 (compose service name) not localhost in DATABASE_URL
 - 2026-06-09: fix(docker): mkdir /data + chown appuser in Dockerfile for e2e startup
+- 2026-06-09: fix(e2e): set NODE_PATH so @playwright/test resolves from e2e/playwright.config.ts
