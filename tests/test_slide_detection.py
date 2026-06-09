@@ -644,7 +644,7 @@ class TestRunFullPipeline:
              patch.object(service, "slide_grouping",
                           side_effect=lambda *a: call_order.append("grouping") or [self._slide_dict(1)]), \
              patch.object(service, "final_state_capture",
-                          side_effect=lambda *a: call_order.append("capture") or [self._slide_dict(1)]), \
+                          side_effect=lambda *a, **kw: call_order.append("capture") or [self._slide_dict(1)]), \
              patch("app.services.slide_detection.cv2.VideoCapture") as MockCap:
             MockCap.return_value.get.return_value = 30.0
             service.run_full_pipeline(db, job, None)
@@ -753,3 +753,77 @@ class TestRunFullPipeline:
         )
         assert metadata is not None
         assert metadata.total_slides == 1
+
+    def test_video_duration_nonzero_when_frame_count_zero(self, service, tmp_path):
+        """VBR containers report FRAME_COUNT==0; _get_video_duration must fall back to POS_MSEC/1000."""
+        import cv2 as _cv2
+
+        video_file = tmp_path / "vbr.mp4"
+        video_file.write_bytes(b"FAKE")
+
+        db = MagicMock()
+        job = MagicMock()
+        job.video_file_path = str(video_file)
+        job.job_id = "vbr-duration-uuid"
+        job.id = 10
+        job.transcripts = []
+
+        captured_duration = {}
+
+        def capture_grouping(transitions, duration):
+            captured_duration["v"] = duration
+            return [self._slide_dict(1)]
+
+        def mock_get(prop):
+            if prop == _cv2.CAP_PROP_FRAME_COUNT:
+                return 0.0
+            if prop == _cv2.CAP_PROP_FPS:
+                return 30.0
+            if prop == _cv2.CAP_PROP_POS_MSEC:
+                return 60000.0
+            return 0.0
+
+        with patch.object(service, "layout_detection", return_value="full_frame"), \
+             patch.object(service, "ssim_transition_scan", return_value=([], 0)), \
+             patch.object(service, "slide_grouping", side_effect=capture_grouping), \
+             patch.object(service, "final_state_capture", return_value=[self._slide_dict(1)]), \
+             patch("app.services.slide_detection.cv2.VideoCapture") as MockCap:
+            mock_cap = MagicMock()
+            mock_cap.get.side_effect = mock_get
+            MockCap.return_value = mock_cap
+            service.run_full_pipeline(db, job, None)
+
+        assert captured_duration.get("v") == 60.0
+
+
+class TestAddOcrContext:
+    """Unit: _add_ocr_context_to_transitions builds an OCR cache; final_state_capture reuses it."""
+
+    def test_ocr_not_called_twice_for_ambiguous_frame(self, service, tmp_path):
+        """OCR for a transition frame is cached; final_state_capture must not re-OCR the same frame index."""
+        fake_frame = np.zeros((100, 100, 3), dtype=np.uint8)
+
+        def make_cap():
+            cap = MagicMock()
+            cap.isOpened.return_value = True
+            cap.get.side_effect = lambda p: 30.0
+            cap.read.return_value = (True, fake_frame)
+            return cap
+
+        # Ambiguous transition at frame 30; final_state_capture targets frame 30
+        # (end_ts=1.5 → capture_ts=1.0 → frame_idx=int(1.0*30)=30)
+        transition = {"classification": "ambiguous", "frame_index": 30, "timestamp": 1.0}
+        slides = [{"slide_number": 1, "start_timestamp": 0.0, "end_timestamp": 1.5}]
+        output_dir = str(tmp_path / "slides")
+
+        with patch("app.services.slide_detection.cv2.VideoCapture", side_effect=lambda *a: make_cap()), \
+             patch.object(service, "_extract_ocr_text", return_value="cached text") as mock_ocr:
+            cache = service._add_ocr_context_to_transitions("/fake/video.mp4", [transition], "full_frame")
+            ocr_count_after_first_pass = mock_ocr.call_count
+
+            service.final_state_capture("/fake/video.mp4", slides, output_dir, frame_ocr_cache=cache)
+
+        assert mock_ocr.call_count == ocr_count_after_first_pass, (
+            f"_extract_ocr_text was called {mock_ocr.call_count - ocr_count_after_first_pass} extra time(s) "
+            "in final_state_capture — frame OCR cache was not applied"
+        )

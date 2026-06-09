@@ -170,3 +170,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: fix(slides): cancel_check must signal on CANCELLED status not FAILED
 - 2026-06-09: test(slides): unit coverage for ssim_transition_scan and layout_detection
 - 2026-06-09: test(slides): integration tests for run_full_pipeline orchestration
+- 2026-06-09: fix(slides): reliable video_duration fallback + OCR frame-index cache
