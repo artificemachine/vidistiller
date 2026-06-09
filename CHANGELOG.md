@@ -172,3 +172,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: test(slides): integration tests for run_full_pipeline orchestration
 - 2026-06-09: fix(slides): reliable video_duration fallback + OCR frame-index cache
 - 2026-06-09: test(frontend): assert slide mode toggle sets is_slide_mode in API payload
+- 2026-06-09: chore(release): bump to v1.9.1 (cancel signal fix, SSIM/layout/pipeline tests, video_duration fallback, OCR cache, frontend toggle test)
