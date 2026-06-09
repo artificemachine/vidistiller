@@ -1,5 +1,4 @@
 import { chromium } from "@playwright/test";
-import path from "path";
 
 // Credentials match the defaults the specs fall back to (see auth-flow.spec.ts).
 const TEST_USERNAME = process.env.E2E_TEST_USERNAME || "e2e_testuser";
@@ -15,7 +14,8 @@ const TEST_EMAIL = process.env.E2E_TEST_EMAIL || "e2e_testuser@example.com";
  */
 async function globalSetup(): Promise<void> {
   const baseURL = process.env.E2E_BASE_URL || "http://localhost:3000";
-  const authFile = path.join(__dirname, ".auth", "user.json");
+  // __dirname + literal segments — no external input, so no traversal risk.
+  const authFile = `${__dirname}/.auth/user.json`;
 
   const browser = await chromium.launch();
   const page = await browser.newPage({ baseURL });
