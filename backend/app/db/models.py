@@ -74,6 +74,7 @@ class ProcessingJob(Base):
     video_file_path: Optional[str] = Column(String(512), nullable=True)  # path to downloaded MP4
     celery_task_id: Optional[str] = Column(String(255), nullable=True)
     summarize_status: Optional[str] = Column(String(20), nullable=True)
+    slide_status: Optional[str] = Column(String(20), nullable=True)
     processing_mode: Optional[str] = Column(String(20), nullable=True, server_default="standard")
     user_id: Optional[int] = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: datetime = Column(DateTime, server_default=func.now(), nullable=False)
