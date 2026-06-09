@@ -175,3 +175,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: chore(release): bump to v1.9.1 (cancel signal fix, SSIM/layout/pipeline tests, video_duration fallback, OCR cache, frontend toggle test)
 - 2026-06-09: fix(e2e): narrow password-reset locator to avoid strict-mode violation
 - 2026-06-10: fix(slides): layout-aware SSIM thresholds and min-duration for pip_speaker screencasting
+- 2026-06-10: chore(release): bump to v1.9.2 (pip_speaker SSIM tuning)
