@@ -142,3 +142,6 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: test(frontend): add polling-restart and failed-status tests for summarize button; add ops-runbook.md
 - 2026-06-09: fix(frontend): rename 'backup json' button to 'backup'
 - 2026-06-09: chore(release): bump to v1.8.2 (rename backup json button)
+- 2026-06-09: fix(slides): route presentation-mode LLM disambiguation through the provider abstraction (vLLM fleet) instead of dead localhost Ollama
+- 2026-06-09: feat(frontend): rename 'obsidian' export button and landing chip to 'markdown'
+- 2026-06-09: chore(release): bump to v1.8.3 (presentation-mode LLM fix + markdown rename)

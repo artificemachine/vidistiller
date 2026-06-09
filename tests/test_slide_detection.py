@@ -227,3 +227,67 @@ class TestFinalStateCapture:
         slides = [{"slide_number": 1, "start_timestamp": 0.0, "end_timestamp": 10.0}]
         with pytest.raises(SlideDetectionException):
             service.final_state_capture("/nonexistent/video.mp4", slides, "/tmp/test_slides")
+
+
+class TestLLMAmbiguityClassification:
+    """Test LLM disambiguation of ambiguous transitions via an injected provider."""
+
+    @staticmethod
+    def _ambiguous_pair():
+        return {
+            "classification": "ambiguous",
+            "ssim": 0.9,
+            "ocr_text_before": "Intro",
+            "ocr_text_after": "Intro\nPoint 1",
+        }
+
+    def test_incremental_classification(self, service):
+        """Provider answering INCREMENTAL marks the pair incremental."""
+        provider = MagicMock()
+        provider.generate.return_value = "INCREMENTAL"
+        pairs = [self._ambiguous_pair()]
+        result = service.llm_ambiguity_classification(pairs, provider=provider, model="gemma4-31b")
+        assert result[0]["llm_classification"] == "incremental"
+        provider.generate.assert_called_once()
+
+    def test_transition_classification(self, service):
+        """Provider answering TRANSITION marks the pair transition."""
+        provider = MagicMock()
+        provider.generate.return_value = "TRANSITION"
+        pairs = [self._ambiguous_pair()]
+        result = service.llm_ambiguity_classification(pairs, provider=provider, model="gemma4-31b")
+        assert result[0]["llm_classification"] == "transition"
+
+    def test_provider_error_falls_back_to_transition(self, service):
+        """A provider failure must not crash — defaults to transition."""
+        provider = MagicMock()
+        provider.generate.side_effect = RuntimeError("fleet unreachable")
+        pairs = [self._ambiguous_pair()]
+        result = service.llm_ambiguity_classification(pairs, provider=provider, model="gemma4-31b")
+        assert result[0]["llm_classification"] == "transition"
+
+    def test_no_provider_leaves_unclassified(self, service):
+        """With no provider injected, pairs are left unclassified (no crash)."""
+        pairs = [self._ambiguous_pair()]
+        result = service.llm_ambiguity_classification(pairs, provider=None)
+        assert "llm_classification" not in result[0]
+
+    def test_non_ambiguous_pairs_skipped(self, service):
+        """Non-ambiguous pairs are never sent to the provider."""
+        provider = MagicMock()
+        provider.generate.return_value = "TRANSITION"
+        pairs = [{"classification": "transition", "ssim": 0.5}]
+        result = service.llm_ambiguity_classification(pairs, provider=provider, model="x")
+        provider.generate.assert_not_called()
+        assert "llm_classification" not in result[0]
+
+    def test_cancel_check_raises(self, service):
+        """A truthy cancel_check raises CancelledException before any call."""
+        from app.services.llm import CancelledException
+
+        provider = MagicMock()
+        pairs = [self._ambiguous_pair()]
+        with pytest.raises(CancelledException):
+            service.llm_ambiguity_classification(
+                pairs, cancel_check=lambda: True, provider=provider, model="x"
+            )

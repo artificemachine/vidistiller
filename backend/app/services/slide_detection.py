@@ -14,7 +14,6 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
-import requests
 from skimage.metrics import structural_similarity
 
 from app.core.config import get_settings
@@ -164,22 +163,37 @@ class SlideDetectionService:
     # ------------------------------------------------------------------
 
     def llm_ambiguity_classification(
-        self, pairs: List[Dict], cancel_check: Optional[Callable[[], bool]] = None
+        self,
+        pairs: List[Dict],
+        cancel_check: Optional[Callable[[], bool]] = None,
+        provider=None,
+        model: Optional[str] = None,
     ) -> List[Dict]:
         """
-        Send ambiguous transition pairs to Ollama for TRANSITION/INCREMENTAL classification.
+        Classify ambiguous transition pairs as TRANSITION or INCREMENTAL via the LLM.
 
-        Uses text-based approach: OCR text diff + SSIM value. Works with any model.
+        Uses a text-based approach (OCR text diff + SSIM value) through the shared
+        provider abstraction, so it runs on the same vLLM fleet / provider the rest
+        of the app uses. The provider is injected by the caller (the slide task
+        resolves the job owner's LLM settings).
 
         Args:
             pairs: List of dicts with "ssim", "ocr_text_before", "ocr_text_after"
             cancel_check: Optional callable that returns True if task was cancelled
+            provider: An LLMProvider instance exposing generate(prompt, model, ...)
+            model: Concrete model id to pass to the provider
 
         Returns:
-            Updated pairs with "llm_classification" field added.
+            Updated pairs with "llm_classification" field added (unchanged when no
+            provider is available).
         """
-        base_url = self.settings.ollama.base_url
-        model = self.slide_settings.llm_model
+        if provider is None:
+            logger.warning(
+                "No LLM provider for slide ambiguity classification; leaving pairs unclassified"
+            )
+            return pairs
+
+        model = model or self.slide_settings.llm_model
         timeout = self.slide_settings.llm_timeout
         classified = 0
 
@@ -205,25 +219,12 @@ class SlideDetectionService:
             )
 
             try:
-                resp = requests.post(
-                    f"{base_url}/api/generate",
-                    json={
-                        "model": model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "temperature": 0.1,
-                    },
-                    timeout=timeout,
-                )
-                if resp.status_code == 200:
-                    answer = resp.json().get("response", "").strip().upper()
-                    if "INCREMENTAL" in answer:
-                        pair["llm_classification"] = "incremental"
-                    else:
-                        pair["llm_classification"] = "transition"
-                    classified += 1
+                answer = provider.generate(prompt, model, timeout=timeout, max_tokens=10).strip().upper()
+                if "INCREMENTAL" in answer:
+                    pair["llm_classification"] = "incremental"
                 else:
                     pair["llm_classification"] = "transition"
+                classified += 1
             except Exception as e:
                 logger.warning(f"LLM classification failed: {e}")
                 pair["llm_classification"] = "transition"
@@ -411,6 +412,8 @@ class SlideDetectionService:
         db,
         job,
         cancel_check: Optional[Callable[[], bool]] = None,
+        provider=None,
+        model: Optional[str] = None,
     ) -> None:
         """
         Orchestrate the full slide detection pipeline.
@@ -419,6 +422,9 @@ class SlideDetectionService:
             db: SQLAlchemy session
             job: ProcessingJob ORM instance
             cancel_check: Optional callable returning True if cancelled
+            provider: LLMProvider for ambiguous-transition classification (injected
+                by the task so it uses the job owner's provider / the vLLM fleet)
+            model: Concrete model id passed to the provider
         """
         from app.db.models import Slide, SlideDetectionMetadata
 
@@ -465,7 +471,9 @@ class SlideDetectionService:
             _add_log(f"Classifying {ambiguous_count} ambiguous transitions with LLM...", "info", "slide_llm")
             # Get OCR text for ambiguous frames to help LLM classify
             self._add_ocr_context_to_transitions(video_path, transitions, layout)
-            transitions = self.llm_ambiguity_classification(transitions, cancel_check)
+            transitions = self.llm_ambiguity_classification(
+                transitions, cancel_check, provider=provider, model=model
+            )
             llm_classifications = ambiguous_count
 
         # 5. Slide grouping
