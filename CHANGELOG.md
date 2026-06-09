@@ -152,3 +152,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: chore(deploy): add orphan-safe deploy script (rm -f tutorial_* -> pull -> up)
 - 2026-06-09: feat(slides): add slide_status to distinguish failed/skipped slide runs
 - 2026-06-09: fix(slides): use incremental_ssim_threshold as non-LLM fast-path; record parent links
+- 2026-06-09: test(e2e): add CI e2e job (docker-compose.e2e.yml + playwright chromium)
