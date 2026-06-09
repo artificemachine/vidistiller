@@ -160,3 +160,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: fix(e2e): use postgres:5432 (compose service name) not localhost in DATABASE_URL
 - 2026-06-09: fix(docker): mkdir /data + chown appuser in Dockerfile for e2e startup
 - 2026-06-09: fix(e2e): set NODE_PATH so @playwright/test resolves from e2e/playwright.config.ts
+- 2026-06-09: fix(ci): bump e2e-tests timeout-minutes 8→20 (docker build takes ~7m in CI)
