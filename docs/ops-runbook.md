@@ -21,27 +21,25 @@ Conflict. The container name "/tutorial_redis" is already in use by container "<
 
 After a failed or interrupted `docker compose up -d` — for example when a dependency health check times out mid-stack-start.
 
-### Diagnosis
+### Important: a pre-`up` sweep does NOT catch them (verified 2026-06-09)
+
+The conflicting container is created **during** the failing `up`, not before it. So filtering for `status=created` *before* running `up` finds nothing, then `up` recreates the conflict and fails again. Do not rely on a pre-sweep — remove by **name** instead.
+
+### Fix (reliable)
 
 ```bash
-docker container ls -a --no-trunc --format '{{.ID}} {{.Names}} {{.Status}}'
-# Look for any containers in "Created" state
-```
-
-### Fix
-
-```bash
-# Remove stale Created-state containers by full ID
-docker rm <full-id-1> <full-id-2>
-
-# Then bring the stack up normally
-docker compose -f docker-compose.prod.yml down --remove-orphans
+cd /opt/vidistiller
+# Force-remove ALL project containers by name, any status, then bring the stack up
+names=$(docker container ls -a --no-trunc --format '{{.Names}}' | grep '^tutorial_')
+[ -n "$names" ] && docker rm -f $names
 docker compose -f docker-compose.prod.yml up -d
 ```
 
+`docker rm -f` by name handles running, exited, and `Created`-state containers in one shot — which is what makes it reliable where `down --remove-orphans` + a `status=created` sweep is not.
+
 ### Permanent fix (TODO)
 
-Add the `--no-trunc` detection + removal step to the deploy script so it runs automatically before every `up -d`.
+Add the force-remove-by-name step to the deploy script so it runs automatically before every `up -d`.
 
 ---
 
