@@ -156,3 +156,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-09: chore: bump version to 1.9.0 (feat/slides minor bump)
 - 2026-06-09: fix(ci): quote shell array in deploy.sh; fix e2e build context to repo root
 - 2026-06-09: fix(e2e): use python3 -m celery for worker (celery not in PATH in runtime image)
+- 2026-06-09: fix(e2e): override api command to python -m uvicorn (matches prod; bins not on PATH)
