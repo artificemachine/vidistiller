@@ -182,3 +182,5 @@ All notable changes to this project will be documented in this file.
 - 2026-06-10: chore(release): bump to v1.10.1 (frontend UI fixes)
 - 2026-06-10: chore: sanitize hardcoded paths in contract.yaml and memory; harden security CI gate
 - 2026-06-10: chore: global rename LXC_HOST → STAGING_HOST; resolve 9 moderate frontend vulnerabilities (v1.10.1 maintenance)
+- 2026-06-10: feat(llm): tuned vision pre-pass prompt for technical slide analysis
+- 2026-06-10: chore(release): bump to v1.10.2 (cleanup and prompt tuning)
