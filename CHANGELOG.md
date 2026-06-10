@@ -178,3 +178,5 @@ All notable changes to this project will be documented in this file.
 - 2026-06-10: chore(release): bump to v1.9.2 (pip_speaker SSIM tuning)
 - 2026-06-10: feat(llm): vision pre-pass — describe snapshots with fleet vision model before summarization
 - 2026-06-10: chore(release): bump to v1.10.0 (vision pre-pass)
+- 2026-06-10: fix(frontend): hide 'toggle logs' button when no logs exist; hide empty logs panel; persist slideTextVisible to localStorage
+- 2026-06-10: chore(release): bump to v1.10.1 (frontend UI fixes)

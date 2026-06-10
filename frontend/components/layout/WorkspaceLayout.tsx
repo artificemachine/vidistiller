@@ -49,7 +49,7 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
     try {
       localStorage.setItem(UI_STATE_KEY, JSON.stringify({ sidebarVisible, bottomVisible, logsVisible, slideTextVisible, playerZoom }));
     } catch {}
-  }, [hydrated, sidebarVisible, bottomVisible, logsVisible, playerZoom]);
+  }, [hydrated, sidebarVisible, bottomVisible, logsVisible, slideTextVisible, playerZoom]);
 
   // Sync logs visibility with external collapse signal
   useEffect(() => {
@@ -83,7 +83,7 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
   }, []);
 
   const showLogs = !!(logs && logsVisible);
-  const showBottom = bottomVisible;
+  const showBottom = bottomVisible && !!bottom;
 
   return (
     <div className="flex h-full w-full overflow-hidden">
@@ -91,6 +91,7 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
         sidebarVisible={sidebarVisible}
         bottomVisible={logsVisible}
         logsVisible={bottomVisible}
+        hasBottom={!!bottom}
         onToggleSidebar={toggleSidebar}
         onToggleBottom={toggleLogs}
         onToggleLogs={toggleBottom}

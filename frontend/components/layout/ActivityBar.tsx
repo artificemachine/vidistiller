@@ -6,6 +6,7 @@ interface ActivityBarProps {
   sidebarVisible: boolean;
   bottomVisible: boolean;
   logsVisible: boolean;
+  hasBottom?: boolean;
   onToggleSidebar: () => void;
   onToggleBottom: () => void;
   onToggleLogs: () => void;
@@ -18,6 +19,7 @@ export default function ActivityBar({
   sidebarVisible,
   bottomVisible,
   logsVisible,
+  hasBottom = true,
   onToggleSidebar,
   onToggleBottom,
   onToggleLogs,
@@ -55,8 +57,8 @@ export default function ActivityBar({
         </svg>
       </button>
 
-      {/* Logs panel toggle */}
-      <button
+      {/* Logs panel toggle — only shown when there is log content */}
+      {hasBottom && <button
         onClick={onToggleLogs}
         className={`p-2 rounded transition-colors ${
           logsVisible ? 'bg-border-dark text-text-light' : 'text-text-light/40 hover:text-text-light'
@@ -69,7 +71,7 @@ export default function ActivityBar({
           <line x1="5" y1="10" x2="12" y2="10" stroke="currentColor" strokeWidth="1.5" />
           <line x1="5" y1="13" x2="14" y2="13" stroke="currentColor" strokeWidth="1.5" />
         </svg>
-      </button>
+      </button>}
 
       {/* Slide notes toggle — only visible in slide_aware mode */}
       {hasSlideText && (

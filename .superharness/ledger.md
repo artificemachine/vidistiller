@@ -468,3 +468,161 @@ Append-only activity log. Never edit previous entries.
 - 2026-04-19T10:58:18Z — claude-code — modified: CHANGELOG.md
 2026-04-19T10:59:28Z session-stop: snapshot written to session-progress.md (branch: chore/migrate-to-artificemachine)
 - 2026-04-19T11:08:01Z — claude-code — modified: smoke_auth.py
+- 2026-06-09T00:09:07Z — claude-code — modified: package.json
+2026-06-09T00:32:13Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-09T06:33:04Z — claude-code — modified: HANDOFF.md
+2026-06-09T06:33:06Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T06:34:58Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-09T06:35:44Z — claude-code — modified: HANDOFF.md
+- 2026-06-09T06:36:04Z — claude-code — modified: ops-runbook.md
+2026-06-09T06:36:16Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T06:38:00Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-09T06:43:01Z — claude-code — modified: JobDetail.test.tsx
+2026-06-09T06:49:23Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T07:15:33Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-09T07:20:06Z — claude-code — modified: page.tsx
+- 2026-06-09T07:20:10Z — claude-code — modified: JobDetail.test.tsx
+- 2026-06-09T07:22:02Z — claude-code — modified: package.json
+2026-06-09T07:26:56Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-09T07:47:58Z — claude-code — modified: slide_detection.py
+- 2026-06-09T07:48:05Z — claude-code — modified: slide_detection.py
+- 2026-06-09T07:48:11Z — claude-code — modified: slide_detection.py
+- 2026-06-09T07:48:22Z — claude-code — modified: tasks.py
+- 2026-06-09T07:48:28Z — claude-code — modified: tasks.py
+2026-06-09T07:49:46Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-09T08:05:14Z — claude-code — modified: package.json
+2026-06-09T08:26:30Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-09T09:54:08Z — claude-code — modified: ops-runbook.md
+2026-06-09T10:01:44Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-09T10:31:22Z — claude-code — modified: playwright.config.ts
+- 2026-06-09T10:31:33Z — claude-code — modified: global-setup.ts
+- 2026-06-09T10:31:52Z — claude-code — modified: CLAUDE.md
+- 2026-06-09T10:31:57Z — claude-code — modified: CLAUDE.md
+- 2026-06-09T10:33:38Z — claude-code — modified: CLAUDE.md
+- 2026-06-09T10:37:23Z — claude-code — modified: global-setup.ts
+- 2026-06-09T10:37:28Z — claude-code — modified: global-setup.ts
+2026-06-09T10:40:20Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T10:41:23Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T10:48:27Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-09T11:25:12Z — claude-code — modified: project_presentation_mode_llm.md
+- 2026-06-09T11:25:22Z — claude-code — modified: MEMORY.md
+- 2026-06-09T11:26:15Z — claude-code — modified: HANDOFF.md
+2026-06-09T11:26:24Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T11:27:20Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T11:36:11Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T11:37:08Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T11:58:32Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-09T12:00:55Z — claude-code — modified: HANDOFF.md
+2026-06-09T12:01:04Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-09T12:03:24Z — claude-code — modified: PLAN-backlog-sonnet46.md
+2026-06-09T12:03:33Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T12:04:26Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T13:05:05Z session-turn-end: snapshot written to session-progress.md (branch: feat/backlog-sonnet46)
+- 2026-06-09T13:08:55Z — claude-code — modified: test_no_node20_actions.sh
+- 2026-06-09T13:09:54Z — claude-code — modified: actionlint.yaml
+- 2026-06-09T13:11:28Z — claude-code — modified: deploy_dryrun.bats
+- 2026-06-09T13:12:51Z — claude-code — modified: deploy.sh
+- 2026-06-09T13:13:37Z — claude-code — modified: deploy_dryrun.bats
+- 2026-06-09T13:13:54Z — claude-code — modified: ops-runbook.md
+- 2026-06-09T13:21:58Z — claude-code — modified: models.py
+- 2026-06-09T13:22:07Z — claude-code — modified: tasks.py
+- 2026-06-09T13:22:12Z — claude-code — modified: tasks.py
+- 2026-06-09T13:22:18Z — claude-code — modified: tasks.py
+- 2026-06-09T13:22:24Z — claude-code — modified: tasks.py
+- 2026-06-09T13:22:36Z — claude-code — modified: schemas.py
+- 2026-06-09T13:22:49Z — claude-code — modified: schemas.py
+- 2026-06-09T13:22:57Z — claude-code — modified: main.py
+- 2026-06-09T13:23:11Z — claude-code — modified: main.py
+- 2026-06-09T13:24:02Z — claude-code — modified: test_slide_routes.py
+- 2026-06-09T13:25:04Z — claude-code — modified: tasks.py
+- 2026-06-09T13:29:36Z — claude-code — modified: pre-commit
+- 2026-06-09T13:36:14Z — claude-code — modified: test_slide_detection.py
+- 2026-06-09T13:36:32Z — claude-code — modified: slide_detection.py
+- 2026-06-09T13:36:39Z — claude-code — modified: slide_detection.py
+- 2026-06-09T13:36:48Z — claude-code — modified: slide_detection.py
+- 2026-06-09T13:36:54Z — claude-code — modified: slide_detection.py
+- 2026-06-09T13:37:03Z — claude-code — modified: test_slide_detection.py
+- 2026-06-09T13:42:12Z — claude-code — modified: test_e2e_job_present.sh
+- 2026-06-09T13:42:28Z — claude-code — modified: test.yml
+- 2026-06-09T13:43:47Z — claude-code — modified: test.yml
+- 2026-06-09T13:44:53Z — claude-code — modified: test.yml
+- 2026-06-09T13:46:12Z — claude-code — modified: test.yml
+2026-06-09T13:46:52Z session-turn-end: snapshot written to session-progress.md (branch: feat/backlog-sonnet46)
+- 2026-06-09T13:50:27Z — claude-code — modified: package.json
+2026-06-09T13:51:37Z session-turn-end: snapshot written to session-progress.md (branch: feat/backlog-sonnet46)
+- 2026-06-09T13:58:30Z — claude-code — modified: deploy.sh
+- 2026-06-09T13:58:41Z — claude-code — modified: docker-compose.e2e.yml
+- 2026-06-09T13:58:45Z — claude-code — modified: docker-compose.e2e.yml
+- 2026-06-09T14:05:51Z — claude-code — modified: docker-compose.e2e.yml
+- 2026-06-09T14:12:15Z — claude-code — modified: docker-compose.e2e.yml
+- 2026-06-09T14:18:39Z — claude-code — modified: test.yml
+- 2026-06-09T14:26:28Z — claude-code — modified: Dockerfile
+- 2026-06-09T14:26:31Z — claude-code — modified: Dockerfile
+- 2026-06-09T14:34:17Z — claude-code — modified: test.yml
+- 2026-06-09T14:44:41Z — claude-code — modified: test.yml
+- 2026-06-09T14:52:30Z — claude-code — modified: test.yml
+- 2026-06-09T15:03:28Z — claude-code — modified: global-setup.ts
+- 2026-06-09T15:28:02Z — claude-code — modified: auth-flow.spec.ts
+- 2026-06-09T15:28:08Z — claude-code — modified: auth-flow.spec.ts
+- 2026-06-09T15:53:02Z — claude-code — modified: test.yml
+- 2026-06-09T15:53:08Z — claude-code — modified: playwright.config.ts
+- 2026-06-09T16:15:30Z — claude-code — modified: settings-buttons.spec.ts
+- 2026-06-09T16:16:07Z — claude-code — modified: settings-vllm.spec.ts
+- 2026-06-09T16:16:15Z — claude-code — modified: password-reset-flow.spec.ts
+- 2026-06-09T16:27:58Z — claude-code — modified: settings-vllm.spec.ts
+- 2026-06-09T16:28:05Z — claude-code — modified: settings-vllm.spec.ts
+- 2026-06-09T16:28:10Z — claude-code — modified: settings-vllm.spec.ts
+- 2026-06-09T16:28:16Z — claude-code — modified: settings-vllm.spec.ts
+2026-06-09T16:36:02Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T16:53:02Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-09T17:06:53Z — claude-code — modified: HANDOFF.md
+2026-06-09T17:07:22Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T17:16:55Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T18:10:45Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-09T18:13:32Z — claude-code — modified: PLAN-presentation-mode-hardening.md
+2026-06-09T18:13:37Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-09T18:25:39Z — claude-code — modified: test_process_slides_task.py
+- 2026-06-09T18:26:10Z — claude-code — modified: tasks.py
+- 2026-06-09T18:26:16Z — claude-code — modified: tasks.py
+- 2026-06-09T18:29:10Z — claude-code — modified: test_slide_detection.py
+- 2026-06-09T18:32:33Z — claude-code — modified: test_slide_detection.py
+- 2026-06-09T18:40:46Z — claude-code — modified: test_slide_detection.py
+- 2026-06-09T18:41:11Z — claude-code — modified: slide_detection.py
+- 2026-06-09T18:41:22Z — claude-code — modified: slide_detection.py
+- 2026-06-09T18:41:28Z — claude-code — modified: slide_detection.py
+- 2026-06-09T18:41:33Z — claude-code — modified: slide_detection.py
+- 2026-06-09T18:41:38Z — claude-code — modified: slide_detection.py
+- 2026-06-09T18:41:52Z — claude-code — modified: slide_detection.py
+- 2026-06-09T18:42:01Z — claude-code — modified: slide_detection.py
+- 2026-06-09T18:45:12Z — claude-code — modified: Home.test.tsx
+2026-06-09T18:46:43Z session-turn-end: snapshot written to session-progress.md (branch: feat/presentation-mode-hardening)
+- 2026-06-09T18:48:44Z — claude-code — modified: pyproject.toml
+- 2026-06-09T18:48:45Z — claude-code — modified: package.json
+- 2026-06-09T19:05:34Z — claude-code — modified: password-reset-flow.spec.ts
+2026-06-09T19:19:51Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T23:14:17Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-09T23:21:45Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-09T23:31:35Z — claude-code — modified: config.py
+- 2026-06-09T23:31:42Z — claude-code — modified: slide_detection.py
+- 2026-06-09T23:31:51Z — claude-code — modified: slide_detection.py
+- 2026-06-09T23:32:01Z — claude-code — modified: slide_detection.py
+- 2026-06-09T23:32:16Z — claude-code — modified: test_slide_detection.py
+- 2026-06-09T23:32:45Z — claude-code — modified: test_slide_detection.py
+- 2026-06-09T23:33:12Z — claude-code — modified: test_slide_detection.py
+- 2026-06-09T23:33:59Z — claude-code — modified: test_slide_detection.py
+- 2026-06-09T23:34:30Z — claude-code — modified: test_slide_detection.py
+2026-06-10T00:12:31Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-10T00:13:22Z session-turn-end: snapshot written to session-progress.md (branch: main)
+2026-06-10T00:14:30Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-10T00:24:23Z — claude-code — modified: llm_providers.py
+- 2026-06-10T00:24:36Z — claude-code — modified: llm.py
+- 2026-06-10T00:24:43Z — claude-code — modified: llm.py
+2026-06-10T00:25:54Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-10T00:34:07Z — claude-code — modified: pyproject.toml
+2026-06-10T00:50:11Z session-turn-end: snapshot written to session-progress.md (branch: main)
+- 2026-06-10T08:42:12Z — claude-code — modified: WorkspaceLayout.tsx
+- 2026-06-10T08:42:18Z — claude-code — modified: WorkspaceLayout.tsx
+- 2026-06-10T08:42:24Z — claude-code — modified: WorkspaceLayout.tsx
+- 2026-06-10T08:42:32Z — claude-code — modified: ActivityBar.tsx
+- 2026-06-10T08:42:38Z — claude-code — modified: ActivityBar.tsx
+- 2026-06-10T08:42:44Z — claude-code — modified: ActivityBar.tsx
