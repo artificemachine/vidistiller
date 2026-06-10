@@ -27,7 +27,7 @@ tasks:
     - .env must not be committed or baked into images
     - docker-compose.yml references ./backend/Dockerfile which doesn't exist yet
     - uv.lock has real deps but pyproject.toml is sparse — full dep audit needed first
-  project_path: /Users/airm2max/DevOpsSec/vidistiller
+  project_path: .
   verified: true
   verified_at: '2026-04-02T15:24:02Z'
   verified_by: claude-code
@@ -42,7 +42,7 @@ tasks:
     src prop (not url), native HTMLVideoElement ref, currentTime for seek,
     onReady callback. Deploy to LXC and resolve cascading TypeScript errors
     (slideText, hasSlideText prop mismatches) via full frontend rsync.
-  project_path: /Users/airm2max/DevOpsSec/vidistiller
+  project_path: .
   verified: true
   verified_at: '2026-04-17T00:00:00Z'
   verified_by: claude-code
@@ -59,7 +59,7 @@ tasks:
     YouTubeService. Thread source_type through LLM summarization output
     (Source: <url> (<source_type>) header). Update all tests and frontend.
     Import backward compat: falls back to youtube_url in old export JSON.
-  project_path: /Users/airm2max/DevOpsSec/vidistiller
+  project_path: .
   verified: true
   verified_at: '2026-04-17T00:00:00Z'
   verified_by: claude-code
@@ -78,7 +78,7 @@ tasks:
     VidDocs_UI_UX_Audit_Report, pen files, pencil-sync.config.json,
     superharness contract/ledger headers, GitHub repo rename,
     SSH config alias (vidistiller-lxc), LXC web container rebuild.
-  project_path: /Users/airm2max/DevOpsSec/vidistiller
+  project_path: .
   verified: true
   verified_at: '2026-04-17T00:00:00Z'
   verified_by: claude-code

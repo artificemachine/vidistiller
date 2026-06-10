@@ -22,7 +22,7 @@ jobs:
         run: python -m pip install --upgrade pip shipguard
 
       - name: Run shipguard scan
-        run: shipguard scan . --format json --output report.shipguard.json || true
+        run: shipguard scan . --format json --output report.shipguard.json
 
       - name: Enforce severity policy
         run: |
