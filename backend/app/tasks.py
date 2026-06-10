@@ -585,6 +585,23 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
                 "image_url": image_url,
             })
 
+        if not snapshot_dicts and job.slides:
+            slides_base = Path(_data_dir) / "slides"
+            for slide in sorted(job.slides, key=lambda s: s.start_timestamp):
+                image_url = ""
+                try:
+                    if slide.final_frame_path:
+                        relative = Path(slide.final_frame_path).relative_to(slides_base)
+                        image_url = f"/static/slides/{relative}"
+                except (ValueError, TypeError):
+                    pass
+                if image_url:
+                    snapshot_dicts.append({
+                        "timestamp": slide.start_timestamp,
+                        "image_url": image_url,
+                    })
+
+
         # Delete old summary if force re-generating
         if force:
             db.query(Document).filter(
