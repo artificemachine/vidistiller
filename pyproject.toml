@@ -1,6 +1,6 @@
 [project]
 name = "vidistiller"
-version = "1.10.1"
+version = "1.10.2"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -11,5 +11,5 @@ dependencies = [
 
 [tool.pytest.ini_options]
 markers = [
-    "lxc: LXC deployment integration tests (run with -m lxc)",
+    "staging: Staging deployment integration tests (run with -m staging)",
 ]

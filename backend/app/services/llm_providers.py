@@ -178,12 +178,12 @@ class VLLMProvider(LLMProvider):
                 messages=[{
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Describe what is shown in this image in 1-2 sentences."},
+                        {"type": "text", "text": "Analyze this video frame from a technical presentation. Identify the main topic, any visible code snippets, diagrams, or key bullet points. Provide a 2-sentence technical summary."},
                         {"type": "image_url", "image_url": {"url": image_url}},
                     ],
                 }],
                 timeout=timeout,
-                max_tokens=256,
+                max_tokens=512,
             )
             return response.choices[0].message.content or ""
         except Exception:
