@@ -85,6 +85,47 @@ class TranscriptSection:
 
 _MAX_ANALYSIS_CHARS = 30_000
 
+
+def _inject_vision_annotations(
+    transcript_text: str,
+    snapshots: list[dict],
+    descriptions: dict[float, str],
+) -> str:
+    """Insert [Vision: ...] lines after the nearest earlier timestamp for each snapshot."""
+    if not descriptions:
+        return transcript_text
+    lines = transcript_text.split("\n")
+    ts_re = re.compile(r"^(?:## )?\[(\d{2}):(\d{2}):(\d{2})\]")
+
+    line_ts: list[tuple[float, int]] = []
+    for i, line in enumerate(lines):
+        m = ts_re.match(line)
+        if m:
+            secs = int(m[1]) * 3600 + int(m[2]) * 60 + int(m[3])
+            line_ts.append((secs, i))
+
+    inject_after: dict[int, list[str]] = {}
+    for snap in snapshots:
+        ts = float(snap["timestamp"])
+        desc = descriptions.get(ts, "")
+        if not desc:
+            continue
+        best_idx = -1
+        best_ts = -1.0
+        for secs, idx in line_ts:
+            if secs <= ts and secs > best_ts:
+                best_ts = secs
+                best_idx = idx
+        target = best_idx if best_idx >= 0 else 0
+        inject_after.setdefault(target, []).append(f"[Vision: {desc}]")
+
+    result: list[str] = []
+    for i, line in enumerate(lines):
+        result.append(line)
+        for annotation in inject_after.get(i, []):
+            result.append(annotation)
+    return "\n".join(result)
+
 _CONTENT_TYPE_PROMPTS: dict[ContentType, str] = {
     ContentType.INTRO: (
         "Orient the reader: summarize what the video covers, mention any "
@@ -491,6 +532,22 @@ Summary:"""
         def _check_cancel():
             if cancel_check and cancel_check():
                 raise CancelledException("Summarization cancelled by user")
+
+        # Vision pre-pass: describe each snapshot before summarizing
+        snapshot_descriptions: dict[float, str] = {}
+        if snapshots and hasattr(self._provider, "describe_image"):
+            for snap in snapshots:
+                desc = self._provider.describe_image(
+                    image_url=snap["image_url"],
+                    model=self._model,
+                )
+                if desc:
+                    snapshot_descriptions[float(snap["timestamp"])] = desc
+
+        if snapshot_descriptions:
+            transcript_text = _inject_vision_annotations(
+                transcript_text, snapshots, snapshot_descriptions
+            )
 
         try:
             # --- Two-pass pipeline ---
