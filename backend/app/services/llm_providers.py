@@ -167,6 +167,28 @@ class VLLMProvider(LLMProvider):
         )
         return response.choices[0].message.content or ""
 
+    def describe_image(self, image_url: str, model: str, timeout: int = 30) -> str:
+        """Send a multimodal request and return a 1-2 sentence image description.
+
+        Returns "" on any error — never raises.
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Describe what is shown in this image in 1-2 sentences."},
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                    ],
+                }],
+                timeout=timeout,
+                max_tokens=256,
+            )
+            return response.choices[0].message.content or ""
+        except Exception:
+            return ""
+
 
 # Default models per provider
 DEFAULT_MODELS = {
