@@ -583,6 +583,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
             snapshot_dicts.append({
                 "timestamp": snap.timestamp,
                 "image_url": image_url,
+                "file_path": snap.file_path,
             })
 
         if not snapshot_dicts and job.slides:
@@ -599,6 +600,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
                     snapshot_dicts.append({
                         "timestamp": slide.start_timestamp,
                         "image_url": image_url,
+                        "file_path": slide.final_frame_path,
                     })
 
 

@@ -536,9 +536,26 @@ Summary:"""
         # Vision pre-pass: describe each snapshot before summarizing
         snapshot_descriptions: dict[float, str] = {}
         if snapshots and hasattr(self._provider, "describe_image"):
+            import base64
+            import os
             for snap in snapshots:
+                # If we have a local file_path, use base64 data URI so remote vLLM can see it
+                file_path = snap.get("file_path")
+                if file_path and os.path.exists(file_path):
+                    try:
+                        with open(file_path, "rb") as f:
+                            b64_data = base64.b64encode(f.read()).decode('utf-8')
+                        ext = os.path.splitext(file_path)[1].lower().replace('.', '')
+                        if ext == 'jpg': ext = 'jpeg'
+                        target_url = f"data:image/{ext};base64,{b64_data}"
+                    except Exception as e:
+                        logger.warning(f"Failed to base64 encode {file_path}: {e}")
+                        target_url = snap["image_url"]
+                else:
+                    target_url = snap["image_url"]
+
                 desc = self._provider.describe_image(
-                    image_url=snap["image_url"],
+                    image_url=target_url,
                     model=self._model,
                 )
                 if desc:
@@ -1048,6 +1065,7 @@ Documentation:"""
                 prompt=prompt,
                 model=self._model,
                 timeout=self.settings.service_timeouts.llm_timeout,
+                max_tokens=2048,  # Leave room for up to 14k input tokens
             ).strip()
         except Exception as e:
             raise ValueError(f"Pass 1 LLM error: {str(e)}")
