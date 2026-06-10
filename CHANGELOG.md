@@ -190,3 +190,5 @@ All notable changes to this project will be documented in this file.
 - 2026-06-10: chore(release): bump to v1.10.4 (vision pre-pass base64 and context fix)
 - 2026-06-10: fix(frontend): fix left sidebar panel toggles failing due to missing order props in react-resizable-panels
 - 2026-06-10: chore(release): bump to v1.10.5 (frontend UI fix)
+- 2026-06-10: fix(frontend): fix left sidebar panel toggles failing due to missing order props; use imperative control instead of conditional rendering for layout stability
+- 2026-06-10: chore(release): bump to v1.10.6 (frontend UI fix v2)
