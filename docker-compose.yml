@@ -258,7 +258,7 @@ services:
         context: ./frontend
         dockerfile: Dockerfile
         args:
-          NEXT_PUBLIC_API_URL: http://${LXC_HOST:-localhost}:${API_PORT}/api
+          NEXT_PUBLIC_API_URL: http://${STAGING_HOST:-localhost}:${API_PORT}/api
           NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
 
       container_name: tutorial_web

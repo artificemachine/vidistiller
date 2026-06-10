@@ -41,7 +41,7 @@ services:
     container_name: staging_web
     build:
       args:
-        NEXT_PUBLIC_API_URL: http://${LXC_HOST:-localhost}:8001/api
+        NEXT_PUBLIC_API_URL: http://${STAGING_HOST:-localhost}:8001/api
     ports:
       - "3001:3000"
     environment:
