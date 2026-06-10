@@ -25,6 +25,9 @@ function readUIState() {
 
 export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarActions, sidebarTitle, logsCollapsed, slideText }: WorkspaceLayoutProps) {
   const sidebarPanelRef = usePanelRef();
+  const logsPanelRef = usePanelRef();
+  const bottomPanelRef = usePanelRef();
+  const slideTextPanelRef = usePanelRef();
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [bottomVisible, setBottomVisible] = useState(true);
   const [logsVisible, setLogsVisible] = useState(true);
@@ -71,16 +74,40 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
   }, [sidebarPanelRef]);
 
   const toggleBottom = useCallback(() => {
-    setBottomVisible((v) => !v);
-  }, []);
+    const panel = bottomPanelRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) {
+      panel.expand();
+      setBottomVisible(true);
+    } else {
+      panel.collapse();
+      setBottomVisible(false);
+    }
+  }, [bottomPanelRef]);
 
   const toggleLogs = useCallback(() => {
-    setLogsVisible((v) => !v);
-  }, []);
+    const panel = logsPanelRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) {
+      panel.expand();
+      setLogsVisible(true);
+    } else {
+      panel.collapse();
+      setLogsVisible(false);
+    }
+  }, [logsPanelRef]);
 
   const toggleSlideText = useCallback(() => {
-    setSlideTextVisible((v) => !v);
-  }, []);
+    const panel = slideTextPanelRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) {
+      panel.expand();
+      setSlideTextVisible(true);
+    } else {
+      panel.collapse();
+      setSlideTextVisible(false);
+    }
+  }, [slideTextPanelRef]);
 
   const showLogs = !!(logs && logsVisible);
   const showBottom = bottomVisible && !!bottom;
@@ -101,6 +128,7 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
       />
 
       <Group
+        key={`${showLogs}-${showBottom}-${!!slideText && slideTextVisible}`}
         orientation="horizontal"
         defaultLayout={horizontalLayout.defaultLayout}
         onLayoutChanged={horizontalLayout.onLayoutChanged}
@@ -108,7 +136,6 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
         {/* Sidebar: Transcript */}
         <Panel
           id="sidebar"
-          order={1}
           panelRef={sidebarPanelRef}
           defaultSize="25%"
           minSize="15%"
@@ -133,10 +160,10 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
         <ResizeHandle direction="horizontal" />
 
         {/* Main content area: vertical split */}
-        <Panel id="content" order={2} defaultSize="75%" minSize="30%">
+        <Panel id="content" defaultSize="75%" minSize="30%">
           <Group orientation="vertical">
             {/* Top: Player */}
-            <Panel id="player" order={1} defaultSize={showLogs || showBottom ? '45%' : '100%'} minSize="20%">
+            <Panel id="player" defaultSize={showLogs || showBottom ? '45%' : '100%'} minSize="20%">
               <div className="flex flex-col h-full bg-card-light dark:bg-card-dark">
                 <PanelHeader
                   title="player"
@@ -179,45 +206,46 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
             </Panel>
 
             {/* Middle: Snapshots */}
-            {showLogs && (
-              <>
-                <ResizeHandle direction="vertical" />
-                <Panel id="logs" order={2} defaultSize="20%" minSize="10%">
-                  <div className="flex flex-col h-full bg-card-light dark:bg-card-dark border-t border-border-light dark:border-border-dark">
+            <ResizeHandle direction="vertical" />
+            <Panel id="logs" panelRef={logsPanelRef} defaultSize="20%" minSize="10%" collapsible collapsedSize="0%">
+              <div className="flex flex-col h-full bg-card-light dark:bg-card-dark border-t border-border-light dark:border-border-dark">
+                {logs && (
+                  <>
                     <PanelHeader title="snapshots" />
                     <div className="flex-1 overflow-y-auto">{logs}</div>
-                  </div>
-                </Panel>
-              </>
-            )}
+                  </>
+                )}
+              </div>
+            </Panel>
 
             {/* Bottom: Processing Logs */}
-            {showBottom && (
-              <>
-                <ResizeHandle direction="vertical" />
-                <Panel id="bottom" order={3} defaultSize={showLogs ? '35%' : '55%'} minSize="15%">
-                  <div className="flex flex-col h-full bg-card-light dark:bg-card-dark border-t border-border-light dark:border-border-dark">
+            <ResizeHandle direction="vertical" />
+            <Panel id="bottom" panelRef={bottomPanelRef} defaultSize={showLogs ? '35%' : '55%'} minSize="15%" collapsible collapsedSize="0%">
+              <div className="flex flex-col h-full bg-card-light dark:bg-card-dark border-t border-border-light dark:border-border-dark">
+                {bottom && (
+                  <>
                     <PanelHeader title="processing logs" />
                     <div className="flex-1 overflow-y-auto p-4">{bottom}</div>
-                  </div>
-                </Panel>
-              </>
-            )}
+                  </>
+                )}
+              </div>
+            </Panel>
 
             {/* Slide Notes: OCR + transcript for the selected slide */}
-            {!!slideText && slideTextVisible && (
-              <>
-                <ResizeHandle direction="vertical" />
-                <Panel id="slide-notes" order={4} defaultSize="25%" minSize="10%">
-                  <div className="flex flex-col h-full bg-card-light dark:bg-card-dark border-t border-border-light dark:border-border-dark">
+            <ResizeHandle direction="vertical" />
+            <Panel id="slide-notes" panelRef={slideTextPanelRef} defaultSize="25%" minSize="10%" collapsible collapsedSize="0%">
+              <div className="flex flex-col h-full bg-card-light dark:bg-card-dark border-t border-border-light dark:border-border-dark">
+                {slideText && (
+                  <>
                     <PanelHeader title="slide notes" />
                     <div className="flex-1 overflow-y-auto">{slideText}</div>
-                  </div>
-                </Panel>
-              </>
-            )}
+                  </>
+                )}
+              </div>
+            </Panel>
           </Group>
         </Panel>
+
       </Group>
     </div>
   );
