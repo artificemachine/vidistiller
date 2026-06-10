@@ -108,6 +108,7 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
         {/* Sidebar: Transcript */}
         <Panel
           id="sidebar"
+          order={1}
           panelRef={sidebarPanelRef}
           defaultSize="25%"
           minSize="15%"
@@ -132,10 +133,10 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
         <ResizeHandle direction="horizontal" />
 
         {/* Main content area: vertical split */}
-        <Panel id="content" defaultSize="75%" minSize="30%">
+        <Panel id="content" order={2} defaultSize="75%" minSize="30%">
           <Group orientation="vertical">
             {/* Top: Player */}
-            <Panel id="player" defaultSize={showLogs || showBottom ? '45%' : '100%'} minSize="20%">
+            <Panel id="player" order={1} defaultSize={showLogs || showBottom ? '45%' : '100%'} minSize="20%">
               <div className="flex flex-col h-full bg-card-light dark:bg-card-dark">
                 <PanelHeader
                   title="player"
@@ -181,7 +182,7 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
             {showLogs && (
               <>
                 <ResizeHandle direction="vertical" />
-                <Panel id="logs" defaultSize="20%" minSize="10%">
+                <Panel id="logs" order={2} defaultSize="20%" minSize="10%">
                   <div className="flex flex-col h-full bg-card-light dark:bg-card-dark border-t border-border-light dark:border-border-dark">
                     <PanelHeader title="snapshots" />
                     <div className="flex-1 overflow-y-auto">{logs}</div>
@@ -194,7 +195,7 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
             {showBottom && (
               <>
                 <ResizeHandle direction="vertical" />
-                <Panel id="bottom" defaultSize={showLogs ? '35%' : '55%'} minSize="15%">
+                <Panel id="bottom" order={3} defaultSize={showLogs ? '35%' : '55%'} minSize="15%">
                   <div className="flex flex-col h-full bg-card-light dark:bg-card-dark border-t border-border-light dark:border-border-dark">
                     <PanelHeader title="processing logs" />
                     <div className="flex-1 overflow-y-auto p-4">{bottom}</div>
@@ -207,7 +208,7 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
             {!!slideText && slideTextVisible && (
               <>
                 <ResizeHandle direction="vertical" />
-                <Panel id="slide-notes" defaultSize="25%" minSize="10%">
+                <Panel id="slide-notes" order={4} defaultSize="25%" minSize="10%">
                   <div className="flex flex-col h-full bg-card-light dark:bg-card-dark border-t border-border-light dark:border-border-dark">
                     <PanelHeader title="slide notes" />
                     <div className="flex-1 overflow-y-auto">{slideText}</div>
