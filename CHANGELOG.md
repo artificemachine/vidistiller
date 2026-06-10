@@ -186,3 +186,5 @@ All notable changes to this project will be documented in this file.
 - 2026-06-10: chore(release): bump to v1.10.2 (cleanup and prompt tuning)
 - 2026-06-10: fix(backend): summarize task now uses slides as fallback context for vision pre-pass in slide_aware mode
 - 2026-06-10: chore(release): bump to v1.10.3 (vision pre-pass slide fix)
+- 2026-06-10: fix(backend): convert images to base64 data URIs for vision pre-pass; reduce max_tokens in analysis pass to fix 16k context limits
+- 2026-06-10: chore(release): bump to v1.10.4 (vision pre-pass base64 and context fix)
