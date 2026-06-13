@@ -8,6 +8,7 @@ vi.mock('react-resizable-panels', () => ({
   Panel: ({ children }: any) => <div data-testid="panel">{children}</div>,
   Separator: ({ children }: any) => <div data-testid="separator">{children}</div>,
   usePanelRef: () => ({ current: null }),
+  useGroupRef: () => ({ current: { setLayout: vi.fn(), getLayout: vi.fn() } }),
   useDefaultLayout: () => ({
     defaultLayout: undefined,
     onLayoutChange: vi.fn(),
