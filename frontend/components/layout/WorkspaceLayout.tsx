@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Group, Panel, usePanelRef, useDefaultLayout } from 'react-resizable-panels';
+import { Group, Layout, Panel, usePanelRef, useDefaultLayout } from 'react-resizable-panels';
 import ActivityBar from './ActivityBar';
 import ResizeHandle from './ResizeHandle';
 import PanelHeader from './PanelHeader';
@@ -63,11 +63,11 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
 
   // Manual vertical layout persistence — saved only when the user clicks "save layout"
   const verticalLayoutKey = `vidistiller-vertical-layout-${logsVisible}-${bottomVisible}-${slideTextVisible}`;
-  const currentVerticalLayout = useRef<number[] | undefined>(undefined);
+  const currentVerticalLayout = useRef<Layout | undefined>(undefined);
   const savedVerticalLayout = useMemo(() => {
     try {
       const raw = localStorage.getItem(verticalLayoutKey);
-      return raw ? (JSON.parse(raw) as number[]) : undefined;
+      return raw ? (JSON.parse(raw) as Layout) : undefined;
     } catch { return undefined; }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [verticalLayoutKey]);
@@ -181,7 +181,7 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
           <Group
               orientation="vertical"
               defaultLayout={savedVerticalLayout}
-              onLayoutChanged={(sizes) => { currentVerticalLayout.current = sizes; }}
+              onLayoutChanged={(layout) => { currentVerticalLayout.current = layout; }}
             >
             {/* Top: Player */}
             <Panel id="player" defaultSize={!showLogs && !showBottom ? '100%' : hasSlideNotes ? '40%' : '45%'} minSize="20%">
