@@ -78,53 +78,28 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
     try { localStorage.setItem('vidistiller-vertical-layout', JSON.stringify(currentVerticalLayout.current)); } catch {}
   }, []);
 
-  const toggleSidebar = useCallback(() => {
-    const panel = sidebarPanelRef.current;
-    if (!panel) return;
-    if (panel.isCollapsed()) {
-      panel.expand();
-      setSidebarVisible(true);
-    } else {
-      panel.collapse();
-      setSidebarVisible(false);
-    }
-  }, [sidebarPanelRef]);
+  const toggleSidebar = useCallback(() => setSidebarVisible(v => !v), []);
+  const toggleBottom = useCallback(() => setBottomVisible(v => !v), []);
+  const toggleLogs = useCallback(() => setLogsVisible(v => !v), []);
+  const toggleSlideText = useCallback(() => setSlideTextVisible(v => !v), []);
 
-  const toggleBottom = useCallback(() => {
-    const panel = bottomPanelRef.current;
-    if (!panel) return;
-    if (panel.isCollapsed()) {
-      panel.expand();
-      setBottomVisible(true);
-    } else {
-      panel.collapse();
-      setBottomVisible(false);
-    }
-  }, [bottomPanelRef]);
-
-  const toggleLogs = useCallback(() => {
-    const panel = logsPanelRef.current;
-    if (!panel) return;
-    if (panel.isCollapsed()) {
-      panel.expand();
-      setLogsVisible(true);
-    } else {
-      panel.collapse();
-      setLogsVisible(false);
-    }
-  }, [logsPanelRef]);
-
-  const toggleSlideText = useCallback(() => {
-    const panel = slideTextPanelRef.current;
-    if (!panel) return;
-    if (panel.isCollapsed()) {
-      panel.expand();
-      setSlideTextVisible(true);
-    } else {
-      panel.collapse();
-      setSlideTextVisible(false);
-    }
-  }, [slideTextPanelRef]);
+  // Sync imperative panel collapse/expand with visibility state.
+  // Runs on hydration (to match restored localStorage state) and on every toggle.
+  // This avoids isCollapsed() mismatches that require double-clicks.
+  useEffect(() => {
+    if (!hydrated) return;
+    const sync = (ref: ReturnType<typeof usePanelRef>, visible: boolean) => {
+      const p = ref.current;
+      if (!p) return;
+      if (!visible && !p.isCollapsed()) p.collapse();
+      else if (visible && p.isCollapsed()) p.expand();
+    };
+    sync(sidebarPanelRef, sidebarVisible);
+    sync(logsPanelRef, logsVisible);
+    sync(bottomPanelRef, bottomVisible);
+    sync(slideTextPanelRef, slideTextVisible);
+  }, [hydrated, sidebarVisible, logsVisible, bottomVisible, slideTextVisible,
+      sidebarPanelRef, logsPanelRef, bottomPanelRef, slideTextPanelRef]);
 
   const showLogs = !!(logs && logsVisible);
   const showBottom = bottomVisible && !!bottom;
