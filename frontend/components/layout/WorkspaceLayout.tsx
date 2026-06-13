@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Group, Panel, usePanelRef, useDefaultLayout } from 'react-resizable-panels';
 import ActivityBar from './ActivityBar';
 import ResizeHandle from './ResizeHandle';
@@ -61,6 +61,22 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
 
   const horizontalLayout = useDefaultLayout({ id: 'workspace-horizontal' });
 
+  // Manual vertical layout persistence — saved only when the user clicks "save layout"
+  const verticalLayoutKey = `vidistiller-vertical-layout-${logsVisible}-${bottomVisible}-${slideTextVisible}`;
+  const currentVerticalLayout = useRef<number[] | undefined>(undefined);
+  const savedVerticalLayout = useMemo(() => {
+    try {
+      const raw = localStorage.getItem(verticalLayoutKey);
+      return raw ? (JSON.parse(raw) as number[]) : undefined;
+    } catch { return undefined; }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verticalLayoutKey]);
+
+  const saveLayout = useCallback(() => {
+    if (!currentVerticalLayout.current) return;
+    try { localStorage.setItem(verticalLayoutKey, JSON.stringify(currentVerticalLayout.current)); } catch {}
+  }, [verticalLayoutKey]);
+
   const toggleSidebar = useCallback(() => {
     const panel = sidebarPanelRef.current;
     if (!panel) return;
@@ -113,19 +129,6 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
   const showBottom = bottomVisible && !!bottom;
   const hasSlideNotes = !!(slideText && slideTextVisible);
 
-  // Restore collapsed state after Group remounts (key change resets all panels to expanded)
-  useEffect(() => {
-    if (!logsVisible) logsPanelRef.current?.collapse();
-  }, [logsPanelRef, logsVisible]);
-
-  useEffect(() => {
-    if (!bottomVisible) bottomPanelRef.current?.collapse();
-  }, [bottomPanelRef, bottomVisible]);
-
-  useEffect(() => {
-    if (!slideTextVisible) slideTextPanelRef.current?.collapse();
-  }, [slideTextPanelRef, slideTextVisible]);
-
   return (
     <div className="flex h-full w-full overflow-hidden">
       <ActivityBar
@@ -139,10 +142,10 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
         hasSlideText={!!slideText}
         slideTextVisible={slideTextVisible}
         onToggleSlideText={toggleSlideText}
+        onSaveLayout={saveLayout}
       />
 
       <Group
-        key={`${showLogs}-${showBottom}-${!!slideText && slideTextVisible}`}
         orientation="horizontal"
         defaultLayout={horizontalLayout.defaultLayout}
         onLayoutChanged={horizontalLayout.onLayoutChanged}
@@ -175,7 +178,11 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
 
         {/* Main content area: vertical split */}
         <Panel id="content" defaultSize="75%" minSize="30%">
-          <Group orientation="vertical">
+          <Group
+              orientation="vertical"
+              defaultLayout={savedVerticalLayout}
+              onLayoutChanged={(sizes) => { currentVerticalLayout.current = sizes; }}
+            >
             {/* Top: Player */}
             <Panel id="player" defaultSize={!showLogs && !showBottom ? '100%' : hasSlideNotes ? '40%' : '45%'} minSize="20%">
               <div className="flex flex-col h-full bg-card-light dark:bg-card-dark">
