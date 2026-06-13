@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Group, Layout, Panel, usePanelRef, useDefaultLayout } from 'react-resizable-panels';
 import ActivityBar from './ActivityBar';
 import ResizeHandle from './ResizeHandle';
@@ -61,21 +61,22 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
 
   const horizontalLayout = useDefaultLayout({ id: 'workspace-horizontal' });
 
-  // Manual vertical layout persistence — saved only when the user clicks "save layout"
-  const verticalLayoutKey = `vidistiller-vertical-layout-${logsVisible}-${bottomVisible}-${slideTextVisible}`;
-  const currentVerticalLayout = useRef<Layout | undefined>(undefined);
-  const savedVerticalLayout = useMemo(() => {
+  // Vertical layout persistence — read ONCE on mount so defaultLayout never changes.
+  // Changing defaultLayout on re-renders causes react-resizable-panels to re-apply it,
+  // which overrides imperative collapse/expand and makes multiple panels toggle at once.
+  const [savedVerticalLayout] = useState<Layout | undefined>(() => {
+    if (typeof window === 'undefined') return undefined;
     try {
-      const raw = localStorage.getItem(verticalLayoutKey);
+      const raw = localStorage.getItem('vidistiller-vertical-layout');
       return raw ? (JSON.parse(raw) as Layout) : undefined;
     } catch { return undefined; }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [verticalLayoutKey]);
+  });
+  const currentVerticalLayout = useRef<Layout | undefined>(undefined);
 
   const saveLayout = useCallback(() => {
     if (!currentVerticalLayout.current) return;
-    try { localStorage.setItem(verticalLayoutKey, JSON.stringify(currentVerticalLayout.current)); } catch {}
-  }, [verticalLayoutKey]);
+    try { localStorage.setItem('vidistiller-vertical-layout', JSON.stringify(currentVerticalLayout.current)); } catch {}
+  }, []);
 
   const toggleSidebar = useCallback(() => {
     const panel = sidebarPanelRef.current;
