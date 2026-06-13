@@ -98,8 +98,8 @@ describe('WorkspaceLayout', () => {
         bottom={<div>B</div>}
       />
     );
-    expect(screen.getByTitle('toggle transcript')).toBeInTheDocument();
-    expect(screen.getByTitle('toggle snapshots')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Transcript' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Snapshots' })).toBeInTheDocument();
   });
 
   it('renders logs panel when logs prop is provided', () => {

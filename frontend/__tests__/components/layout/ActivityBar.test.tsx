@@ -8,9 +8,9 @@ function renderWithProviders(ui: React.ReactElement) {
   return render(<ThemeProvider>{ui}</ThemeProvider>);
 }
 
-/** Find ActivityBar toggle button by its title attribute. */
-function getToggleButton(tooltipText: string): HTMLElement {
-  return screen.getByTitle(tooltipText);
+/** Find ActivityBar toggle button by its aria-label. */
+function getToggleButton(label: string): HTMLElement {
+  return screen.getByRole('button', { name: label });
 }
 
 describe('ActivityBar', () => {
@@ -25,12 +25,12 @@ describe('ActivityBar', () => {
 
   it('renders toggle buttons and theme toggle', () => {
     renderWithProviders(<ActivityBar {...defaultProps} />);
-    expect(getToggleButton('toggle transcript')).toBeInTheDocument();
-    expect(getToggleButton('toggle snapshots')).toBeInTheDocument();
-    expect(getToggleButton('toggle logs')).toBeInTheDocument();
-    // Theme toggle button is also present
+    expect(getToggleButton('Transcript')).toBeInTheDocument();
+    expect(getToggleButton('Snapshots')).toBeInTheDocument();
+    expect(getToggleButton('Logs')).toBeInTheDocument();
+    // Theme toggle + save layout button also present
     const buttons = screen.getAllByRole('button');
-    expect(buttons).toHaveLength(4);
+    expect(buttons).toHaveLength(5);
   });
 
   it('calls onToggleSidebar when sidebar button is clicked', async () => {
@@ -38,7 +38,7 @@ describe('ActivityBar', () => {
     const onToggleSidebar = vi.fn();
     renderWithProviders(<ActivityBar {...defaultProps} onToggleSidebar={onToggleSidebar} />);
 
-    await user.click(getToggleButton('toggle transcript'));
+    await user.click(getToggleButton('Transcript'));
     expect(onToggleSidebar).toHaveBeenCalledOnce();
   });
 
@@ -47,7 +47,7 @@ describe('ActivityBar', () => {
     const onToggleBottom = vi.fn();
     renderWithProviders(<ActivityBar {...defaultProps} onToggleBottom={onToggleBottom} />);
 
-    await user.click(getToggleButton('toggle snapshots'));
+    await user.click(getToggleButton('Snapshots'));
     expect(onToggleBottom).toHaveBeenCalledOnce();
   });
 
@@ -56,32 +56,32 @@ describe('ActivityBar', () => {
     const onToggleLogs = vi.fn();
     renderWithProviders(<ActivityBar {...defaultProps} onToggleLogs={onToggleLogs} />);
 
-    await user.click(getToggleButton('toggle logs'));
+    await user.click(getToggleButton('Logs'));
     expect(onToggleLogs).toHaveBeenCalledOnce();
   });
 
   it('applies active style when sidebar is visible', () => {
     renderWithProviders(<ActivityBar {...defaultProps} sidebarVisible={true} />);
-    const btn = getToggleButton('toggle transcript');
+    const btn = getToggleButton('Transcript');
     expect(btn.className).toContain('bg-border-dark');
   });
 
   it('applies inactive style when sidebar is hidden', () => {
     renderWithProviders(<ActivityBar {...defaultProps} sidebarVisible={false} />);
-    const btn = getToggleButton('toggle transcript');
+    const btn = getToggleButton('Transcript');
     expect(btn.className).toContain('text-text-light/40');
     expect(btn.className).not.toContain('bg-border-dark');
   });
 
   it('applies active style when logs are visible', () => {
     renderWithProviders(<ActivityBar {...defaultProps} logsVisible={true} />);
-    const btn = getToggleButton('toggle logs');
+    const btn = getToggleButton('Logs');
     expect(btn.className).toContain('bg-border-dark');
   });
 
   it('applies inactive style when logs are hidden', () => {
     renderWithProviders(<ActivityBar {...defaultProps} logsVisible={false} />);
-    const btn = getToggleButton('toggle logs');
+    const btn = getToggleButton('Logs');
     expect(btn.className).toContain('text-text-light/40');
     expect(btn.className).not.toContain('bg-border-dark');
   });

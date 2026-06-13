@@ -1,0 +1,2 @@
+- 2026-06-08: fix(frontend): pdf export renders all pages; strip preamble from print transcript
+- 2026-06-08: fix(frontend): pdf export renders all pages; strip preamble from print transcript
