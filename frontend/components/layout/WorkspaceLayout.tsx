@@ -111,6 +111,20 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
 
   const showLogs = !!(logs && logsVisible);
   const showBottom = bottomVisible && !!bottom;
+  const hasSlideNotes = !!(slideText && slideTextVisible);
+
+  // Restore collapsed state after Group remounts (key change resets all panels to expanded)
+  useEffect(() => {
+    if (!logsVisible) logsPanelRef.current?.collapse();
+  }, [logsPanelRef, logsVisible]);
+
+  useEffect(() => {
+    if (!bottomVisible) bottomPanelRef.current?.collapse();
+  }, [bottomPanelRef, bottomVisible]);
+
+  useEffect(() => {
+    if (!slideTextVisible) slideTextPanelRef.current?.collapse();
+  }, [slideTextPanelRef, slideTextVisible]);
 
   return (
     <div className="flex h-full w-full overflow-hidden">
@@ -163,7 +177,7 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
         <Panel id="content" defaultSize="75%" minSize="30%">
           <Group orientation="vertical">
             {/* Top: Player */}
-            <Panel id="player" defaultSize={showLogs || showBottom ? '45%' : '100%'} minSize="20%">
+            <Panel id="player" defaultSize={!showLogs && !showBottom ? '100%' : hasSlideNotes ? '40%' : '45%'} minSize="20%">
               <div className="flex flex-col h-full bg-card-light dark:bg-card-dark">
                 <PanelHeader
                   title="player"
@@ -207,7 +221,7 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
 
             {/* Middle: Snapshots */}
             <ResizeHandle direction="vertical" />
-            <Panel id="logs" panelRef={logsPanelRef} defaultSize="20%" minSize="10%" collapsible collapsedSize="0%">
+            <Panel id="logs" panelRef={logsPanelRef} defaultSize={hasSlideNotes ? '18%' : '20%'} minSize="10%" collapsible collapsedSize="0%">
               <div className="flex flex-col h-full bg-card-light dark:bg-card-dark border-t border-border-light dark:border-border-dark">
                 {logs && (
                   <>
@@ -220,7 +234,7 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
 
             {/* Bottom: Processing Logs */}
             <ResizeHandle direction="vertical" />
-            <Panel id="bottom" panelRef={bottomPanelRef} defaultSize={showLogs ? '35%' : '55%'} minSize="15%" collapsible collapsedSize="0%">
+            <Panel id="bottom" panelRef={bottomPanelRef} defaultSize={showLogs ? (hasSlideNotes ? '27%' : '35%') : (hasSlideNotes ? '42%' : '55%')} minSize="15%" collapsible collapsedSize="0%">
               <div className="flex flex-col h-full bg-card-light dark:bg-card-dark border-t border-border-light dark:border-border-dark">
                 {bottom && (
                   <>
@@ -233,7 +247,7 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
 
             {/* Slide Notes: OCR + transcript for the selected slide */}
             <ResizeHandle direction="vertical" />
-            <Panel id="slide-notes" panelRef={slideTextPanelRef} defaultSize="25%" minSize="10%" collapsible collapsedSize="0%">
+            <Panel id="slide-notes" panelRef={slideTextPanelRef} defaultSize="15%" minSize="10%" collapsible collapsedSize="0%">
               <div className="flex flex-col h-full bg-card-light dark:bg-card-dark border-t border-border-light dark:border-border-dark">
                 {slideText && (
                   <>

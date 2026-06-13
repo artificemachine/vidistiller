@@ -969,7 +969,7 @@ export default function JobDetail() {
       ) : null}
     </div>
 
-    <div className="print:hidden">
+    <div className="h-full print:hidden">
       <WorkspaceLayout
         sidebar={sidebarContent ?? transcriptContent}
         main={playerContent}

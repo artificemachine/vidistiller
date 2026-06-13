@@ -192,3 +192,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-10: chore(release): bump to v1.10.5 (frontend UI fix)
 - 2026-06-10: fix(frontend): fix left sidebar panel toggles failing due to missing order props; use imperative control instead of conditional rendering for layout stability
 - 2026-06-10: chore(release): bump to v1.10.6 (frontend UI fix v2)
+- 2026-06-13: fix(frontend): fix workspace panels overflowing viewport; panel sizes now sum to 100%; restore collapsed state after Group remount
