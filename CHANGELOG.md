@@ -194,3 +194,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-10: chore(release): bump to v1.10.6 (frontend UI fix v2)
 - 2026-06-13: fix(frontend): fix workspace panels overflowing viewport; panel sizes now sum to 100%; restore collapsed state after Group remount
 - 2026-06-13: fix(frontend): fix panel toggle buttons not collapsing panels; remove Group key to prevent remount race; add save layout button; add ActivityBar tooltips. v1.10.8.
+- 2026-06-13: fix(frontend): fix Layout type for vertical panel defaultLayout (react-resizable-panels v4 expects Record not number[])
