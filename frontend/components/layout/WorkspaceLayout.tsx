@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Group, Layout, Panel, usePanelRef, useDefaultLayout } from 'react-resizable-panels';
+import { Group, Layout, Panel, usePanelRef, useDefaultLayout, useGroupRef } from 'react-resizable-panels';
 import ActivityBar from './ActivityBar';
 import ResizeHandle from './ResizeHandle';
 import PanelHeader from './PanelHeader';
@@ -61,17 +61,22 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
 
   const horizontalLayout = useDefaultLayout({ id: 'workspace-horizontal' });
 
-  // Vertical layout persistence — read ONCE on mount so defaultLayout never changes.
-  // Changing defaultLayout on re-renders causes react-resizable-panels to re-apply it,
-  // which overrides imperative collapse/expand and makes multiple panels toggle at once.
-  const [savedVerticalLayout] = useState<Layout | undefined>(() => {
-    if (typeof window === 'undefined') return undefined;
+  const verticalGroupRef = useGroupRef();
+  const currentVerticalLayout = useRef<Layout | undefined>(undefined);
+
+  // Restore saved panel sizes after hydration via setLayout (client-only).
+  // useState lazy init can't read localStorage on Next.js because the init runs
+  // during SSR where window is undefined, and React reuses that value on hydration.
+  useEffect(() => {
+    if (!hydrated) return;
     try {
       const raw = localStorage.getItem('vidistiller-vertical-layout');
-      return raw ? (JSON.parse(raw) as Layout) : undefined;
-    } catch { return undefined; }
-  });
-  const currentVerticalLayout = useRef<Layout | undefined>(undefined);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as Layout;
+      verticalGroupRef.current?.setLayout(saved);
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated]);
 
   const saveLayout = useCallback(() => {
     if (!currentVerticalLayout.current) return;
@@ -156,7 +161,7 @@ export default function WorkspaceLayout({ sidebar, main, logs, bottom, sidebarAc
         <Panel id="content" defaultSize="75%" minSize="30%">
           <Group
               orientation="vertical"
-              defaultLayout={savedVerticalLayout}
+              groupRef={verticalGroupRef}
               onLayoutChanged={(layout) => { currentVerticalLayout.current = layout; }}
             >
             {/* Top: Player */}

@@ -197,3 +197,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-13: fix(frontend): fix Layout type for vertical panel defaultLayout (react-resizable-panels v4 expects Record not number[])
 - 2026-06-13: fix(frontend): fix multi-panel toggle bug — make savedVerticalLayout stable (useState lazy init) so defaultLayout never re-applies on toggle
 - 2026-06-13: fix(frontend): fix Snapshots toggle requiring double-click — decouple toggle functions from isCollapsed(); sync panel state via useEffect on hydration. v1.10.9.
+- 2026-06-13: fix(frontend): fix Save Layout not restoring panel sizes on reload — use useGroupRef/setLayout after hydration instead of broken useState lazy init. v1.10.10.
