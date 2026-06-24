@@ -1,0 +1,72 @@
+# gitleaks config for vidistiller
+# Detects credentials (default rules) + PII (custom rules).
+# See docs/github-repo-hardening.md (Phase 6) in the project-scaffold repo.
+
+title = "vidistiller gitleaks config"
+
+[extend]
+useDefault = true
+
+# ---- Custom PII rules ----
+# Tuned to reduce false positives on real code (timestamps, version numbers, etc.)
+
+[[rules]]
+id = "personal-email"
+description = "Personal email addresses (gmail, yahoo, outlook, etc.)"
+# Require word boundary + common personal email domains
+regex = '''(?i)\b[a-zA-Z0-9._%+-]+@(gmail|yahoo|outlook|hotmail|icloud|aol|protonmail)\.com\b'''
+tags = ["pii", "email"]
+
+[[rules]]
+id = "us-phone-number"
+description = "US phone numbers (strict — must look like a phone)"
+# Use Go-compatible regex (no (?x) verbose mode).
+# Require either (xxx) xxx-xxxx OR xxx.xxx.xxxx OR xxx-xxx-xxxx format.
+# Word boundaries exclude timestamps like 20260510T134349Z.
+regex = '''\b(?:\(\d{3}\)\s?\d{3}[.-]\d{4}|\d{3}[.-]\d{3}[.-]\d{4})\b'''
+tags = ["pii", "phone"]
+
+[[rules]]
+id = "us-ssn"
+description = "US Social Security Numbers"
+regex = '''\b\d{3}-\d{2}-\d{4}\b'''
+tags = ["pii", "ssn"]
+
+[[rules]]
+id = "credit-card"
+description = "Credit card numbers (Visa, MC, Amex, Discover)"
+regex = '''\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b'''
+tags = ["pii", "financial"]
+
+[[rules]]
+id = "ipv4-address"
+description = "IPv4 addresses (disabled by default — enable for network code)"
+regex = '''\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d{1,2})\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d{1,2})\b'''
+tags = ["network"]
+# Disabled by default — too many false positives in real code
+enabled = false
+
+[allowlist]
+description = "Global allowlist"
+paths = [
+  '''\.lock$''',
+  '''package-lock\.json$''',
+  '''yarn\.lock$''',
+  '''\.gitleaks\.toml$''',
+  '''\.log$''',
+  '''\.jsonl$''',
+  '''node_modules/.*''',
+  '''target/.*''',
+  '''dist/.*''',
+  '''build/.*''',
+  '''__pycache__/.*''',
+  '''\.pytest_cache/.*''',
+  '''\.next/.*''',
+]
+regexes = [
+  '''example\.com''',
+  '''placeholder@''',
+  '''xxx-xx-xxxx''',
+  '''your[_-]?email''',
+  '''noreply@''',
+]
