@@ -21,7 +21,7 @@ requests>=2.31.0
 httpx>=0.25.0
 
 # Video Processing
-opencv-python>=4.8.0
+opencv-python>=4.13.0.92
 moviepy>=1.0.3
 pillow>=12.2.0
 ffmpeg-python>=0.2.0
