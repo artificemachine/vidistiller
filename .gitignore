@@ -171,3 +171,16 @@ frontend/tsconfig.tsbuildinfo
 # Additional secret formats
 *.p12
 secrets.json
+
+# ── Security tooling ──────────────────────────────────────────────────────────
+.gitleaks-report.json
+.gitleaks.toml.bak
+.nuxt/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+target/
+vendor/
+.gradle/
+*.generated.*
+*.pb.go
