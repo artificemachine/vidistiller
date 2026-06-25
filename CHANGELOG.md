@@ -201,3 +201,5 @@ All notable changes to this project will be documented in this file.
 - 2026-06-13: fix(frontend): replace imperative panel collapse with conditional rendering — toggle buttons now unmount panels instead of collapsing them, eliminating all isCollapsed() state sync issues. v1.10.11.
 - 2026-06-24: harden repo (Phase 6 gitleaks + dependabot)
 - 2026-06-24: add missing .gitleaks.toml
+
+- 2026-06-25: chore: remove personal workspace path from tracked files
