@@ -4,7 +4,7 @@
 This is an active source project. The `business_with_ai` contract has a task called
 `cleanup-old-viddocs` — that task refers ONLY to the skill stub at
 `business_with_ai/clawhub-skills/youtube-model-feeder/SKILL.md`, not this project.
-Never `rm -rf` or delete `~/DevOpsSec/vidistiller/`.
+Never `rm -rf` this repository checkout.
 
 Project-specific rules and conventions. For global rules, see `~/.claude/CLAUDE.md`.
 

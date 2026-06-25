@@ -8,7 +8,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SYNOD_TFVARS="$HOME/DevOpsSec/synod/deploy/terraform/terraform.tfvars"
+SYNOD_TFVARS="${SYNOD_TFVARS_OVERRIDE:-$HOME/synod/deploy/terraform/terraform.tfvars}"
 OUT="$SCRIPT_DIR/terraform.tfvars"
 
 # --- Read token secret ---
