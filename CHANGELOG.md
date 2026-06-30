@@ -209,3 +209,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-30: chore(ci): exclude GHA-002 from shipguard scan (0.4.3 false positive on SHA-pinned actions); add .shipguard.toml
 - 2026-06-30: fix(e2e): scroll vllm radio into view before clicking and scroll to bottom after — fleet section renders below the radio
 - 2026-06-30: fix(ci): remove Jinja2 raw tags from gitleaks.yml — caused workflow parse failure on GitHub
+- 2026-06-30: fix(ci): replace gitleaks-action@v2 (requires paid org license) with direct CLI install; fix e2e selectVllm to click label instead of sr-only radio input
