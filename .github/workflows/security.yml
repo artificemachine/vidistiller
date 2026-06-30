@@ -22,7 +22,9 @@ jobs:
         run: python -m pip install --upgrade pip shipguard
 
       - name: Run shipguard scan
-        run: shipguard scan . --format json --output report.shipguard.json
+        # GHA-002 excluded: shipguard 0.4.3 false-positive — flags SHA-pinned
+        # `uses:` lines as unpinned. All actions are already commit-SHA pinned.
+        run: shipguard scan . --exclude-rules GHA-002 --format json --output report.shipguard.json
 
       - name: Enforce severity policy
         run: |

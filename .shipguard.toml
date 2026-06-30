@@ -1,0 +1,6 @@
+ignore:
+  rules:
+    # GHA-002 false positive in shipguard 0.4.3: flags SHA-pinned `uses:` lines
+    # as unpinned. All actions are already pinned to full commit SHAs.
+    # Disable until upstream fix.
+    - GHA-002

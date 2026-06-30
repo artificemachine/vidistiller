@@ -47,6 +47,13 @@ async function gotoSettingsWithFleet(page: any, sidecarModels?: string[]) {
   await expect(page.getByText("loading settings...")).not.toBeVisible({ timeout: 10_000 });
 }
 
+async function selectVllm(page: any) {
+  // Radio is sr-only (1px clipped); click the wrapping label instead
+  const label = page.locator("label:has(input[type='radio'][value='vllm'])");
+  await label.scrollIntoViewIfNeeded();
+  await label.click();
+}
+
 test.describe("Settings — vLLM provider", () => {
 
   // -------------------------------------------------------------------------
@@ -67,7 +74,7 @@ test.describe("Settings — vLLM provider", () => {
 
   test("selecting vllm shows fleet node buttons", async ({ page }) => {
     await gotoSettingsWithFleet(page);
-    await page.locator("input[type='radio'][value='vllm']").click({ force: true });
+    await selectVllm(page);
 
     await expect(page.locator("button", { hasText: "VM913" })).toBeVisible();
     await expect(page.locator("button", { hasText: "VM903" })).toBeVisible();
@@ -77,7 +84,7 @@ test.describe("Settings — vLLM provider", () => {
 
   test("vllm card does not show api key input", async ({ page }) => {
     await gotoSettingsWithFleet(page);
-    await page.locator("input[type='radio'][value='vllm']").click({ force: true });
+    await selectVllm(page);
     await expect(page.locator("input[type='password']")).not.toBeVisible();
   });
 
@@ -87,7 +94,7 @@ test.describe("Settings — vLLM provider", () => {
 
   test("clicking VM913 node fetches and displays model", async ({ page }) => {
     await gotoSettingsWithFleet(page, ["qwopus-27b"]);
-    await page.locator("input[type='radio'][value='vllm']").click({ force: true });
+    await selectVllm(page);
     await page.locator("button", { hasText: "VM913" }).click();
 
     await expect(page.locator("text=qwopus-27b").first()).toBeVisible({ timeout: 5_000 });
@@ -103,7 +110,7 @@ test.describe("Settings — vLLM provider", () => {
     await page.goto("/settings");
     await expect(page.getByText("loading settings...")).not.toBeVisible({ timeout: 10_000 });
 
-    await page.locator("input[type='radio'][value='vllm']").click({ force: true });
+    await selectVllm(page);
     await Promise.all([
       page.waitForResponse(MODELS_API),
       page.locator("button", { hasText: "VM913" }).click(),
@@ -113,7 +120,7 @@ test.describe("Settings — vLLM provider", () => {
 
   test("node button highlights when selected", async ({ page }) => {
     await gotoSettingsWithFleet(page);
-    await page.locator("input[type='radio'][value='vllm']").click({ force: true });
+    await selectVllm(page);
     const vm913 = page.locator("button", { hasText: "VM913" });
     await vm913.click();
 
@@ -128,7 +135,7 @@ test.describe("Settings — vLLM provider", () => {
     await gotoSettingsWithFleet(page);
     await page.route(MODELS_API, (route: Route) => mockSidecar(route, ["model-a", "model-b"]));
 
-    await page.locator("input[type='radio'][value='vllm']").click({ force: true });
+    await selectVllm(page);
     await page.locator("button", { hasText: "VM903" }).click();
 
     await expect(page.locator("button", { hasText: "model-a" })).toBeVisible({ timeout: 5_000 });
@@ -139,7 +146,7 @@ test.describe("Settings — vLLM provider", () => {
     await gotoSettingsWithFleet(page);
     await page.route(MODELS_API, (route: Route) => mockSidecar(route, ["model-a", "model-b"]));
 
-    await page.locator("input[type='radio'][value='vllm']").click({ force: true });
+    await selectVllm(page);
     await page.locator("button", { hasText: "VM903" }).click();
     await page.locator("button", { hasText: "model-b" }).click();
 
@@ -153,7 +160,7 @@ test.describe("Settings — vLLM provider", () => {
 
   test("user can type a custom model name not in the list", async ({ page }) => {
     await gotoSettingsWithFleet(page, ["qwopus-27b"]);
-    await page.locator("input[type='radio'][value='vllm']").click({ force: true });
+    await selectVllm(page);
     await Promise.all([
       page.waitForResponse(MODELS_API),
       page.locator("button", { hasText: "VM913" }).click(),
@@ -176,7 +183,7 @@ test.describe("Settings — vLLM provider", () => {
       route.fulfill({ status: 502, body: JSON.stringify({ detail: "unreachable" }) })
     );
 
-    await page.locator("input[type='radio'][value='vllm']").click({ force: true });
+    await selectVllm(page);
     await Promise.all([
       page.waitForResponse(MODELS_API),
       page.locator("button", { hasText: "VM901" }).click(),
@@ -192,7 +199,7 @@ test.describe("Settings — vLLM provider", () => {
 
   test("can save vllm provider settings", async ({ page }) => {
     await gotoSettingsWithFleet(page, ["qwopus-27b"]);
-    await page.locator("input[type='radio'][value='vllm']").click({ force: true });
+    await selectVllm(page);
     await Promise.all([
       page.waitForResponse(MODELS_API),
       page.locator("button", { hasText: "VM913" }).click(),

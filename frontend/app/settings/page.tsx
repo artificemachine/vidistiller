@@ -36,6 +36,9 @@ const DEFAULT_MODELS: Record<string, string> = {
   openai: 'gpt-4o-mini',
   ollama: 'qwen3:8b',
   vllm: 'gemma4-31b',
+  deepseek: 'deepseek-chat',
+  minimax: 'MiniMax-Text-01',
+  opencode: '',
 };
 
 interface VLLMFleetNode {
@@ -229,7 +232,7 @@ export default function SettingsPage() {
       };
 
       // Include base URL for providers that need a custom endpoint
-      if ((form.llm_provider === 'ollama' || form.llm_provider === 'vllm') && form.llm_ollama_url.trim()) {
+      if ((form.llm_provider === 'ollama' || form.llm_provider === 'vllm' || form.llm_provider === 'opencode') && form.llm_ollama_url.trim()) {
         payload.llm_ollama_url = form.llm_ollama_url;
       }
 
@@ -437,6 +440,114 @@ export default function SettingsPage() {
                 )}
               </div>
 
+              <div className={`rounded-xl p-5 flex flex-col gap-4 bg-card-light dark:bg-card-dark transition-colors ${form.llm_provider === 'deepseek' ? 'ring-2 ring-primary' : ''}`}>
+                <label className="flex items-center gap-4 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="llm_provider"
+                    value="deepseek"
+                    checked={form.llm_provider === 'deepseek'}
+                    onChange={() => handleProviderChange('deepseek')}
+                    className="sr-only"
+                  />
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${form.llm_provider === 'deepseek' ? 'border-primary' : 'border-text-muted'}`}>
+                    {form.llm_provider === 'deepseek' && <div className="w-2.5 h-2.5 rounded-full bg-primary" />}
+                  </div>
+                  <div>
+                    <p className="text-[15px] font-semibold text-text-dark dark:text-text-light">deepseek</p>
+                    <p className="text-xs text-text-muted">deepseek-chat · api.deepseek.com (requires api key)</p>
+                  </div>
+                </label>
+                {form.llm_provider === 'deepseek' && (
+                  <CloudProviderFields
+                    apiKeyPlaceholder="sk-..."
+                    modelPlaceholder={DEFAULT_MODELS['deepseek']}
+                    form={form}
+                    hasApiKey={user?.has_api_key}
+                    saving={saving}
+                    onApiKeyChange={handleApiKeyChange}
+                    onModelChange={handleModelChange}
+                    onClearApiKey={handleClearApiKey}
+                  />
+                )}
+              </div>
+
+              <div className={`rounded-xl p-5 flex flex-col gap-4 bg-card-light dark:bg-card-dark transition-colors ${form.llm_provider === 'minimax' ? 'ring-2 ring-primary' : ''}`}>
+                <label className="flex items-center gap-4 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="llm_provider"
+                    value="minimax"
+                    checked={form.llm_provider === 'minimax'}
+                    onChange={() => handleProviderChange('minimax')}
+                    className="sr-only"
+                  />
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${form.llm_provider === 'minimax' ? 'border-primary' : 'border-text-muted'}`}>
+                    {form.llm_provider === 'minimax' && <div className="w-2.5 h-2.5 rounded-full bg-primary" />}
+                  </div>
+                  <div>
+                    <p className="text-[15px] font-semibold text-text-dark dark:text-text-light">minimax</p>
+                    <p className="text-xs text-text-muted">MiniMax-Text-01 · api.minimaxi.chat (requires api key)</p>
+                  </div>
+                </label>
+                {form.llm_provider === 'minimax' && (
+                  <CloudProviderFields
+                    apiKeyPlaceholder="eyJ..."
+                    modelPlaceholder={DEFAULT_MODELS['minimax']}
+                    form={form}
+                    hasApiKey={user?.has_api_key}
+                    saving={saving}
+                    onApiKeyChange={handleApiKeyChange}
+                    onModelChange={handleModelChange}
+                    onClearApiKey={handleClearApiKey}
+                  />
+                )}
+              </div>
+
+              <div className={`rounded-xl p-5 flex flex-col gap-4 bg-card-light dark:bg-card-dark transition-colors ${form.llm_provider === 'opencode' ? 'ring-2 ring-primary' : ''}`}>
+                <label className="flex items-center gap-4 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="llm_provider"
+                    value="opencode"
+                    checked={form.llm_provider === 'opencode'}
+                    onChange={() => handleProviderChange('opencode')}
+                    className="sr-only"
+                  />
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${form.llm_provider === 'opencode' ? 'border-primary' : 'border-text-muted'}`}>
+                    {form.llm_provider === 'opencode' && <div className="w-2.5 h-2.5 rounded-full bg-primary" />}
+                  </div>
+                  <div>
+                    <p className="text-[15px] font-semibold text-text-dark dark:text-text-light">opencode</p>
+                    <p className="text-xs text-text-muted">any openai-compatible endpoint · bring your own model + key</p>
+                  </div>
+                </label>
+                {form.llm_provider === 'opencode' && (
+                  <>
+                    <div>
+                      <label className={LABEL_CLASS}>base url</label>
+                      <input
+                        type="text"
+                        value={form.llm_ollama_url}
+                        onChange={(e) => setForm((prev) => ({ ...prev, llm_ollama_url: e.target.value }))}
+                        placeholder="https://api.minimaxi.chat/v1"
+                        className={`w-full ${INPUT_CLASS}`}
+                      />
+                    </div>
+                    <CloudProviderFields
+                      apiKeyPlaceholder="sk-..."
+                      modelPlaceholder="enter model name (e.g. MiniMax-Text-01)"
+                      form={form}
+                      hasApiKey={user?.has_api_key}
+                      saving={saving}
+                      onApiKeyChange={handleApiKeyChange}
+                      onModelChange={handleModelChange}
+                      onClearApiKey={handleClearApiKey}
+                    />
+                  </>
+                )}
+              </div>
+
               <div className={`rounded-xl p-5 flex flex-col gap-4 bg-card-light dark:bg-card-dark transition-colors ${form.llm_provider === 'vllm' ? 'ring-2 ring-primary' : ''}`}>
                 <label className="flex items-center gap-4 cursor-pointer">
                   <input
@@ -475,7 +586,7 @@ export default function SettingsPage() {
                                 setVllmModelFetching(true);
                                 try {
                                   const res = await apiClient.get('/settings/vllm/models', { params: { base_url: node.url } });
-                                  const models: string[] = res.data.models ?? [];
+                                  const models: string[] = [...new Set<string>(res.data.models ?? [])];
                                   setVllmAvailableModels(models);
                                   if (models.length === 1) {
                                     setForm((prev) => ({ ...prev, llm_model: models[0] }));

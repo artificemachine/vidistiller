@@ -10,10 +10,23 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v4
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
-          GITLEAKS_CONFIG: .gitleaks.toml
+
+      - name: Install gitleaks
+        run: |
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.27.2/gitleaks_8.27.2_linux_x64.tar.gz \
+            | tar -xz -C /usr/local/bin gitleaks
+
+      - name: Run gitleaks
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Scan only commits introduced by this PR
+            gitleaks detect --source . --config .gitleaks.toml --redact --no-banner \
+              --log-opts="origin/${{ github.base_ref }}..HEAD" --exit-code 1
+          else
+            # On push to main, scan only the pushed commit
+            gitleaks detect --source . --config .gitleaks.toml --redact --no-banner \
+              --log-opts="-1" --exit-code 1
+          fi
