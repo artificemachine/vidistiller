@@ -51,6 +51,8 @@ async function selectVllm(page: any) {
   const radio = page.locator("input[type='radio'][value='vllm']");
   await radio.scrollIntoViewIfNeeded();
   await radio.click({ force: true });
+  // Fleet section renders inside the vllm card below the radio; scroll down to expose it
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
 }
 
 test.describe("Settings — vLLM provider", () => {
