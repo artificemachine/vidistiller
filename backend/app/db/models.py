@@ -430,6 +430,7 @@ class User(Base):
     llm_model: Optional[str] = Column(String(100), nullable=True)
     llm_api_key_encrypted: Optional[str] = Column(Text, nullable=True)
     llm_ollama_url: Optional[str] = Column(String(512), nullable=True)
+    summary_language: Optional[str] = Column(String(10), nullable=True)
     created_at: datetime = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at: datetime = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 

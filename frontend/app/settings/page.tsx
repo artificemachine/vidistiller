@@ -10,7 +10,26 @@ interface SettingsForm {
   llm_model: string;
   llm_api_key: string;
   llm_ollama_url: string;
+  summary_language: string;
 }
+
+const SUMMARY_LANGUAGES = [
+  { code: '', label: 'source language (follow transcript)' },
+  { code: 'en', label: 'English' },
+  { code: 'fr', label: 'French' },
+  { code: 'es', label: 'Spanish' },
+  { code: 'de', label: 'German' },
+  { code: 'pt', label: 'Portuguese' },
+  { code: 'it', label: 'Italian' },
+  { code: 'nl', label: 'Dutch' },
+  { code: 'ru', label: 'Russian' },
+  { code: 'ja', label: 'Japanese' },
+  { code: 'ko', label: 'Korean' },
+  { code: 'zh-cn', label: 'Chinese (Simplified)' },
+  { code: 'ar', label: 'Arabic' },
+  { code: 'hi', label: 'Hindi' },
+  { code: 'tr', label: 'Turkish' },
+];
 
 const DEFAULT_MODELS: Record<string, string> = {
   anthropic: 'claude-sonnet-4-6',
@@ -106,6 +125,7 @@ export default function SettingsPage() {
     llm_model: user?.llm_model || DEFAULT_MODELS['ollama'],
     llm_api_key: '',
     llm_ollama_url: '',
+    summary_language: '',
   });
 
   useEffect(() => {
@@ -137,6 +157,7 @@ export default function SettingsPage() {
           llm_model: settings.llm_model || DEFAULT_MODELS[provider] || '',
           llm_api_key: '',
           llm_ollama_url: savedUrl,
+          summary_language: settings.summary_language || '',
         });
 
         if (settingsRes.status !== 'fulfilled') {
@@ -204,6 +225,7 @@ export default function SettingsPage() {
       const payload: any = {
         llm_provider: form.llm_provider,
         llm_model: form.llm_model,
+        summary_language: form.summary_language || '',
       };
 
       // Include base URL for providers that need a custom endpoint
@@ -513,6 +535,29 @@ export default function SettingsPage() {
                   </>
                 )}
               </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-6">
+            <div>
+              <h2 className="text-2xl font-semibold text-text-dark dark:text-text-light">
+                summary language
+              </h2>
+              <p className="text-sm text-text-muted mt-1">
+                choose the output language for llm summaries (independent of the video&apos;s spoken language)
+              </p>
+            </div>
+            <div className="rounded-xl p-5 bg-card-light dark:bg-card-dark">
+              <label className={LABEL_CLASS}>output language</label>
+              <select
+                value={form.summary_language}
+                onChange={(e) => setForm((prev) => ({ ...prev, summary_language: e.target.value }))}
+                className={`w-full ${INPUT_CLASS}`}
+              >
+                {SUMMARY_LANGUAGES.map(({ code, label }) => (
+                  <option key={code} value={code}>{label}</option>
+                ))}
+              </select>
             </div>
           </div>
 

@@ -320,11 +320,6 @@ def process_transcript(self, job_id: int):
         # 5b. Persist Video record so title appears in Recent Conversions
         _save_video_record(db, job_id, job, video_url, metadata)
 
-        # 5c. Prepend video title and source URL
-        video_title = metadata.get("title", "")
-        if video_title:
-            transcript_text = f"# {video_title}\n\nSource: {video_url}\n\n{transcript_text}"
-
         # 6. Save transcript to DB and segment it
         _save_transcript_and_segments(db, job_id, job, transcript_text, source, detected_language)
 
@@ -538,7 +533,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         _resolved_model = model_name
         if not _resolved_model and provider_name == "vllm":
             from app.services.llm_providers import DEFAULT_MODELS
-            _resolved_model = DEFAULT_MODELS.get("vllm", "gemma4-31b")
+            _resolved_model = DEFAULT_MODELS.get("vllm", "qwen3-32b-awq")
 
         if provider_name == "vllm" and _resolved_model:
             _fleet_url = _resolve_fleet_url(_resolved_model)
@@ -566,7 +561,9 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
             return {"error": "No transcript"}
 
         transcript_text = job.transcripts[0].full_text
-        language = job.transcripts[0].language or "en"
+        detected_lang = job.transcripts[0].language or "en"
+        # Use user's preferred summary output language, fall back to transcript language
+        language = (owner.summary_language if owner and owner.summary_language else None) or detected_lang
         title = job.videos[0].title if job.videos else "Video Summary"
 
         # Build snapshot image URLs

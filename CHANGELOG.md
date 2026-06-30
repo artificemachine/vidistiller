@@ -203,3 +203,5 @@ All notable changes to this project will be documented in this file.
 - 2026-06-24: add missing .gitleaks.toml
 
 - 2026-06-25: chore: remove personal workspace path from tracked files
+
+- 2026-06-30: feat: add summary_language user setting; fix vLLM fleet routing to qwen3-32b-awq on vm903; fix duplicate transcript header; fix frontend NEXT_PUBLIC_API_URL baking
