@@ -37,6 +37,7 @@ def get_user_settings(
         llm_model=current_user.llm_model,
         llm_ollama_url=current_user.llm_ollama_url,
         has_api_key=bool(current_user.llm_api_key_encrypted),
+        summary_language=current_user.summary_language,
     )
 
 
@@ -76,6 +77,10 @@ def update_user_settings(
             # Empty string means clear the key
             current_user.llm_api_key_encrypted = None
 
+    # Update summary output language if provided ("" = clear, None = unchanged)
+    if settings_update.summary_language is not None:
+        current_user.summary_language = settings_update.summary_language or None
+
     db.add(current_user)
     db.commit()
     db.refresh(current_user)
@@ -85,6 +90,7 @@ def update_user_settings(
         llm_model=current_user.llm_model,
         llm_ollama_url=current_user.llm_ollama_url,
         has_api_key=bool(current_user.llm_api_key_encrypted),
+        summary_language=current_user.summary_language,
     )
 
 

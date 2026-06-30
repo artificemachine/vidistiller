@@ -600,13 +600,19 @@ class UserSettingsUpdate(BaseModel):
         max_length=512,
         description="Custom base URL for Ollama or vLLM sidecar (e.g. http://10.255.150.36:8100)"
     )
+    summary_language: Optional[str] = Field(
+        None,
+        max_length=10,
+        description="ISO 639-1 language code for summary output (e.g. 'en', 'fr'). None = follow transcript language."
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "llm_provider": "anthropic",
                 "llm_model": "claude-sonnet-4-6",
-                "llm_api_key": "sk-ant-..."
+                "llm_api_key": "sk-ant-...",
+                "summary_language": "en"
             }
         }
     )
@@ -618,6 +624,7 @@ class UserSettingsResponse(BaseSchema):
     llm_model: Optional[str] = Field(None, description="Model name")
     llm_ollama_url: Optional[str] = Field(None, description="Custom Ollama URL")
     has_api_key: bool = Field(default=False, description="Whether an API key is stored")
+    summary_language: Optional[str] = Field(None, description="Output language for summaries (ISO 639-1). None = follow transcript language.")
 
     model_config = ConfigDict(
         from_attributes=True,
