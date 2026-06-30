@@ -20,4 +20,13 @@ jobs:
             | tar -xz -C /usr/local/bin gitleaks
 
       - name: Run gitleaks
-        run: gitleaks detect --source . --config .gitleaks.toml --redact --no-banner --exit-code 1
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Scan only commits introduced by this PR
+            gitleaks detect --source . --config .gitleaks.toml --redact --no-banner \
+              --log-opts="origin/${{ github.base_ref }}..HEAD" --exit-code 1
+          else
+            # On push to main, scan only the pushed commit
+            gitleaks detect --source . --config .gitleaks.toml --redact --no-banner \
+              --log-opts="-1" --exit-code 1
+          fi

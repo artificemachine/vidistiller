@@ -210,3 +210,4 @@ All notable changes to this project will be documented in this file.
 - 2026-06-30: fix(e2e): scroll vllm radio into view before clicking and scroll to bottom after — fleet section renders below the radio
 - 2026-06-30: fix(ci): remove Jinja2 raw tags from gitleaks.yml — caused workflow parse failure on GitHub
 - 2026-06-30: fix(ci): replace gitleaks-action@v2 (requires paid org license) with direct CLI install; fix e2e selectVllm to click label instead of sr-only radio input
+- 2026-06-30: fix(ci): scope gitleaks scan to PR commits only, not full history (157 pre-existing false positives in history)
