@@ -206,3 +206,4 @@ All notable changes to this project will be documented in this file.
 
 - 2026-06-30: feat: add summary_language user setting; fix vLLM fleet routing to qwen3-32b-awq on vm903; fix duplicate transcript header; fix frontend NEXT_PUBLIC_API_URL baking
 - 2026-06-30: feat: add DeepSeek, MiniMax, and OpenCode LLM providers; fix vllm model list dedup; fix BACKEND_URL baked at build time
+- 2026-06-30: chore(ci): exclude GHA-002 from shipguard scan (0.4.3 false positive on SHA-pinned actions); add .shipguard.toml
