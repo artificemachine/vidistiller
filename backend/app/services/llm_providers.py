@@ -196,6 +196,9 @@ DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",
     "ollama": None,  # Falls back to settings.ollama.model_name
     "vllm": "qwen3-32b-awq",
+    "deepseek": "deepseek-chat",
+    "minimax": "MiniMax-Text-01",
+    "opencode": None,
 }
 
 
@@ -236,8 +239,38 @@ def build_provider(
     elif provider_name == "vllm":
         return VLLMProvider(ollama_base_url)
 
+    elif provider_name == "deepseek":
+        if not api_key:
+            raise ValueError("api_key is required for DeepSeek provider")
+        import openai
+        client = openai.OpenAI(base_url="https://api.deepseek.com/v1", api_key=api_key)
+        provider = OpenAIProvider.__new__(OpenAIProvider)
+        provider.client = client
+        return provider
+
+    elif provider_name == "minimax":
+        if not api_key:
+            raise ValueError("api_key is required for MiniMax provider")
+        import openai
+        client = openai.OpenAI(base_url="https://api.minimaxi.chat/v1", api_key=api_key)
+        provider = OpenAIProvider.__new__(OpenAIProvider)
+        provider.client = client
+        return provider
+
+    elif provider_name == "opencode":
+        if not api_key:
+            raise ValueError("api_key is required for OpenCode provider")
+        if not ollama_base_url:
+            raise ValueError("base_url is required for OpenCode provider")
+        import openai
+        base = ollama_base_url.rstrip("/")
+        if not base.endswith("/v1"):
+            base = f"{base}/v1"
+        client = openai.OpenAI(base_url=base, api_key=api_key)
+        provider = OpenAIProvider.__new__(OpenAIProvider)
+        provider.client = client
+        return provider
+
     else:
-        raise ValueError(
-            f"Unknown provider: {provider_name}. "
-            "Must be one of: 'anthropic', 'openai', 'ollama', 'vllm'"
-        )
+        known = ", ".join(f"'{k}'" for k in DEFAULT_MODELS)
+        raise ValueError(f"Unknown provider: {provider_name}. Must be one of: {known}")
