@@ -14,7 +14,7 @@ useDefault = true
 id = "personal-email"
 description = "Personal email addresses (gmail, yahoo, outlook, etc.)"
 # Require word boundary + common personal email domains
-regex = '''(?i)\b[a-zA-Z0-9._%+-]+@(gmail|yahoo|outlook|hotmail|icloud|aol|protonmail)\.com\b'''
+regex = '''(?i)\b[a-zA-Z0-9._%+-]+@(?:gmail|yahoo|outlook|hotmail|icloud|aol|protonmail)\.com\b'''
 tags = ["pii", "email"]
 
 [[rules]]
@@ -69,4 +69,9 @@ regexes = [
   '''xxx-xx-xxxx''',
   '''your[_-]?email''',
   '''noreply@''',
+  '''^127\.''',
+  '''^0\.0\.0\.0$''',
+  '''^10\.''',
+  '''^172\.(?:1[6-9]|2\d|3[01])\.''',
+  '''^192\.168\.''',
 ]
