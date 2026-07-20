@@ -281,3 +281,13 @@ All notable changes to this project will be documented in this file.
 - fix(ui): settings page rendered neither a success nor an error banner when the API returned a 422. FastAPI sends `detail` as a list of objects for validation failures, and passing that array into JSX crashed the render. New `errorMessage()` helper in frontend/lib/utils.ts flattens both shapes; wired into the save and clear-api-key handlers.
 - fix(test): SSRF tests hardcoded a real homelab address, which the scoped gitleaks ipv4 rule correctly flagged. Replaced with the scrubbed 10.0.x convention already used in the same files.
 - test(e2e): "can save vllm provider settings" asserted success-or-error, so it went green on a rejected save. Now asserts the success banner, with the mock fleet's RFC5737 addresses allowlisted via ALLOWED_LLM_HOSTS in docker-compose.e2e.yml.
+
+## [1.10.15] - 2026-07-20
+
+### Security
+- fix(security): snapshot and slide images were served by a bare StaticFiles mount, so anyone who learned a job UUID could read that job's frames without logging in. Frame filenames are deterministic, so one leaked UUID exposed the whole set permanently. Both paths are now FastAPI routes that authenticate the caller and verify job ownership, returning 404 rather than 403 to a non-owner so the response cannot confirm a job exists.
+- fix(security): the /snapproxy Next route fetched upstream with no credentials. Now that delivery is authenticated it forwards the caller's auth_token as a bearer token and refuses anonymous requests, rather than acting as a read hole around the ownership check.
+- fix(security): media responses are Cache-Control private, not public. Per-user images must not sit in a shared cache.
+
+### Fixed
+- fix(config): Settings.storage was built at class-definition time, so DATA_DIR was frozen at import and could not be changed without a restart. Now a default_factory, matching the jwt fix in 1.10.13. The remaining sub-settings fields still share the old pattern.

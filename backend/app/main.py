@@ -17,13 +17,13 @@ import sys
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings, Settings, Environment
 from sqlalchemy import text
 from app.db.session import health_check, engine, Base
 from app.routes import router as api_router
+from app.routes.media import router as media_router
 from app.middleware import RequestLoggingMiddleware
 from app.exceptions import (
     APIException,
@@ -144,16 +144,16 @@ app.add_middleware(
 app.add_middleware(RequestLoggingMiddleware)
 
 
-# Mount static files for snapshot images
+# Snapshot and slide images are served by app.routes.media, not a StaticFiles
+# mount. A mount has no notion of who is asking, and frame filenames are
+# deterministic, so a leaked job UUID exposed that job's entire frame set to
+# anyone. The routes below authenticate the caller and check job ownership.
 _data_dir = settings.storage.data_dir or str(Path(__file__).resolve().parent.parent / "data")
 _data_root = Path(_data_dir)
-snapshots_dir = _data_root / "snapshots"
-snapshots_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/static/snapshots", StaticFiles(directory=str(snapshots_dir)), name="snapshots")
+(_data_root / "snapshots").mkdir(parents=True, exist_ok=True)
+(_data_root / "slides").mkdir(parents=True, exist_ok=True)
 
-slides_dir = _data_root / "slides"
-slides_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/static/slides", StaticFiles(directory=str(slides_dir)), name="slides")
+app.include_router(media_router)
 
 
 # ==============================================================================

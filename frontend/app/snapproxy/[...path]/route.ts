@@ -6,7 +6,7 @@ const BACKEND_BASE = (
 );
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   const { path } = await params;
@@ -23,9 +23,19 @@ export async function GET(
 
   const upstreamUrl = `${BACKEND_BASE}/${joined}`;
 
+  // Snapshot delivery is authenticated and ownership-checked upstream, so the
+  // caller's credentials have to travel with the request. Without this the
+  // proxy would be an anonymous read hole around that check.
+  const authToken = request.cookies.get('auth_token')?.value;
+  if (!authToken) {
+    return new NextResponse(null, { status: 401 });
+  }
+
   let res: Response;
   try {
-    res = await fetch(upstreamUrl);
+    res = await fetch(upstreamUrl, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
   } catch {
     return new NextResponse(null, { status: 502 });
   }
@@ -39,7 +49,8 @@ export async function GET(
   return new NextResponse(buffer, {
     headers: {
       'Content-Type': contentType,
-      'Cache-Control': 'public, max-age=3600',
+      // private: this media belongs to one user, so no shared cache may keep it
+      'Cache-Control': 'private, max-age=3600',
     },
   });
 }
