@@ -9,7 +9,14 @@ import os
 import secrets
 import string
 
-from pydantic import SecretStr, HttpUrl, field_validator, model_validator, Field
+from pydantic import (
+    AliasChoices,
+    SecretStr,
+    HttpUrl,
+    field_validator,
+    model_validator,
+    Field,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -26,6 +33,19 @@ _PUBLISHED_PLACEHOLDER_SECRETS = frozenset(
         "ChangeMe123!ReplaceThisNow_32charsMin",
     }
 )
+
+# A key at least this long is assumed generated, not typed, so the character
+# composition rules are waived. 64 is the output length of both
+# `openssl rand -hex 32` and `secrets.token_urlsafe(48)`.
+_HIGH_ENTROPY_KEY_LENGTH = 64
+# Guards against a long but degenerate key such as "aaaa...". Hex output uses
+# 16 symbols, so this stays comfortably below any real generator's variety.
+_MIN_DISTINCT_CHARS = 12
+
+# Loopback only, so a stock install works and anything wider is an explicit
+# opt-in. host.docker.internal is included because .env.example ships it as the
+# default OLLAMA_URL; omitting it would reject the documented Docker setup.
+_DEFAULT_ALLOWED_LLM_HOSTS = "localhost,127.0.0.1,::1,ollama,vllm,host.docker.internal"
 
 
 # ==============================================================================
@@ -152,7 +172,16 @@ class JWTSettings(BaseSettings):
     # Deliberately has no default: a hardcoded one is published the moment the
     # repository is public, and every strength check below would still pass it.
     # Resolution happens in _resolve_secret_key below.
-    secret_key: Optional[SecretStr] = None
+    #
+    # This class has no env_prefix, so the field name alone would bind to
+    # SECRET_KEY while every deployment artifact sets JWT_SECRET_KEY. Prod ran
+    # for months on an unread variable because of that mismatch. JWT_SECRET_KEY
+    # is the documented name and wins; SECRET_KEY stays accepted so the
+    # hand-patched production host does not break on the next deploy.
+    secret_key: Optional[SecretStr] = Field(
+        default=None,
+        validation_alias=AliasChoices("JWT_SECRET_KEY", "SECRET_KEY"),
+    )
 
     # Field encryption key for Fernet symmetric encryption of API keys and secrets
     # Should be overridden in .env for production
@@ -190,7 +219,22 @@ class JWTSettings(BaseSettings):
         if "change-me" in raw_value.lower():
             raise ValueError("JWT_SECRET_KEY must be changed from the default value")
 
-        # 3. Digit Check
+        # 3. High-entropy keys skip the composition rules below.
+        #    Those rules exist to stop weak human-chosen passphrases. The output
+        #    of `openssl rand -hex 32` or `secrets.token_urlsafe(48)` is 64
+        #    characters of pure randomness with no uppercase or punctuation, and
+        #    rejecting it would push operators toward weaker, typeable keys.
+        #    Character variety is still required so "aaaa..." cannot pass.
+        if len(raw_value) >= _HIGH_ENTROPY_KEY_LENGTH:
+            if len(set(raw_value)) < _MIN_DISTINCT_CHARS:
+                raise ValueError(
+                    "JWT_SECRET_KEY is long but has too little variety to be "
+                    'random. Generate one with: python -c "import secrets; '
+                    'print(secrets.token_urlsafe(48))"'
+                )
+            return v
+
+        # 4. Digit Check
         if not any(c.isdigit() for c in raw_value):
             raise ValueError("JWT_SECRET_KEY must contain at least one digit")
 
@@ -242,7 +286,11 @@ class JWTSettings(BaseSettings):
         )
         return self
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # populate_by_name keeps `JWTSettings(secret_key=...)` working now that the
+    # field carries a validation_alias.
+    model_config = SettingsConfigDict(
+        env_file=".env", extra="ignore", populate_by_name=True
+    )
 
 
 # Configure service timeouts
@@ -446,18 +494,19 @@ class Settings(BaseSettings):
     # Hosts the backend may use as an LLM / vLLM endpoint. These legitimately
     # point at private addresses (a local Ollama, an on-prem vLLM fleet), so
     # they cannot be screened by IP range like other fetch targets are; an
-    # operator-controlled allowlist is used instead. Defaults to loopback only,
-    # so a stock install works and anything wider is an explicit opt-in.
-    # host.docker.internal is included because .env.example ships it as the
-    # default OLLAMA_URL; omitting it would reject the documented Docker setup.
-    allowed_llm_hosts: str = (
-        "localhost,127.0.0.1,::1,ollama,vllm,host.docker.internal"
-    )
+    # operator-controlled allowlist is used instead.
+    allowed_llm_hosts: str = _DEFAULT_ALLOWED_LLM_HOSTS
 
     @property
     def allowed_llm_host_list(self) -> list[str]:
-        """allowed_llm_hosts parsed into a list of hostnames."""
-        return [h.strip() for h in self.allowed_llm_hosts.split(",") if h.strip()]
+        """allowed_llm_hosts parsed into a list of hostnames.
+
+        A blank value means "not configured", not "allow nothing":
+        docker-compose passes `${ALLOWED_LLM_HOSTS:-}` and would otherwise
+        hand every deployment an empty allowlist that rejects local Ollama.
+        """
+        source = self.allowed_llm_hosts.strip() or _DEFAULT_ALLOWED_LLM_HOSTS
+        return [h.strip() for h in source.split(",") if h.strip()]
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 

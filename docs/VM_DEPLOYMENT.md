@@ -279,8 +279,10 @@ MAX_WORKERS=4
 ### 3. Generate Secure Secrets
 
 ```bash
-# Generate JWT secret key (32+ characters with complexity)
-python3 -c "import secrets; print('JWT_SECRET_KEY=' + secrets.token_urlsafe(32))"
+# Generate JWT secret key. Use 48, not 32: the 64-char output clears the
+# length threshold above which the character-composition rules are waived,
+# so it is accepted every time rather than depending on the random draw.
+python3 -c "import secrets; print('JWT_SECRET_KEY=' + secrets.token_urlsafe(48))"
 
 # Generate database password
 openssl rand -base64 32
