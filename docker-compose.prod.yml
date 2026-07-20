@@ -63,7 +63,7 @@ services:
       - tutorial_network
 
   api:
-    image: newblacc/vidistiller-backend:latest
+    image: newblacc/vidistiller-backend:${VIDISTILLER_IMAGE_TAG:-latest}
     command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     container_name: tutorial_api
     restart: unless-stopped
@@ -117,7 +117,7 @@ services:
       - tutorial_network
 
   celery_worker:
-    image: newblacc/vidistiller-backend:latest
+    image: newblacc/vidistiller-backend:${VIDISTILLER_IMAGE_TAG:-latest}
     command: python3 -m celery -A app.tasks worker --loglevel=${LOG_LEVEL:-info}
     container_name: tutorial_celery_worker
     restart: unless-stopped
@@ -166,7 +166,7 @@ services:
       - tutorial_network
 
   web:
-    image: newblacc/vidistiller-frontend:latest
+    image: newblacc/vidistiller-frontend:${VIDISTILLER_IMAGE_TAG:-latest}
     container_name: tutorial_web
     restart: unless-stopped
     logging:
