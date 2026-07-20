@@ -222,3 +222,9 @@ All notable changes to this project will be documented in this file.
 
 ### Security
 - chore: scrub internal homelab topology from tracked files — replaced internal 10.255.x.x addresses with 10.0.x documentation placeholders and real node names with generic ones across .env.example, deploy/ (terraform+ansible), CI deploy workflow, backend docstrings, docs, and tests; production health check now reads vars.PROD_API_BASE_URL; untracked .superharness/ (agent state) and features_to_add/ (working notes incl. personal-named .docx) and gitignored both
+
+### Fixed
+- docs: README surface repair — removed broken links (DESIGN_EXPORT_GUIDE.md, DESIGN_README.md, docs/DOCKER.md, docs/DEPLOYMENT.md), corrected terraform description (Proxmox, not AWS), dropped pink-span heading styling, aligned Python prerequisite to 3.12+ (matches Docker image and CI)
+
+### Added
+- docs: add SECURITY.md with private-reporting policy and self-hosted scope notes
