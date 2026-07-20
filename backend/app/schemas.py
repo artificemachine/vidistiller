@@ -378,15 +378,16 @@ class JobCreate(BaseModel):
     @field_validator("video_url")
     @classmethod
     def validate_video_url(cls, v: str) -> str:
-        """Accept any well-formed HTTP/HTTPS URL."""
-        from urllib.parse import urlparse
-        v = v.strip()
-        if not re.match(r'^https?://', v, re.IGNORECASE):
-            raise ValueError("URL must start with http:// or https://")
-        parsed = urlparse(v)
-        if not parsed.netloc or '.' not in parsed.netloc:
-            raise ValueError("Invalid URL: missing or malformed host")
-        return v
+        """Accept a well-formed public HTTP/HTTPS URL.
+
+        The backend fetches this URL itself, from inside a private network, so
+        it must not be allowed to resolve to an internal address. The previous
+        check here was `'.' in netloc`, which rejected `localhost` by accident
+        while permitting every IP literal, including 169.254.169.254.
+        """
+        from app.core.url_guard import validate_fetch_target
+
+        return validate_fetch_target(v)
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -605,6 +606,24 @@ class UserSettingsUpdate(BaseModel):
         max_length=10,
         description="ISO 639-1 language code for summary output (e.g. 'en', 'fr'). None = follow transcript language."
     )
+
+    @field_validator("llm_ollama_url")
+    @classmethod
+    def validate_llm_ollama_url(cls, v: Optional[str]) -> Optional[str]:
+        """Restrict the stored LLM endpoint to the operator allowlist.
+
+        This value is persisted and then POSTed to on every summarization job,
+        with part of the request body under user control, so an unrestricted
+        value is a stored SSRF primitive. It previously had no validation at
+        all, not even a scheme check.
+        """
+        if v is None or not v.strip():
+            return v
+
+        from app.core.config import get_settings
+        from app.core.url_guard import validate_llm_endpoint
+
+        return validate_llm_endpoint(v, get_settings().allowed_llm_host_list)
 
     model_config = ConfigDict(
         json_schema_extra={

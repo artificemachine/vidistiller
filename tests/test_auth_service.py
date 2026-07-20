@@ -103,7 +103,10 @@ class TestVerifyToken:
         from jose import jwt
         from app.core.config import get_settings
         settings = get_settings()
-        payload = {"username": "nosub", "exp": 9999999999, "iat": 1000000000}
+        # type must be present so this isolates the missing-sub path; the
+        # token-type check in verify_token runs first and would otherwise
+        # short-circuit before sub is ever inspected.
+        payload = {"username": "nosub", "exp": 9999999999, "iat": 1000000000, "type": "access"}
         token = jwt.encode(payload, settings.jwt.secret_key.get_secret_value(), algorithm=settings.jwt.algorithm)
         with pytest.raises(AuthenticationException, match="missing subject"):
             AuthService.verify_token(token)
@@ -186,3 +189,34 @@ class TestGetCurrentUser:
         test_db.commit()
         with pytest.raises(AuthenticationException, match="not found"):
             AuthService.get_current_user(token, test_db)
+
+
+# ===========================================================================
+# Token type confinement
+#
+# verify_token() backs get_current_user(), so anything it accepts is a full
+# API credential. It previously checked only "sub", while the refresh and
+# password-reset verifiers did check "type". That asymmetry meant a
+# password-reset token — which travels in an emailed URL and therefore lands
+# in browser history and Referer headers — worked as a bearer token.
+# ===========================================================================
+
+class TestTokenTypeConfinement:
+    def test_access_token_carries_access_type(self):
+        token, _ = AuthService.create_access_token(user_id=1, username="u")
+        assert AuthService.verify_token(token).sub == "1"
+
+    def test_password_reset_token_rejected_as_bearer(self):
+        reset = AuthService.create_password_reset_token(user_id=1, email="u@example.com")
+        with pytest.raises(AuthenticationException):
+            AuthService.verify_token(reset)
+
+    def test_refresh_token_rejected_as_bearer(self):
+        refresh, _ = AuthService.create_refresh_token(user_id=1)
+        with pytest.raises(AuthenticationException):
+            AuthService.verify_token(refresh)
+
+    def test_access_token_still_rejected_by_refresh_verifier(self):
+        token, _ = AuthService.create_access_token(user_id=1, username="u")
+        with pytest.raises(AuthenticationException):
+            AuthService.verify_refresh_token(token)

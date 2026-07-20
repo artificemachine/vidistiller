@@ -91,6 +91,11 @@ class AuthService:
             "username": username,
             "iat": now,
             "exp": expire,
+            # Every token class is signed with the same key, so the class must be
+            # stated explicitly and asserted on the way back in. Without this,
+            # verify_token cannot tell an access token from a refresh or
+            # password-reset token.
+            "type": "access",
         }
 
         # Encode JWT token
@@ -193,6 +198,20 @@ class AuthService:
                 settings.jwt.secret_key.get_secret_value(),
                 algorithms=[settings.jwt.algorithm],
             )
+
+            # Confine this verifier to access tokens. verify_token backs
+            # get_current_user, so whatever it accepts becomes a full API
+            # credential. Refresh and password-reset tokens are signed with the
+            # same key and also carry "sub", and a reset token is delivered in an
+            # emailed URL — so without this check it doubles as a bearer token
+            # that survives in browser history and Referer headers.
+            # Tokens minted before "type" was introduced have no claim and are
+            # rejected here, which forces one re-login on deploy. That is
+            # intended.
+            if payload.get("type") != "access":
+                raise AuthenticationException(
+                    "Invalid token type: expected access token"
+                )
 
             user_id: str = payload.get("sub")
             if user_id is None:
