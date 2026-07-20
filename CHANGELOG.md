@@ -216,3 +216,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix: restore image-baked /app/deps under backend bind mount in dev compose — fresh-clone quickstart failed with "uvicorn: executable not found" (api) and "No module named celery" (worker) because ./backend shadowed the pip --target dir; anonymous volume over /app/deps restores it (found by /job-ready stage 4, reproduced 2x)
+
+### Fixed
+- fix: add /app/deps/bin to PATH in backend Dockerfile — pip --target installs console scripts there, so `uvicorn` was not on PATH and the api container could not exec its CMD
