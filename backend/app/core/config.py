@@ -435,7 +435,10 @@ class Settings(BaseSettings):
     sentry: SentrySettings = SentrySettings()
     email: EmailSettings = EmailSettings()
     password_reset: PasswordResetSettings = PasswordResetSettings()
-    storage: StorageSettings = StorageSettings()
+    # default_factory, not a class-definition-time instance: the media routes
+    # resolve DATA_DIR per request, which only works if the env is read when
+    # Settings is constructed rather than when this module is imported.
+    storage: StorageSettings = Field(default_factory=StorageSettings)
     api_key: ApiKeySettings = ApiKeySettings()
     vllm_fleet: VLLMFleetSettings = VLLMFleetSettings()
     environment: Environment = Environment.DEVELOPMENT
