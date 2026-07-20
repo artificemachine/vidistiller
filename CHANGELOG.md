@@ -234,3 +234,6 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 - chore: delete 33 local + 78 remote branches verified as merged via their PR head refs (ancestry check under-counts with squash-merge)
+
+### Fixed
+- fix: scope gitleaks ipv4-address rule to the real internal range (10.255.x.x) — the generic IPv4 regex flagged documentation placeholders (44 false positives on this PR) and the per-rule `enabled = false` line was silently ignored (gitleaks has no such field); PR-range CI scans now pass
