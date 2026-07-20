@@ -44,10 +44,41 @@ class TestJWTSettingsValidation:
         with pytest.raises(ValidationError):
             JWTSettings(secret_key=SecretStr("change-me-please-this-is-long-enough-1234!A"))
 
-    def test_default_development_key_accepted(self):
-        # The default value should pass validation
+    def test_former_hardcoded_default_is_rejected(self):
+        # This exact value used to be the built-in default and passed every
+        # strength check, so any deployment that never set JWT_SECRET_KEY signed
+        # tokens with a secret published in the repo.
+        with pytest.raises(ValidationError):
+            JWTSettings(
+                secret_key=SecretStr("TestSecretKey123!@#abcDEF_development_only")
+            )
+
+    def test_env_example_placeholder_is_rejected(self):
+        # Shipped in .env.example, and the documented quickstart is
+        # `cp .env.example .env`, so this is the value a self-hoster is most
+        # likely to leave in place.
+        with pytest.raises(ValidationError):
+            JWTSettings(
+                secret_key=SecretStr("ChangeMe123!ReplaceThisNow_32charsMin")
+            )
+
+    def test_unset_secret_is_generated_in_non_production(self, monkeypatch):
+        monkeypatch.setenv("ENVIRONMENT", "development")
         s = JWTSettings()
-        assert "development" in s.secret_key.get_secret_value()
+        raw = s.secret_key.get_secret_value()
+        assert len(raw) >= 32
+        assert "development_only" not in raw
+
+    def test_generated_secret_differs_between_instances(self, monkeypatch):
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        first = JWTSettings().secret_key.get_secret_value()
+        second = JWTSettings().secret_key.get_secret_value()
+        assert first != second, "generated dev secret must not be a fixed value"
+
+    def test_unset_secret_fails_in_production(self, monkeypatch):
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        with pytest.raises(ValidationError):
+            JWTSettings()
 
 
 # ===========================================================================
