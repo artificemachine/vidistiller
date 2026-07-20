@@ -1,11 +1,11 @@
 # Ansible Inventory — vidistiller-prod
-# SSH reaches the VM via ProxyJump through node-antares (10.255.100.33)
+# SSH reaches the VM via ProxyJump through proxmox-node (10.0.100.33)
 all:
   hosts:
     vidistiller-prod:
-      ansible_host: 10.255.181.20
+      ansible_host: 10.0.181.20
       ansible_user: sysadmin          # ciuser from ubuntu2404-cloud-v2 template
       ansible_become: true
       ansible_ssh_private_key_file: "{{ lookup('env', 'HOME') }}/.ssh/id_ed25519"
-      ansible_ssh_common_args: '-o ProxyJump=node-antares'
+      ansible_ssh_common_args: '-o ProxyJump=proxmox-node'
       ansible_python_interpreter: /usr/bin/python3

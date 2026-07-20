@@ -213,7 +213,7 @@ def build_provider(
     Args:
         provider_name: Name of the provider ("anthropic", "openai", "ollama", "vllm")
         api_key: API key (required for anthropic/openai, ignored for ollama/vllm)
-        ollama_base_url: Base URL for Ollama or vLLM sidecar (e.g. http://10.255.150.36:8100)
+        ollama_base_url: Base URL for Ollama or vLLM sidecar (e.g. http://10.0.150.36:8100)
 
     Returns:
         An instance of the appropriate LLMProvider subclass

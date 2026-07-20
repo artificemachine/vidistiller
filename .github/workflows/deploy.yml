@@ -184,7 +184,7 @@ jobs:
       - name: Health check
         run: |
           sleep 12
-          curl -sf http://10.255.181.20:8000/health || { echo "API health check failed"; exit 1; }
+          curl -sf "${{ vars.PROD_API_BASE_URL }}/health" || { echo "API health check failed"; exit 1; }
           echo "Deploy successful"
 
   # ── 6. Deploy to staging (self-hosted runner on staging LXC) ───────────────

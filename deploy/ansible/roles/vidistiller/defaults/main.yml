@@ -21,7 +21,7 @@ frontend_port: 3000
 pgadmin_port: 5050
 
 # Ollama — direct IP routable from the prod VM (carried over from the old LXC config)
-ollama_url: "http://10.255.150.10:11434"
+ollama_url: "http://10.0.150.10:11434"
 ollama_model: "qwen3:8b"
 
 # Celery worker resource limits

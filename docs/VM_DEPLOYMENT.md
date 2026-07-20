@@ -1,12 +1,12 @@
 # Production VM Deployment Guide
 
 ## Target Environment
-- **Host:** `vidistiller` (SSH alias) — Proxmox VM 900 on `node03-antares`
-- **IP Address:** `10.255.181.20`
+- **Host:** `vidistiller` (SSH alias) — Proxmox VM 900 on `your-proxmox-node`
+- **IP Address:** `10.0.181.20`
 - **Type:** Proxmox VM (cloud-init Ubuntu 24.04 template)
 - **Application:** Vidistiller — YouTube to Documentation engine
 
-> **History:** prod was previously hosted in an LXC at `10.255.181.10` and was
+> **History:** prod was previously hosted in an LXC at `10.0.181.10` and was
 > migrated to this VM. See `deploy/ansible/migrate-db.yml` for the DB migration
 > playbook used during the cut-over. The `vidistiller-lxc` host alias still
 > resolves but is no longer the deploy target.
@@ -76,7 +76,7 @@ qm set <VMID> --cores 8 --memory 16384 --net0 virtio,bridge=vmbr0
 
 # Configure cloud-init (user, ssh key, static IP)
 qm set <VMID> --ciuser sysadmin --sshkeys ~/.ssh/authorized_keys
-qm set <VMID> --ipconfig0 ip=10.255.181.20/24,gw=<YOUR_GATEWAY_IP>
+qm set <VMID> --ipconfig0 ip=10.0.181.20/24,gw=<YOUR_GATEWAY_IP>
 
 # Start
 qm start <VMID>
@@ -85,7 +85,7 @@ qm start <VMID>
 ### Initial VM configuration
 
 ```bash
-ssh sysadmin@10.255.181.20
+ssh sysadmin@10.0.181.20
 
 # Update system
 sudo apt update && sudo apt upgrade -y
@@ -1011,4 +1011,4 @@ docker system prune -a
 
 **Deployment Guide Version:** 2.0
 **Last Updated:** 2026-05-09 (renamed from LXC_DEPLOYMENT.md after prod migrated to a VM)
-**Target host:** `vidistiller` (Proxmox VM 900 at 10.255.181.20)
+**Target host:** `vidistiller` (Proxmox VM 900 at 10.0.181.20)

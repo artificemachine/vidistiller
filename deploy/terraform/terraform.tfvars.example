@@ -3,13 +3,13 @@
 # DO NOT commit terraform.tfvars — it is gitignored
 # =============================================================================
 
-# /etc/hosts must have: 10.255.100.33  node03.gitsilence.net
-proxmox_api_url      = "https://node03.gitsilence.net:8006"
+# /etc/hosts must have: 10.0.100.33  proxmox-node.example.com
+proxmox_api_url      = "https://proxmox-node.example.com:8006"
 proxmox_token_id     = "root@pam!terraform"
 proxmox_token_secret = ""   # Proxmox API token secret
 
-target_node    = "node03-antares"
-template_vm_id = 9001        # ubuntu2404-cloud-v2 template on node-antares
+target_node    = "your-proxmox-node"
+template_vm_id = 9001        # ubuntu2404-cloud-v2 template on proxmox-node
 
 vm_id        = 900
 vm_cores     = 4
@@ -17,13 +17,13 @@ vm_memory    = 8192          # MB
 vm_disk_size = 80            # GB
 vm_storage   = "nvme00-proxmox"
 
-# Verify the correct bridge for 10.255.181.x on node-antares:
-#   pvesh get /nodes/node03-antares/network
+# Verify the correct bridge for 10.0.181.x on proxmox-node:
+#   pvesh get /nodes/your-proxmox-node/network
 vm_bridge = "vmbr0"
 
-vm_ip     = "10.255.181.20"
+vm_ip     = "10.0.181.20"
 vm_prefix = 16
-gateway   = "10.255.10.1"
+gateway   = "10.0.10.1"
 
 # Paste output of: cat $HOME/.ssh/id_ed25519.pub
 ssh_public_key = ""

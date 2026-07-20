@@ -219,3 +219,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix: add /app/deps/bin to PATH in backend Dockerfile — pip --target installs console scripts there, so `uvicorn` was not on PATH and the api container could not exec its CMD
+
+### Security
+- chore: scrub internal homelab topology from tracked files — replaced internal 10.255.x.x addresses with 10.0.x documentation placeholders and real node names with generic ones across .env.example, deploy/ (terraform+ansible), CI deploy workflow, backend docstrings, docs, and tests; production health check now reads vars.PROD_API_BASE_URL; untracked .superharness/ (agent state) and features_to_add/ (working notes incl. personal-named .docx) and gitignored both

@@ -1,7 +1,7 @@
-# Provision vidistiller-prod on node03-antares
-# Provider: bpg/proxmox ~> 0.74 (same as synod)
-# Clone from Ubuntu 24.04 cloud-init template (VM 9001 on node03-antares)
-# IP: 10.255.181.20 (deprecated LXC at 10.255.181.10 lives on the same subnet)
+# Provision vidistiller-prod on your-proxmox-node
+# Provider: bpg/proxmox ~> 0.74 (same as your existing cluster)
+# Clone from Ubuntu 24.04 cloud-init template (VM 9001 on your-proxmox-node)
+# IP: 10.0.181.20 (deprecated LXC at 10.0.181.10 lives on the same subnet)
 
 terraform {
   required_version = ">= 1.5.0"
@@ -19,7 +19,7 @@ terraform {
 provider "proxmox" {
   endpoint  = var.proxmox_api_url
   api_token = format("%s=%s", var.proxmox_token_id, var.proxmox_token_secret)
-  # TLS verified via /etc/hosts: 10.255.100.33 node03.gitsilence.net
+  # TLS verified via /etc/hosts: 10.0.100.33 proxmox-node.example.com
   insecure = false
 
   ssh {
@@ -33,7 +33,7 @@ provider "proxmox" {
 variable "proxmox_api_url" {
   description = "Proxmox API endpoint"
   type        = string
-  default     = "https://node03.gitsilence.net:8006"
+  default     = "https://proxmox-node.example.com:8006"
 }
 
 variable "proxmox_token_id" {
@@ -50,7 +50,7 @@ variable "proxmox_token_secret" {
 variable "target_node" {
   description = "Proxmox node name"
   type        = string
-  default     = "node03-antares"
+  default     = "your-proxmox-node"
 }
 
 variable "template_vm_id" {
@@ -89,10 +89,10 @@ variable "vm_storage" {
 }
 
 variable "vm_bridge" {
-  # 10.255.181.x lives on this bridge on node-antares.
-  # Verify with: pvesh get /nodes/node03-antares/network on the Proxmox host.
-  # synod uses vmbr10 for 10.255.77.x; 10.255.181.x may be vmbr0 or another bridge.
-  description = "Proxmox bridge for the 10.255.181.x subnet"
+  # 10.0.181.x lives on this bridge on proxmox-node.
+  # Verify with: pvesh get /nodes/your-proxmox-node/network on the Proxmox host.
+  # your other node uses vmbr10 for 10.0.77.x; 10.0.181.x may be vmbr0 or another bridge.
+  description = "Proxmox bridge for the 10.0.181.x subnet"
   type        = string
   default     = "vmbr0"
 }
@@ -100,7 +100,7 @@ variable "vm_bridge" {
 variable "vm_ip" {
   description = "Static IP for vidistiller-prod"
   type        = string
-  default     = "10.255.181.20"
+  default     = "10.0.181.20"
 }
 
 variable "vm_prefix" {
@@ -110,7 +110,7 @@ variable "vm_prefix" {
 
 variable "gateway" {
   type    = string
-  default = "10.255.10.1"
+  default = "10.0.10.1"
 }
 
 variable "ssh_public_key" {
