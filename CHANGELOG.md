@@ -237,3 +237,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix: scope gitleaks ipv4-address rule to the real internal range (10.255.x.x) — the generic IPv4 regex flagged documentation placeholders (44 false positives on this PR) and the per-rule `enabled = false` line was silently ignored (gitleaks has no such field); PR-range CI scans now pass
+
+### Fixed
+- fix: security workflow — pass --severity high to shipguard so the scan step exits non-zero only on high/critical findings; previously any medium finding failed the job before the severity-policy step could run (fail-closed on noise)
