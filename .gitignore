@@ -188,3 +188,7 @@ vendor/
 # Agent harness state and working notes — local only
 .superharness/
 features_to_add/
+.ship-check-passed
+.hablatone-project
+.voice-toolkit-project
+HANDOFF.md
