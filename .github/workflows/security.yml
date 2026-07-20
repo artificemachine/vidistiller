@@ -22,11 +22,11 @@ jobs:
         run: python -m pip install --upgrade pip shipguard
 
       - name: Run shipguard scan
-        # GHA-002 excluded: shipguard 0.4.3 false-positive — flags SHA-pinned
-        # `uses:` lines as unpinned. All actions are already commit-SHA pinned.
         # --severity high: exit non-zero only on high/critical, matching the
         # severity policy enforced below (mediums are reported, not blocking).
-        run: shipguard scan . --exclude-rules GHA-002 --severity high --format json --output report.shipguard.json
+        # The former --exclude-rules GHA-002 workaround was dropped at shipguard
+        # 0.5.2, where that false positive no longer fires.
+        run: shipguard scan . --severity high --format json --output report.shipguard.json
 
       - name: Enforce severity policy
         run: |
@@ -43,3 +43,20 @@ jobs:
           if blockers > 0:
               raise SystemExit(f'Blocking security findings: critical+high={blockers}')
           PY
+
+      # Python dependency CVEs were previously unscanned in CI. pip-audit covers
+      # the backend requirements set, which includes yt-dlp and pillow — both of
+      # which process untrusted, user-supplied input (video URLs and extracted
+      # frames respectively).
+      - name: Audit Python dependencies
+        # PYSEC-2026-1325 (ecdsa side-channel) is ignored deliberately. ecdsa is
+        # pulled in transitively by python-jose and has no upstream fix. The
+        # vulnerable code path is ECDSA signing, which this app never reaches:
+        # JWTs are signed with HS256 (symmetric HMAC), set in
+        # backend/app/core/config.py. Re-evaluate if jwt.algorithm ever changes
+        # to an EC algorithm, or if upstream publishes a fix.
+        run: |
+          python -m pip install pip-audit
+          pip-audit --requirement backend/requirements.txt \
+            --ignore-vuln PYSEC-2026-1325 \
+            --progress-spinner off

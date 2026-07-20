@@ -1,6 +1,6 @@
 ignore:
-  rules:
-    # GHA-002 false positive in shipguard 0.4.3: flags SHA-pinned `uses:` lines
-    # as unpinned. All actions are already pinned to full commit SHAs.
-    # Disable until upstream fix.
-    - GHA-002
+  rules: []
+  # The GHA-002 suppression (shipguard 0.4.3 false positive on SHA-pinned
+  # `uses:` lines) was removed once the project moved to shipguard 0.5.2, where
+  # the rule no longer fires. Verified: `shipguard scan .` with no exclusions
+  # reports 0 GHA-002 findings.

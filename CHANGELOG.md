@@ -251,3 +251,17 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - chore(gitleaks): allowlist the public dev Fernet key and truncated OpenAPI JWT examples so PR-range CI scans stay clean without weakening any rule.
 - chore(gitignore): ignore local agent/session artifacts (.ship-check-passed, .hablatone-project, .voice-toolkit-project, HANDOFF.md).
+
+## v1.10.13
+
+### Security
+- fix(security): JWT_SECRET_KEY no longer has a hardcoded default. The former default ("TestSecretKey123!@#abcDEF_development_only") and the .env.example placeholder ("ChangeMe123!ReplaceThisNow_32charsMin") both passed every strength check, so any deployment that never set the variable signed tokens with a secret published in this repository — forgeable tokens for any account. Both are now rejected by exact-value match in every environment. Production requires an explicit key; outside production an ephemeral random key is generated at startup with a warning, so `cp .env.example .env` still boots without a public secret ever signing a token. Verified: production deployments were unaffected (real 64-char key in use).
+- fix(security): add pip-audit to the security workflow. Python dependency CVEs were previously never scanned in CI. PYSEC-2026-1325 (ecdsa, transitive via python-jose) is ignored with justification — it has no upstream fix and its ECDSA code path is unreachable because JWTs are signed with HS256.
+- fix(deps): raise pillow floor to >=12.3.0, closing 8 CVEs. pillow decodes video snapshot frames via Image.open(), so it sits directly on the untrusted-input path.
+
+### Fixed
+- fix(config): construct JWTSettings via default_factory instead of at class-definition time. As an import-time singleton, an unset JWT_SECRET_KEY in production made app.core.config itself un-importable, which would have broken migrations and tooling. The remaining sub-settings share this pattern but are not security-gated.
+- fix(config): correct requires-python from >=3.14 to >=3.12, matching .python-version, the Dockerfile and CI. The previous value meant local development ran a different interpreter than CI and production.
+
+### Changed
+- chore(security): drop the stale --exclude-rules GHA-002 workaround from security.yml and .shipguard.toml. Verified that the rule no longer fires on shipguard 0.5.2.

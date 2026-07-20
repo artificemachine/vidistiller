@@ -4,10 +4,28 @@
 from typing import Optional, Union
 from enum import Enum
 from functools import lru_cache
+import logging
+import os
+import secrets
 import string
 
-from pydantic import SecretStr, HttpUrl, field_validator, Field
+from pydantic import SecretStr, HttpUrl, field_validator, model_validator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+# Secrets that have been published in this repository and therefore must never
+# sign a real token. Matched by exact value rather than substring: a substring
+# check on words like "test" or "example" would reject legitimate random
+# secrets that happen to contain them.
+_PUBLISHED_PLACEHOLDER_SECRETS = frozenset(
+    {
+        # Former hardcoded default of JWTSettings.secret_key.
+        "TestSecretKey123!@#abcDEF_development_only",
+        # Shipped in .env.example, which the quickstart copies to .env.
+        "ChangeMe123!ReplaceThisNow_32charsMin",
+    }
+)
 
 
 # ==============================================================================
@@ -120,19 +138,21 @@ class JWTSettings(BaseSettings):
     """
     JWT (JSON Web Token) authentication settings.
 
-    Secret Keys: Your JWT_SECRET_KEY should be a SecretStr. Never hardcode a default
-    value for production; use a "factory" or leave it without a default to force the
-    developer to set it in the .env.
+    Secret Keys: JWT_SECRET_KEY has no default. Outside production an ephemeral
+    random key is generated at startup so the quickstart still boots; in
+    production the key must be supplied explicitly. Either way no published
+    placeholder can ever sign a token.
 
     Algorithms: Set ALGORITHM: str = "HS256" as a default.
 
     Expirations: Use int values for ACCESS_TOKEN_EXPIRE_MINUTES.
     """
 
-    # Use SecretStr to prevent accidental logging of the key
-    # Should be overridden in .env for production (minimum 32 chars with complexity)
-    # For development, use: TestSecretKey123!@#abcDEF
-    secret_key: SecretStr = SecretStr("TestSecretKey123!@#abcDEF_development_only")
+    # Use SecretStr to prevent accidental logging of the key.
+    # Deliberately has no default: a hardcoded one is published the moment the
+    # repository is public, and every strength check below would still pass it.
+    # Resolution happens in _resolve_secret_key below.
+    secret_key: Optional[SecretStr] = None
 
     # Field encryption key for Fernet symmetric encryption of API keys and secrets
     # Should be overridden in .env for production
@@ -145,15 +165,28 @@ class JWTSettings(BaseSettings):
 
     @field_validator("secret_key", mode="after")
     @classmethod
-    def validate_jwt_secret(cls, v: SecretStr) -> SecretStr:
+    def validate_jwt_secret(cls, v: Optional[SecretStr]) -> Optional[SecretStr]:
         """Validate JWT secret key strength and format."""
+        # An unset key is resolved in _resolve_secret_key, which either
+        # generates one or fails, depending on the environment.
+        if v is None:
+            return None
+
         raw_value = v.get_secret_value()
 
         # 1. Length Check
         if len(raw_value) < 32:
             raise ValueError("JWT_SECRET_KEY must be at least 32 characters long")
 
-        # 2. Default Value Check (only fail if it looks like placeholder)
+        # 2. Published placeholders. Checked by exact value first, so the two
+        #    secrets that exist in this repo can never be used, then by the
+        #    looser "change-me" heuristic for anything else.
+        if raw_value in _PUBLISHED_PLACEHOLDER_SECRETS:
+            raise ValueError(
+                "JWT_SECRET_KEY is set to a placeholder published in this "
+                "repository and would be public knowledge. Generate a real key: "
+                'python -c "import secrets; print(secrets.token_urlsafe(48))"'
+            )
         if "change-me" in raw_value.lower():
             raise ValueError("JWT_SECRET_KEY must be changed from the default value")
 
@@ -179,6 +212,35 @@ class JWTSettings(BaseSettings):
             )
 
         return v
+
+    @model_validator(mode="after")
+    def _resolve_secret_key(self) -> "JWTSettings":
+        """Supply a secret when none was configured, or refuse to start.
+
+        Production must set JWT_SECRET_KEY explicitly. Everywhere else an
+        ephemeral random key is generated so `cp .env.example .env` still boots
+        without a published secret ever signing a token. Tokens issued with a
+        generated key do not survive a restart, which is correct for dev.
+        """
+        if self.secret_key is not None:
+            return self
+
+        environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+        if environment == "production":
+            raise ValueError(
+                "JWT_SECRET_KEY must be set when ENVIRONMENT=production. "
+                'Generate one with: python -c "import secrets; '
+                'print(secrets.token_urlsafe(48))"'
+            )
+
+        self.secret_key = SecretStr(secrets.token_urlsafe(48))
+        logger.warning(
+            "JWT_SECRET_KEY is not set. Generated an ephemeral key for "
+            "environment=%s. Tokens will be invalidated on restart. Set "
+            "JWT_SECRET_KEY explicitly for any persistent deployment.",
+            environment,
+        )
+        return self
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -354,7 +416,13 @@ class Settings(BaseSettings):
     """
 
     database: DatabaseSettings = DatabaseSettings()
-    jwt: JWTSettings = JWTSettings()
+    # default_factory, not a call: a bare JWTSettings() here is evaluated when
+    # this class is defined, so an unset JWT_SECRET_KEY in production would make
+    # the module itself un-importable (breaking migrations, tooling and --help).
+    # Deferring construction moves that failure to Settings() instantiation,
+    # where it belongs. The other fields below share the import-time-evaluation
+    # pattern but are not security-gated, so they are left alone here.
+    jwt: JWTSettings = Field(default_factory=JWTSettings)
     logging: LoggingSettings = LoggingSettings()
     cors: CorsSettings = CorsSettings()
     ollama: OllamaSettings = OllamaSettings()
