@@ -300,3 +300,9 @@ All notable changes to this project will be documented in this file.
 - fix(config): a blank ALLOWED_LLM_HOSTS is treated as unconfigured rather than as an empty allowlist, so the `${ALLOWED_LLM_HOSTS:-}` passthrough added below cannot silently block the local Ollama endpoint.
 - fix(deploy): docker-compose.prod.yml now passes ALLOWED_LLM_HOSTS to api and celery_worker. It was hand-patched into the production host only, so a rebuild from the repository regressed it.
 - docs: VM_DEPLOYMENT.md generates the JWT secret with token_urlsafe(48) instead of (32); the shorter draw could fail the composition rules by chance.
+
+## [1.10.17] - 2026-07-21
+
+### Changed
+- chore(deploy): docker-compose.prod.yml image tags are now `${VIDISTILLER_IMAGE_TAG:-latest}` instead of a hardcoded `latest`. Pinning a release makes the running version knowable from configuration and turns a rollback into a one-line .env change. Behaviour is unchanged when the variable is unset.
+- docs: .env.example documents VIDISTILLER_IMAGE_TAG. The production host has been pinned to 1.10.16 and its incident-era SECRET_KEY entry removed, now that 1.10.16 reads JWT_SECRET_KEY; that entry never existed in this repository's compose file.
