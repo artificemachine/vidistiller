@@ -291,3 +291,12 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(config): Settings.storage was built at class-definition time, so DATA_DIR was frozen at import and could not be changed without a restart. Now a default_factory, matching the jwt fix in 1.10.13. The remaining sub-settings fields still share the old pattern.
+
+## [1.10.16] - 2026-07-20
+
+### Fixed
+- fix(config): JWTSettings has no env_prefix, so its secret_key field bound to SECRET_KEY while .env.example, the docs and every compose file set JWT_SECRET_KEY. Production therefore ran on an unread variable. The field now reads JWT_SECRET_KEY first and still accepts SECRET_KEY so hosts patched during the incident keep booting.
+- fix(config): the character-composition rules rejected high-entropy generated keys such as `openssl rand -hex 32`, which have no uppercase or punctuation. Keys of 64+ characters now skip those rules and are checked for character variety instead.
+- fix(config): a blank ALLOWED_LLM_HOSTS is treated as unconfigured rather than as an empty allowlist, so the `${ALLOWED_LLM_HOSTS:-}` passthrough added below cannot silently block the local Ollama endpoint.
+- fix(deploy): docker-compose.prod.yml now passes ALLOWED_LLM_HOSTS to api and celery_worker. It was hand-patched into the production host only, so a rebuild from the repository regressed it.
+- docs: VM_DEPLOYMENT.md generates the JWT secret with token_urlsafe(48) instead of (32); the shorter draw could fail the composition rules by chance.
