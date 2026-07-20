@@ -231,3 +231,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - chore: align backend version to 1.10.11 (pyproject was 1.10.6, frontend 1.10.11), switch CI to npm ci for deterministic installs, npm audit fix (resolves HIGH form-data CRLF injection GHSA-hmw2-7cc7-3qxx; prod deps now 0 vulnerabilities)
+
+### Removed
+- chore: delete 33 local + 78 remote branches verified as merged via their PR head refs (ancestry check under-counts with squash-merge)
