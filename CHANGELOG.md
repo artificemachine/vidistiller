@@ -240,3 +240,14 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix: security workflow — pass --severity high to shipguard so the scan step exits non-zero only on high/critical findings; previously any medium finding failed the job before the severity-policy step could run (fail-closed on noise)
+
+## v1.10.12
+
+### Fixed
+- fix(security): make the gitleaks personal-email rule use a non-capturing group — with a capturing group gitleaks reported the captured domain ("gmail") as the Secret instead of the full address, which also prevented allowlist regexes from matching. Backported from fix/gitleaks-pii-regex-backport; the private-range IP allowlist from that same branch was deliberately NOT taken, as `^10\.` fully suppresses the scoped 10.255.x.x rule added in #98.
+- fix(security): replace the real-format Fernet key in .env.example with base64("DEV-ONLY-INSECURE-CHANGE-ME-0000") — still a valid Fernet key so `cp .env.example .env` boots for local dev, but self-evidently not a secret. Verified it never matched the live production key.
+- fix(scripts): remove hardcoded internal IP from scripts/push-backend.sh; SSH target now defaults to the `vidistiller` host alias and is overridable via VIDISTILLER_SSH.
+
+### Changed
+- chore(gitleaks): allowlist the public dev Fernet key and truncated OpenAPI JWT examples so PR-range CI scans stay clean without weakening any rule.
+- chore(gitignore): ignore local agent/session artifacts (.ship-check-passed, .hablatone-project, .voice-toolkit-project, HANDOFF.md).

@@ -13,8 +13,11 @@ useDefault = true
 [[rules]]
 id = "personal-email"
 description = "Personal email addresses (gmail, yahoo, outlook, etc.)"
-# Require word boundary + common personal email domains
-regex = '''(?i)\b[a-zA-Z0-9._%+-]+@(gmail|yahoo|outlook|hotmail|icloud|aol|protonmail)\.com\b'''
+# Require word boundary + common personal email domains.
+# Non-capturing group is required: with a capturing group gitleaks reports the
+# captured domain (e.g. "gmail") as the Secret instead of the full email, which
+# also breaks allowlist regexes that match on the address.
+regex = '''(?i)\b[a-zA-Z0-9._%+-]+@(?:gmail|yahoo|outlook|hotmail|icloud|aol|protonmail)\.com\b'''
 tags = ["pii", "email"]
 
 [[rules]]
@@ -70,4 +73,10 @@ regexes = [
   '''xxx-xx-xxxx''',
   '''your[_-]?email''',
   '''noreply@''',
+  # Public throwaway dev key in .env.example — base64 of
+  # "DEV-ONLY-INSECURE-CHANGE-ME-0000". Not a secret by construction.
+  '''^REVWLU9OTFktSU5TRUNVUkUtQ0hBTkdFLU1FLTAwMDA=$''',
+  # Truncated JWTs in OpenAPI doc examples. A token ending in literal dots is
+  # never a real credential, so this cannot mask a live token.
+  '''^eyJ[A-Za-z0-9_.-]*\.\.\.$''',
 ]
