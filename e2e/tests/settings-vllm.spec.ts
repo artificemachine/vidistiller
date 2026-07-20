@@ -207,8 +207,10 @@ test.describe("Settings — vLLM provider", () => {
 
     await page.click("button[type='submit']:has-text('save settings')");
 
+    // Assert the success banner specifically. Accepting "success or error"
+    // would go green on a rejected save, which is how a 422 that rendered no
+    // banner at all previously slipped through as a pass.
     const success = page.locator("text=Settings saved successfully");
-    const error = page.locator(".bg-red-50, .dark\\:bg-red-900\\/20").first();
-    await expect(success.or(error)).toBeVisible({ timeout: 10_000 });
+    await expect(success).toBeVisible({ timeout: 10_000 });
   });
 });

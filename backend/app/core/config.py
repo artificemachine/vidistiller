@@ -440,6 +440,22 @@ class Settings(BaseSettings):
     vllm_fleet: VLLMFleetSettings = VLLMFleetSettings()
     environment: Environment = Environment.DEVELOPMENT
 
+    # Hosts the backend may use as an LLM / vLLM endpoint. These legitimately
+    # point at private addresses (a local Ollama, an on-prem vLLM fleet), so
+    # they cannot be screened by IP range like other fetch targets are; an
+    # operator-controlled allowlist is used instead. Defaults to loopback only,
+    # so a stock install works and anything wider is an explicit opt-in.
+    # host.docker.internal is included because .env.example ships it as the
+    # default OLLAMA_URL; omitting it would reject the documented Docker setup.
+    allowed_llm_hosts: str = (
+        "localhost,127.0.0.1,::1,ollama,vllm,host.docker.internal"
+    )
+
+    @property
+    def allowed_llm_host_list(self) -> list[str]:
+        """allowed_llm_hosts parsed into a list of hostnames."""
+        return [h.strip() for h in self.allowed_llm_hosts.split(",") if h.strip()]
+
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
 # Cache settings

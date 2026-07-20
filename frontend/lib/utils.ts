@@ -1,4 +1,22 @@
 /**
+ * Extract a renderable message from an axios error.
+ *
+ * FastAPI returns `detail` as a plain string for HTTPException, but as an
+ * array of {loc, msg, type} objects for Pydantic validation failures (422).
+ * Passing the array straight into JSX crashes the render, which surfaces as a
+ * page with neither a success nor an error banner.
+ */
+export function errorMessage(err: any, fallback: string): string {
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === 'string' && detail) return detail;
+  if (Array.isArray(detail)) {
+    const msgs = detail.map((d) => d?.msg).filter(Boolean);
+    if (msgs.length > 0) return msgs.join('; ');
+  }
+  return fallback;
+}
+
+/**
  * Parse a [HH:MM:SS] or [MM:SS] timestamp string into total seconds.
  */
 export function parseTimestamp(ts: string): number {

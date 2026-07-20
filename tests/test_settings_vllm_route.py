@@ -8,6 +8,21 @@ import pytest
 
 VLLM_MODELS_URL = "/api/settings/vllm/models"
 
+# These tests target 192.0.2.x (RFC 5737 documentation range). The route now
+# restricts base_url to the operator allowlist to close a read-proxy SSRF, so
+# the fixture below widens the allowlist for the duration of each test.
+_TEST_SIDECAR_HOSTS = "localhost,127.0.0.1,192.0.2.1,192.0.2.2,192.0.2.3"
+
+
+@pytest.fixture(autouse=True)
+def _allow_test_sidecar_hosts(monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("ALLOWED_LLM_HOSTS", _TEST_SIDECAR_HOSTS)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
 SIDECAR_RESPONSE = {
     "object": "list",
     "data": [
@@ -169,3 +184,27 @@ def test_vllm_models_calls_correct_sidecar_endpoint(client, auth_headers, monkey
     )
 
     assert called_with["url"] == "http://192.0.2.1:8100/v1/models"
+
+
+# ---------------------------------------------------------------------------
+# SSRF guard
+# ---------------------------------------------------------------------------
+
+def test_vllm_models_rejects_non_allowlisted_host(client, auth_headers):
+    """The route fetches base_url and returns the body, so an unrestricted
+    value would make it a read proxy into the private network."""
+    resp = client.get(
+        VLLM_MODELS_URL,
+        params={"base_url": "http://169.254.169.254/"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 400
+
+
+def test_vllm_models_rejects_non_allowlisted_private_host(client, auth_headers):
+    resp = client.get(
+        VLLM_MODELS_URL,
+        params={"base_url": "http://10.0.181.20:8000/"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 400

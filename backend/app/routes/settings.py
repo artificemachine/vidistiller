@@ -4,6 +4,7 @@ Settings API Routes
 Handles user settings including LLM provider preferences, model selection, and API keys.
 """
 
+import logging
 from urllib.parse import urlparse
 
 import httpx
@@ -17,6 +18,8 @@ from app.core.crypto import encrypt_field, decrypt_field
 from app.db.models import User
 from app.schemas import UserSettingsUpdate, UserSettingsResponse
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -121,9 +124,18 @@ def get_vllm_models(
     Proxy call to a vLLM sidecar to discover which model is currently loaded.
     Returns {"models": ["model-id", ...]}
     """
-    parsed = urlparse(base_url)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise HTTPException(status_code=400, detail="Invalid base_url")
+    # This endpoint fetches base_url and returns the response body to the
+    # caller, so an unrestricted value would make it a general-purpose read
+    # proxy into the private network. vLLM sidecars are legitimately on private
+    # addresses, so the host is checked against the operator allowlist.
+    from app.core.url_guard import validate_llm_endpoint
+
+    try:
+        base_url = validate_llm_endpoint(
+            base_url, get_settings().allowed_llm_host_list
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     sidecar_url = base_url.rstrip("/") + "/v1/models"
     try:
@@ -135,7 +147,10 @@ def get_vllm_models(
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="Sidecar did not respond within 5 s")
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to reach sidecar: {exc}")
+        # The exception text is logged, not returned: reflecting it gave the
+        # caller connection-level detail about hosts behind the backend.
+        logger.warning("vLLM sidecar request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to reach sidecar")
 
 
 @router.delete("/me/api-key", response_model=UserSettingsResponse)

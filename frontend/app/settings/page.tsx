@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import apiClient from '@/lib/api';
 import { useAuthStore } from '@/lib/authStore';
+import { errorMessage } from '@/lib/utils';
 
 interface SettingsForm {
   llm_provider: string;
@@ -258,8 +259,7 @@ export default function SettingsPage() {
 
       setTimeout(() => setSuccess(''), 3000);
     } catch (err: any) {
-      const message = err.response?.data?.detail || 'Failed to save settings';
-      setError(message);
+      setError(errorMessage(err, 'Failed to save settings'));
     } finally {
       setSaving(false);
     }
@@ -286,8 +286,7 @@ export default function SettingsPage() {
 
       setTimeout(() => setSuccess(''), 3000);
     } catch (err: any) {
-      const message = err.response?.data?.detail || 'Failed to clear API key';
-      setError(message);
+      setError(errorMessage(err, 'Failed to clear API key'));
     } finally {
       setSaving(false);
     }

@@ -265,3 +265,19 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(security): drop the stale --exclude-rules GHA-002 workaround from security.yml and .shipguard.toml. Verified that the rule no longer fires on shipguard 0.5.2.
+
+## v1.10.14
+
+### Security
+- fix(security): confine verify_token to access tokens. It backs get_current_user, so whatever it accepts is a full API credential, yet it checked only "sub" while the refresh and password-reset verifiers did check "type". Access tokens carried no type claim at all. A password-reset token — delivered in an emailed URL, so it persists in browser history and Referer headers — therefore worked as a bearer token, and remained valid after the reset was consumed because verify_token never consults the database. Access tokens now carry type=access and it is asserted on verification. Existing sessions are invalidated on deploy; this is intended.
+- fix(security): add SSRF guards on every user-supplied URL the backend fetches itself. video_url was validated only by "\.' in netloc", which rejected localhost by accident while permitting every IP literal including 169.254.169.254, and was passed to yt_dlp synchronously inside the POST handler from inside the private network. GET /settings/vllm/models was worse: it returned the fetched body and reflected the exception text, making it a non-blind read proxy. llm_ollama_url had no validation at all and is persisted, so it was a stored SSRF primitive replayed on every summarization job.
+- fix(security): stop reflecting the sidecar exception string in the 502 body of /settings/vllm/models; it is now logged instead.
+
+### Added
+- feat(config): ALLOWED_LLM_HOSTS. LLM and vLLM endpoints legitimately target private addresses, so a denylist would break the local-first path; they are matched against this operator allowlist instead. Defaults to loopback, the compose service names, and host.docker.internal, so the documented Docker setup keeps working.
+- feat(security): backend/app/core/url_guard.py, with validate_fetch_target (deny private/loopback/link-local/reserved/multicast, all resolved addresses checked) and validate_llm_endpoint (allowlist). Documented limitation: validation is pre-request, so DNS rebinding and redirect chains are not covered.
+
+### Fixed
+- fix(ui): settings page rendered neither a success nor an error banner when the API returned a 422. FastAPI sends `detail` as a list of objects for validation failures, and passing that array into JSX crashed the render. New `errorMessage()` helper in frontend/lib/utils.ts flattens both shapes; wired into the save and clear-api-key handlers.
+- fix(test): SSRF tests hardcoded a real homelab address, which the scoped gitleaks ipv4 rule correctly flagged. Replaced with the scrubbed 10.0.x convention already used in the same files.
+- test(e2e): "can save vllm provider settings" asserted success-or-error, so it went green on a rejected save. Now asserts the success banner, with the mock fleet's RFC5737 addresses allowlisted via ALLOWED_LLM_HOSTS in docker-compose.e2e.yml.

@@ -1,5 +1,32 @@
 import { describe, it, expect } from 'vitest';
-import { parseTimestamp, toSnakeCase } from '@/lib/utils';
+import { parseTimestamp, toSnakeCase, errorMessage } from '@/lib/utils';
+
+describe('errorMessage', () => {
+  it('returns a plain string detail unchanged', () => {
+    const err = { response: { data: { detail: 'endpoint not allowed' } } };
+    expect(errorMessage(err, 'fallback')).toBe('endpoint not allowed');
+  });
+
+  it('flattens the FastAPI 422 array shape into a string', () => {
+    const err = {
+      response: {
+        data: {
+          detail: [
+            { loc: ['body', 'llm_ollama_url'], msg: 'host not allowed', type: 'value_error' },
+            { loc: ['body', 'llm_model'], msg: 'field required', type: 'missing' },
+          ],
+        },
+      },
+    };
+    expect(errorMessage(err, 'fallback')).toBe('host not allowed; field required');
+  });
+
+  it('falls back when detail is absent, empty, or an unusable array', () => {
+    expect(errorMessage({}, 'fallback')).toBe('fallback');
+    expect(errorMessage({ response: { data: { detail: '' } } }, 'fallback')).toBe('fallback');
+    expect(errorMessage({ response: { data: { detail: [{}] } } }, 'fallback')).toBe('fallback');
+  });
+});
 
 describe('parseTimestamp', () => {
   it('parses [HH:MM:SS] format', () => {
