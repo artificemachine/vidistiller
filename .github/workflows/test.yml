@@ -42,7 +42,7 @@ jobs:
           node-version: '22'
 
       - name: Install frontend deps
-        run: cd frontend && npm install
+        run: cd frontend && npm ci
 
       - name: Run frontend tests
         run: cd frontend && npm test -- --run
@@ -60,7 +60,7 @@ jobs:
           node-version: '22'
 
       - name: Install frontend deps (for Playwright)
-        run: cd frontend && npm install
+        run: cd frontend && npm ci
 
       - name: Install Playwright browsers
         run: cd frontend && npx playwright install --with-deps chromium
