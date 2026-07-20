@@ -10,7 +10,7 @@
 Semblar calls vidistiller's REST API to convert video URLs into transcripts and structured Markdown for use as **reference material** in article generation.
 
 ```
-Semblar VM (10.255.181.30)
+Semblar VM (10.0.181.30)
        │
        │  HTTP to vidistiller API
        ▼
@@ -85,7 +85,7 @@ The API key middleware returns this user when `X-API-Key` matches.
 
 N/A for machine-to-machine. Semblar calls vidistiller directly via HTTP from Python -- no browser, no CORS. **No change needed** for this. The CORS middleware only applies to browser-based requests.
 
-**Verify**: Semblar VM (10.255.181.30) can reach vidistiller API port (8000) on the LAN. Both are Proxmox VMs on the same cluster and should sit on reachable subnets.
+**Verify**: Semblar VM (10.0.181.30) can reach vidistiller API port (8000) on the LAN. Both are Proxmox VMs on the same cluster and should sit on reachable subnets.
 
 ### 4. Transcript Endpoint (nice-to-have, not required)
 

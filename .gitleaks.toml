@@ -40,11 +40,12 @@ tags = ["pii", "financial"]
 
 [[rules]]
 id = "ipv4-address"
-description = "IPv4 addresses (disabled by default — enable for network code)"
-regex = '''\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d{1,2})\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d{1,2})\b'''
+description = "Operator internal IPv4 ranges (10.255.x.x) — documentation placeholders like 10.0.x.x are allowed"
+# Scoped to the operator's real internal range; a generic IPv4 regex flags
+# documentation placeholders and produces only false positives.
+# NOTE: gitleaks has no per-rule "enabled" field — to disable a rule, remove it.
+regex = '''\b10\.255\.\d{1,3}\.\d{1,3}\b'''
 tags = ["network"]
-# Disabled by default — too many false positives in real code
-enabled = false
 
 [allowlist]
 description = "Global allowlist"

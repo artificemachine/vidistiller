@@ -155,6 +155,10 @@ services:
       # enabling hot-reload during development (no rebuild needed).
       volumes:
         - ./backend:/app              # Backend source code
+        # Anonymous volume restores the image-baked /app/deps (pip --target) that
+        # the ./backend bind mount above would otherwise shadow. Without this,
+        # api starts with no installed packages (uvicorn not found) on fresh clones.
+        - /app/deps
         - ./services:/services        # Shared service modules (youtube, transcript, etc.)
         - app_data:/data              # Persistent storage for snapshots and videos
         - ./alembic.ini:/app/alembic.ini  # Alembic config (in WORKDIR so alembic finds it)
@@ -236,6 +240,8 @@ services:
 
       volumes:
         - ./backend:/app
+        # See api service: keep image-baked /app/deps visible under the bind mount.
+        - /app/deps
         - ./services:/services
         - app_data:/data              # Shared persistent storage for snapshots and videos
         - ./alembic.ini:/app/alembic.ini  # Alembic config (in WORKDIR so alembic finds it)

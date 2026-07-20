@@ -6,7 +6,7 @@ Vidistiller is a local-first, source-agnostic video-to-documentation engine. Pas
 
 ---
 
-## <span style="color: pink;">Architecture Diagram</span>
+## Architecture Diagram
 
 The diagram below shows how every component connects at runtime.
 
@@ -86,7 +86,7 @@ The diagram below shows how every component connects at runtime.
 
 ---
 
-## <span style="color: pink;">Presentation Mode (Slide Detection)</span>
+## Presentation Mode (Slide Detection)
 
 For **presentation-style videos** (tech talks, lectures, tutorials with slides), enable **Presentation Mode** to automatically detect and extract slides.
 
@@ -130,7 +130,7 @@ This type of video typically produces 20–40 well-defined slides with OCR text 
 
 ---
 
-## <span style="color: pink;">🎨 Design System — Multi-Theme</span>
+## Design System — Multi-Theme
 
 The Vidistiller UI supports three palettes switchable at runtime: **Monokai** (default, dark), **Lunaris**, and **Nord**. The active palette is persisted to `localStorage` as `vidistiller-theme`.
 
@@ -138,8 +138,6 @@ The Vidistiller UI supports three palettes switchable at runtime: **Monokai** (d
 
 - **Design File:** [`new_vidistiller_ui.pen`](./new_vidistiller_ui.pen) — Complete Pencil design with all screens and Monokai colors
 - **Design Specification:** [`DESIGN_SPEC.md`](./DESIGN_SPEC.md) — Full design system details, colors, typography, and spacing
-- **Implementation Guide:** [`DESIGN_EXPORT_GUIDE.md`](./DESIGN_EXPORT_GUIDE.md) — Code implementation patterns for React/Tailwind
-- **Quick Reference:** [`DESIGN_README.md`](./DESIGN_README.md) — 5-minute overview of the design system
 
 ### Key Design Tokens
 
@@ -173,7 +171,7 @@ The design includes:
 
 ---
 
-## <span style="color: pink;">Explanation of Each Part</span>
+## Explanation of Each Part
 
 ### `backend/` — FastAPI Backend
 
@@ -233,7 +231,7 @@ Automation helpers for common tasks:
 
 ### `terraform/` — Infrastructure as Code
 
-[Terraform](https://www.terraform.io/) definitions for deploying the application to AWS. Defines cloud resources (VPC, ECS, RDS, ElastiCache, etc.) and outputs connection details after `terraform apply`.
+[Terraform](https://www.terraform.io/) definitions for deploying the application to a self-hosted Proxmox VM. Defines the VM, network, and cloud-init configuration; outputs connection details after `terraform apply`. See `deploy/` for the companion Ansible playbooks.
 
 ### `.github/workflows/` — CI/CD
 
@@ -241,7 +239,7 @@ A GitHub Actions pipeline template for automated testing and deployment on push/
 
 ---
 
-## <span style="color: pink;">Docker Compose Files</span>
+## Docker Compose Files
 
 The project includes three Compose files, each serving a different purpose:
 
@@ -285,16 +283,16 @@ Automatically merged with `docker-compose.yml` by Docker Compose. Use this for p
 
 ---
 
-## <span style="color: pink;">Prerequisites</span>
+## Prerequisites
 
 - **Docker** 24+ with Compose v2 (`docker compose version`)
 - **Node.js** 18+ (for running the frontend outside Docker)
-- **Python** 3.14+ (for running the backend outside Docker)
+- **Python** 3.12+ (for running the backend outside Docker)
 - **Tesseract OCR** — required for Presentation Mode (`brew install tesseract` on macOS)
 
 ---
 
-## <span style="color: pink;">Getting Started</span>
+## Getting Started
 
 1. **Clone the repository** and copy the environment template:
    ```bash
@@ -324,11 +322,11 @@ Automatically merged with `docker-compose.yml` by Docker Compose. Use this for p
    - API docs: `http://localhost:8000/docs`
    - pgAdmin: `http://localhost:5050`
 
-See [DOCKER.md](docs/DOCKER.md) for troubleshooting and [DEPLOYMENT.md](docs/DEPLOYMENT.md) for production setup.
+See [ops-runbook](docs/ops-runbook.md) for troubleshooting and [VM_DEPLOYMENT.md](docs/VM_DEPLOYMENT.md) for production setup.
 
 ---
 
-## <span style="color: pink;">Running the Frontend Alone</span>
+## Running the Frontend Alone
 
 If you just want to preview the UI in your browser without starting the full stack:
 
@@ -352,7 +350,7 @@ The `--no-deps` flag tells Compose to start **only** the `web` container and ign
 
 ---
 
-## <span style="color: pink;">Running the Backend Alone</span>
+## Running the Backend Alone
 
 If you want to work on the API without starting the frontend, Celery worker, or pgAdmin:
 

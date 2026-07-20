@@ -24,7 +24,9 @@ jobs:
       - name: Run shipguard scan
         # GHA-002 excluded: shipguard 0.4.3 false-positive — flags SHA-pinned
         # `uses:` lines as unpinned. All actions are already commit-SHA pinned.
-        run: shipguard scan . --exclude-rules GHA-002 --format json --output report.shipguard.json
+        # --severity high: exit non-zero only on high/critical, matching the
+        # severity policy enforced below (mediums are reported, not blocking).
+        run: shipguard scan . --exclude-rules GHA-002 --severity high --format json --output report.shipguard.json
 
       - name: Enforce severity policy
         run: |

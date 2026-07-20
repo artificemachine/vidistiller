@@ -32,6 +32,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /app/deps /app/deps
 
 ENV PYTHONPATH="/app/deps"
+# pip --target installs console scripts (uvicorn, alembic, ...) into /app/deps/bin
+ENV PATH="/app/deps/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 

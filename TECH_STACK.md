@@ -120,7 +120,7 @@ This project uses a modern microservices architecture with containerized service
 
 ### Virtualization
 - **Proxmox VE** — virtualization platform
-- **VM (KVM)** — production runs as Proxmox VM 900 on `node03-antares`
+- **VM (KVM)** — production runs as Proxmox VM 900 on `your-proxmox-node`
   (Ubuntu 24.04 cloud-init template). Prod was previously hosted in an LXC and
   has since been migrated to a VM.
 

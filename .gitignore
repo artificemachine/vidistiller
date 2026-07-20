@@ -184,3 +184,7 @@ vendor/
 .gradle/
 *.generated.*
 *.pb.go
+
+# Agent harness state and working notes — local only
+.superharness/
+features_to_add/

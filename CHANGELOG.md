@@ -211,3 +211,32 @@ All notable changes to this project will be documented in this file.
 - 2026-06-30: fix(ci): remove Jinja2 raw tags from gitleaks.yml — caused workflow parse failure on GitHub
 - 2026-06-30: fix(ci): replace gitleaks-action@v2 (requires paid org license) with direct CLI install; fix e2e selectVllm to click label instead of sr-only radio input
 - 2026-06-30: fix(ci): scope gitleaks scan to PR commits only, not full history (157 pre-existing false positives in history)
+
+## [Unreleased] — 2026-07-20
+
+### Fixed
+- fix: restore image-baked /app/deps under backend bind mount in dev compose — fresh-clone quickstart failed with "uvicorn: executable not found" (api) and "No module named celery" (worker) because ./backend shadowed the pip --target dir; anonymous volume over /app/deps restores it (found by /job-ready stage 4, reproduced 2x)
+
+### Fixed
+- fix: add /app/deps/bin to PATH in backend Dockerfile — pip --target installs console scripts there, so `uvicorn` was not on PATH and the api container could not exec its CMD
+
+### Security
+- chore: scrub internal homelab topology from tracked files — replaced internal 10.255.x.x addresses with 10.0.x documentation placeholders and real node names with generic ones across .env.example, deploy/ (terraform+ansible), CI deploy workflow, backend docstrings, docs, and tests; production health check now reads vars.PROD_API_BASE_URL; untracked .superharness/ (agent state) and features_to_add/ (working notes incl. personal-named .docx) and gitignored both
+
+### Fixed
+- docs: README surface repair — removed broken links (DESIGN_EXPORT_GUIDE.md, DESIGN_README.md, docs/DOCKER.md, docs/DEPLOYMENT.md), corrected terraform description (Proxmox, not AWS), dropped pink-span heading styling, aligned Python prerequisite to 3.12+ (matches Docker image and CI)
+
+### Added
+- docs: add SECURITY.md with private-reporting policy and self-hosted scope notes
+
+### Fixed
+- chore: align backend version to 1.10.11 (pyproject was 1.10.6, frontend 1.10.11), switch CI to npm ci for deterministic installs, npm audit fix (resolves HIGH form-data CRLF injection GHSA-hmw2-7cc7-3qxx; prod deps now 0 vulnerabilities)
+
+### Removed
+- chore: delete 33 local + 78 remote branches verified as merged via their PR head refs (ancestry check under-counts with squash-merge)
+
+### Fixed
+- fix: scope gitleaks ipv4-address rule to the real internal range (10.255.x.x) — the generic IPv4 regex flagged documentation placeholders (44 false positives on this PR) and the per-rule `enabled = false` line was silently ignored (gitleaks has no such field); PR-range CI scans now pass
+
+### Fixed
+- fix: security workflow — pass --severity high to shipguard so the scan step exits non-zero only on high/critical findings; previously any medium finding failed the job before the severity-policy step could run (fail-closed on noise)

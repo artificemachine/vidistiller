@@ -63,7 +63,7 @@ This recreates the container with the updated env.
 `NEXT_PUBLIC_*` vars are baked into the static JS bundle at build time. Always build with the correct URL:
 
 ```bash
-NEXT_PUBLIC_API_URL=http://10.255.181.20:8000/api npm run build
+NEXT_PUBLIC_API_URL=http://10.0.181.20:8000/api npm run build
 ```
 
 Never use the default `.env.local` values for VM deploys.

@@ -114,7 +114,7 @@ def get_vllm_fleet(
 
 @router.get("/vllm/models")
 def get_vllm_models(
-    base_url: str = Query(..., description="vLLM sidecar base URL, e.g. http://10.255.150.36:8100"),
+    base_url: str = Query(..., description="vLLM sidecar base URL, e.g. http://10.0.150.36:8100"),
     current_user: User = Depends(get_current_user_from_token),
 ) -> dict:
     """

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generates terraform.tfvars from environment variables + synod credentials.
+# Generates terraform.tfvars from environment variables + your Proxmox cluster credentials.
 # Usage:
 #   ./setup-tfvars.sh
 # Or with explicit override:
@@ -8,15 +8,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SYNOD_TFVARS="${SYNOD_TFVARS_OVERRIDE:-$HOME/synod/deploy/terraform/terraform.tfvars}"
+CLUSTER_TFVARS="${CLUSTER_TFVARS_OVERRIDE:-$HOME/your-proxmox-cluster/deploy/terraform/terraform.tfvars}"
 OUT="$SCRIPT_DIR/terraform.tfvars"
 
 # --- Read token secret ---
-# Priority: env var > synod terraform.tfvars > prompt
+# Priority: env var > your cluster terraform.tfvars > prompt
 if [[ -n "${PROXMOX_TOKEN_SECRET:-}" ]]; then
   TOKEN_SECRET="$PROXMOX_TOKEN_SECRET"
-elif [[ -f "$SYNOD_TFVARS" ]]; then
-  TOKEN_SECRET=$(grep 'proxmox_token_secret' "$SYNOD_TFVARS" | awk -F'"' '{print $2}')
+elif [[ -f "$CLUSTER_TFVARS" ]]; then
+  TOKEN_SECRET=$(grep 'proxmox_token_secret' "$CLUSTER_TFVARS" | awk -F'"' '{print $2}')
 else
   read -rsp "Proxmox API token value: " TOKEN_SECRET
   echo
@@ -29,7 +29,7 @@ if [[ -z "$SSH_KEY" ]]; then
 fi
 
 cat > "$OUT" <<'STATIC'
-proxmox_api_url  = "https://node03.gitsilence.net:8006"
+proxmox_api_url  = "https://proxmox-node.example.com:8006"
 proxmox_token_id = "terraform@pve!terraform"
 STATIC
 
@@ -37,7 +37,7 @@ STATIC
 printf 'proxmox_token_secret = "%s"\n\n' "$TOKEN_SECRET" >> "$OUT"
 
 cat >> "$OUT" <<DYNAMIC
-target_node    = "node03-antares"
+target_node    = "your-proxmox-node"
 template_vm_id = 9001
 
 vm_id        = 900
@@ -47,9 +47,9 @@ vm_disk_size = 80
 vm_storage   = "local-lvm"
 vm_bridge    = "vmbr0"
 
-vm_ip     = "10.255.181.20"
+vm_ip     = "10.0.181.20"
 vm_prefix = 16
-gateway   = "10.255.10.1"
+gateway   = "10.0.10.1"
 
 ssh_public_key = "$SSH_KEY"
 DYNAMIC

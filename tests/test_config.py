@@ -128,16 +128,16 @@ class TestVLLMFleetSettings:
         assert s.vm2900_url == ""
 
     def test_reads_from_env(self, monkeypatch):
-        monkeypatch.setenv("VLLM_VM913_URL", "http://10.255.150.36:8100")
-        monkeypatch.setenv("VLLM_VM903_URL", "http://10.255.150.16:8100")
-        monkeypatch.setenv("VLLM_VM901_URL", "http://10.255.150.10:8100")
-        monkeypatch.setenv("VLLM_VM2900_URL", "http://10.255.150.20:8100")
+        monkeypatch.setenv("VLLM_VM913_URL", "http://10.0.150.36:8100")
+        monkeypatch.setenv("VLLM_VM903_URL", "http://10.0.150.16:8100")
+        monkeypatch.setenv("VLLM_VM901_URL", "http://10.0.150.10:8100")
+        monkeypatch.setenv("VLLM_VM2900_URL", "http://10.0.150.20:8100")
         from app.core.config import VLLMFleetSettings
         s = VLLMFleetSettings()
-        assert s.vm913_url == "http://10.255.150.36:8100"
-        assert s.vm903_url == "http://10.255.150.16:8100"
-        assert s.vm901_url == "http://10.255.150.10:8100"
-        assert s.vm2900_url == "http://10.255.150.20:8100"
+        assert s.vm913_url == "http://10.0.150.36:8100"
+        assert s.vm903_url == "http://10.0.150.16:8100"
+        assert s.vm901_url == "http://10.0.150.10:8100"
+        assert s.vm2900_url == "http://10.0.150.20:8100"
 
     def test_settings_exposes_vllm_fleet(self):
         from app.core.config import Settings

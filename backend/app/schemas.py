@@ -598,7 +598,7 @@ class UserSettingsUpdate(BaseModel):
     llm_ollama_url: Optional[str] = Field(
         None,
         max_length=512,
-        description="Custom base URL for Ollama or vLLM sidecar (e.g. http://10.255.150.36:8100)"
+        description="Custom base URL for Ollama or vLLM sidecar (e.g. http://10.0.150.36:8100)"
     )
     summary_language: Optional[str] = Field(
         None,

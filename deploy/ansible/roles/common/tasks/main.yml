@@ -1,5 +1,5 @@
 # Base system setup for vidistiller-prod (Ubuntu 24.04)
-# No Squid proxy — 10.255.181.20 has direct internet access
+# No Squid proxy — 10.0.181.20 has direct internet access
 ---
 - name: Update apt cache
   apt:
@@ -80,7 +80,7 @@
     rule: limit
     port: "22"
     proto: tcp
-    from_ip: "10.255.100.0/24"
+    from_ip: "10.0.100.0/24"
     comment: "SSH from Proxmox management subnet"
 
 - name: UFW — allow SSH from same subnet (LXC and lab hosts)
@@ -88,15 +88,15 @@
     rule: limit
     port: "22"
     proto: tcp
-    from_ip: "10.255.181.0/24"
-    comment: "SSH from 10.255.181.x subnet"
+    from_ip: "10.0.181.0/24"
+    comment: "SSH from 10.0.181.x subnet"
 
 - name: UFW — allow frontend from lab network
   ufw:
     rule: allow
     port: "3000"
     proto: tcp
-    from_ip: "10.255.0.0/16"
+    from_ip: "10.0.0.0/16"
     comment: "Vidistiller frontend"
 
 - name: UFW — allow API from lab network
@@ -104,7 +104,7 @@
     rule: allow
     port: "8000"
     proto: tcp
-    from_ip: "10.255.0.0/16"
+    from_ip: "10.0.0.0/16"
     comment: "Vidistiller API"
 
 - name: UFW — allow pgAdmin from lab network (admin only)
@@ -112,7 +112,7 @@
     rule: allow
     port: "5050"
     proto: tcp
-    from_ip: "10.255.0.0/16"
+    from_ip: "10.0.0.0/16"
     comment: "pgAdmin"
 
 - name: Enable UFW logging
