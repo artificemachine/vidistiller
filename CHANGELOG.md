@@ -211,3 +211,8 @@ All notable changes to this project will be documented in this file.
 - 2026-06-30: fix(ci): remove Jinja2 raw tags from gitleaks.yml — caused workflow parse failure on GitHub
 - 2026-06-30: fix(ci): replace gitleaks-action@v2 (requires paid org license) with direct CLI install; fix e2e selectVllm to click label instead of sr-only radio input
 - 2026-06-30: fix(ci): scope gitleaks scan to PR commits only, not full history (157 pre-existing false positives in history)
+
+## [Unreleased] — 2026-07-20
+
+### Fixed
+- fix: restore image-baked /app/deps under backend bind mount in dev compose — fresh-clone quickstart failed with "uvicorn: executable not found" (api) and "No module named celery" (worker) because ./backend shadowed the pip --target dir; anonymous volume over /app/deps restores it (found by /job-ready stage 4, reproduced 2x)
