@@ -1,6 +1,6 @@
 {
   "name": "vidistiller",
-  "version": "1.12.10",
+  "version": "1.12.11",
   "description": "Turn YouTube videos into structured documentation",
   "private": true,
   "scripts": {
@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@sentry/nextjs": "^10.49.0",
-    "axios": "^1.6.0",
+    "axios": "^1.18.1",
     "jszip": "^3.10.1",
     "next": "^15.5.15",
     "react": "^19.2.5",
