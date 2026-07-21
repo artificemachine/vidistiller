@@ -671,6 +671,7 @@ class TokenPayload(BaseModel):
     sub: str = Field(..., description="Subject (user ID)")
     exp: datetime = Field(..., description="Expiration timestamp")
     iat: datetime = Field(..., description="Issued at timestamp")
+    tv: int = Field(default=0, description="Token version at mint time (revocation)")
 
 
 class PasswordResetRequest(BaseModel):

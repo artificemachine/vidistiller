@@ -327,3 +327,83 @@ All notable changes to this project will be documented in this file.
 - chore(community): CODE_OF_CONDUCT.md (Contributor Covenant 2.1), PR template, and bug/feature issue templates.
 - chore(ci): Dependabot now covers npm (frontend) and docker (backend + frontend Dockerfiles) in addition to pip and github-actions.
 - docs(audits): 2026-07-21 job-ready audit report.
+
+## [1.11.2] - 2026-07-21
+
+### Security
+- fix(security): the rate limiter and the import-task ownership check now fail CLOSED on a Redis error instead of open. Previously a Redis outage silently disabled brute-force protection on the auth endpoints and let any authenticated user read another user's import status. Both now deny on Redis failure (auth requests get a retry-able rate-limit response; import status returns not-found), trading availability during an outage for the security control staying enforced. Regression tests added in tests/test_fail_closed.py.
+
+## [1.11.3] - 2026-07-21
+
+### Fixed
+- fix(migrations): consolidate the broken alembic chain into a single squashed baseline and restore migrations/env.py. The prior chain was unrunnable from a fresh clone — revisions 001/007/009/011 were committed as empty stubs then deleted, leaving dangling down_revision references, and env.py had been removed. Both dev and prod build the schema from the models via create_all at startup, so alembic had drifted into a decorative broken state. `alembic upgrade head` now works from a fresh clone and builds the full current schema (verified: 10 tables incl. caption_language). The baseline uses create_all with checkfirst, so it is a safe no-op on an already-populated database. Prod reconciliation (schema already create_all-built): `alembic stamp --purge 0001_squashed_baseline` if a stale version stamp exists.
+
+## [1.11.4] - 2026-07-21
+
+### Changed
+- chore(ci): docker-publish.yml now gates image publishing on a test job (`build-and-push` needs `test`). A `v*` tag push previously built and pushed images to Docker Hub with no test run; backend + frontend tests must now pass first.
+
+## [1.12.0] - 2026-07-21
+
+### Changed
+- fix(config): all 16 sub-settings now use default_factory instead of building at class-definition time, so environment changes are read when Settings() is constructed rather than frozen at module import.
+- fix(db): the Video, Transcript, TranscriptSegment, Snapshot and Document foreign keys now declare ON DELETE CASCADE at the database level, matching the ORM cascade so raw/bulk deletes cannot orphan rows.
+- fix(ops): prod docker-compose now sets mem_limit and cpus on every service (postgres, redis, api, web, pgadmin), not just celery_worker.
+
+### Added
+- feat(health): /readyz readiness probe that checks database and Redis liveness and returns 503 when a dependency is down, distinct from the static /health liveness probe.
+
+## [1.12.1] - 2026-07-21
+
+### Security
+- feat(auth): token revocation via a per-user token_version. Each access token carries the version it was minted with; logout and password reset bump the version, invalidating every token issued before the bump (this token and any on other devices). Gives the stateless JWT a real revocation path without a denylist. Existing DBs get the users.token_version column via the startup ALTER block; fresh clones via the alembic baseline.
+- fix(security): /api/videos/metadata, /captions and /check now require authentication. They trigger outbound fetches (yt_dlp / caption APIs) and were previously callable unauthenticated. Not used by the frontend, so no UX impact.
+
+## [1.12.2] - 2026-07-21
+
+### Fixed
+- fix(tasks): process_transcript is now idempotent for terminal-state jobs. With task_acks_late, a worker killed after finishing but before acking gets the job redelivered; reprocessing a completed job would overwrite its transcript and re-run the LLM. Jobs already completed or cancelled are now skipped on redelivery.
+
+## [1.12.3] - 2026-07-21
+
+### Fixed
+- fix(startup): the startup column-add loop ran every ALTER on one shared connection. On Postgres, the first ALTER that fails because the column already exists aborts the transaction, so every subsequent ALTER silently fails with "current transaction is aborted" — which caused a deploy to ship without users.token_version and break login. Each ALTER now runs in its own transaction and rolls back on failure. Regression test added.
+
+## [1.12.4] - 2026-07-21
+
+### Added
+- docs(readme): add a landing-page and workspace screenshot above the fold so the README shows what the product does at a glance. Assets live in docs/assets/ (allowlisted via .allow-binary-paths).
+
+## [1.12.5] - 2026-07-21
+
+### Fixed
+- fix(config): docker-compose.yml passes `JWT_SECRET_KEY: ${JWT_SECRET_KEY}` with no default, so leaving it unset in .env (the documented way to get an auto-generated dev key) arrives in the container as an EMPTY STRING, not an absent variable. The v1.10.16 alias fix made the field read that empty string as "set" and reject it outright, which broke `docker compose up -d` on a genuinely fresh clone — the api container never became healthy. A blank/whitespace-only value is now treated the same as unset. Found by an actual fresh-clone `docker compose up -d` verification, not a config test alone.
+- docs(env): .env.example VLLM_VM913_URL and siblings are now commented out, matching the neighboring ALLOWED_LLM_HOSTS example and the "leave blank to hide a VM" comment already above them. Previously uncommented, so a fresh `cp .env.example .env` populated the UI's fleet picker with 4 example VMs by default.
+
+## [1.12.6] - 2026-07-21
+
+### Fixed
+- fix(docs): CONTRIBUTING.md had three factual errors: claimed Apache 2.0 license (actual LICENSE is MIT), described backend/frontend as `api/`/`web/` (actual dirs are `backend/`/`frontend/`), and stated Python 3.10+ (pyproject.toml requires 3.12+). Also updated the stale "Ollama/Mistral 7B only" LLM description to reflect the current multi-provider support.
+- fix(docs): docs/README.md linked to 6 files that do not exist (DEPLOYMENT.md, DEVELOPMENT.md, PROGRESS.md, ARCHITECTURE.md, API.md, API_DOCUMENTATION.md) — a 100%-dead-link documentation index. Rewritten to link only files that exist, each labeled with its actual status.
+- chore: removed a dead `main.py` scaffold stub at the repo root (untouched since v0.2.0, disconnected from the real app in backend/app/main.py).
+
+## [1.12.7] - 2026-07-21
+
+### Changed
+- chore: renamed the internal machine-to-machine service-account identifier from a named sibling private project ("semblar") to a generic `m2m-client`. Renamed in code (`SEMBLAR_SERVICE_USERNAME` -> `M2M_SERVICE_USERNAME`), comments, `.env.example`, and the design doc (`docs/SEMBLAR_INTEGRATION.md` -> `docs/M2M_AUTH_DESIGN.md`, stripped project-specific naming and topology, status corrected from stale "Proposed" to "Implemented"). No behavior change — this is an internal identifier the calling client never sends or sees. Production service-user row renamed to match after this deploy.
+
+## [1.12.8] - 2026-07-21
+
+### Changed
+- docs: executed the Stage 2 /docs-organize cleanup plan — moved DESIGN_SPEC.md, ROADMAP.md, TECH_STACK.md and VidDocs_UI_UX_Audit_Report.md from repo root into docs/, updated the README design-spec link and the docs/README.md index to match.
+- docs: redacted a personal name from docs/VidDocs_UI_UX_Audit_Report.md's "Prepared for" line (the email there was already a safe @example.com placeholder).
+
+## [1.12.9] - 2026-07-21
+
+### Changed
+- docs: VidDocs_UI_UX_Audit_Report.md "Prepared for" line set to the repo owner's name, at their request.
+
+## [1.12.10] - 2026-07-21
+
+### Fixed
+- docs(readme): the "Explanation of Each Part" section described a `config/` directory that does not exist. Corrected to describe the actual location, `backend/app/core/config.py`. Found during a fresh /readme-audit re-validation; every other referenced directory (backend/, frontend/, migrations/, tests/, scripts/, terraform/, .github/workflows/) checked and confirmed accurate.

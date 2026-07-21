@@ -12,6 +12,7 @@ Initializes the FastAPI application with:
 from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
+import os
 import sys
 
 from fastapi import FastAPI, Request, status
@@ -108,15 +109,21 @@ async def lifespan(app: FastAPI):
 
     # Ensure nullable columns added after initial schema creation exist on older DBs.
     # create_all() does not ALTER existing tables, so we add missing columns explicitly.
-    with engine.connect() as conn:
-        for col_def in [
-            "ALTER TABLE processing_jobs ADD COLUMN slide_status VARCHAR(20)",
-        ]:
+    # Each statement runs in its own transaction: on Postgres, an ALTER that
+    # fails because the column already exists aborts the current transaction, and
+    # without a rollback every subsequent statement in the loop would also fail
+    # with "current transaction is aborted" — silently skipping real new columns.
+    for col_def in [
+        "ALTER TABLE processing_jobs ADD COLUMN slide_status VARCHAR(20)",
+        "ALTER TABLE processing_jobs ADD COLUMN caption_language VARCHAR(10)",
+        "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0",
+    ]:
+        with engine.connect() as conn:
             try:
                 conn.execute(text(col_def))
                 conn.commit()
             except Exception:
-                pass  # column already exists
+                conn.rollback()  # column already exists (or unsupported) — move on cleanly
 
     yield
 
@@ -256,8 +263,35 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 @app.get("/health", tags=["Health"])
 async def health():
-    """Basic health check endpoint."""
+    """Liveness check — the process is up. Always 200 if the app is running."""
     return {"status": "healthy"}
+
+
+@app.get("/readyz", tags=["Health"])
+async def readyz():
+    """Readiness check — the app can serve traffic.
+
+    Verifies the dependencies a request actually needs (database, and Redis when
+    a broker is configured). Returns 503 with per-dependency status when any is
+    unreachable, so an orchestrator can stop routing to a pod whose DB is down
+    instead of trusting a static 'healthy'.
+    """
+    checks = {"database": health_check()}
+
+    try:
+        import redis as _redis
+        client = _redis.from_url(
+            os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+            socket_connect_timeout=2,
+        )
+        client.ping()
+        checks["redis"] = True
+    except Exception:
+        checks["redis"] = False
+
+    ok = all(checks.values())
+    body = {"status": "ready" if ok else "not ready", "checks": checks}
+    return JSONResponse(body, status_code=200 if ok else 503)
 
 
 # Include API routes with /api prefix
