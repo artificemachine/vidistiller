@@ -198,7 +198,14 @@ class JWTSettings(BaseSettings):
         """Validate JWT secret key strength and format."""
         # An unset key is resolved in _resolve_secret_key, which either
         # generates one or fails, depending on the environment.
-        if v is None:
+        #
+        # A blank value is treated the same as unset, not as "set to nothing".
+        # docker-compose.yml passes `JWT_SECRET_KEY: ${JWT_SECRET_KEY}` with no
+        # `:-` default, so leaving it unset in .env (the documented way to get
+        # an auto-generated dev key) arrives in the container as an empty
+        # string, not an absent variable. Rejecting that outright broke
+        # `docker compose up -d` on a genuinely fresh clone.
+        if v is None or not v.get_secret_value().strip():
             return None
 
         raw_value = v.get_secret_value()

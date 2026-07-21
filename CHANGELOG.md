@@ -373,3 +373,9 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - docs(readme): add a landing-page and workspace screenshot above the fold so the README shows what the product does at a glance. Assets live in docs/assets/ (allowlisted via .allow-binary-paths).
+
+## [1.12.5] - 2026-07-21
+
+### Fixed
+- fix(config): docker-compose.yml passes `JWT_SECRET_KEY: ${JWT_SECRET_KEY}` with no default, so leaving it unset in .env (the documented way to get an auto-generated dev key) arrives in the container as an EMPTY STRING, not an absent variable. The v1.10.16 alias fix made the field read that empty string as "set" and reject it outright, which broke `docker compose up -d` on a genuinely fresh clone — the api container never became healthy. A blank/whitespace-only value is now treated the same as unset. Found by an actual fresh-clone `docker compose up -d` verification, not a config test alone.
+- docs(env): .env.example VLLM_VM913_URL and siblings are now commented out, matching the neighboring ALLOWED_LLM_HOSTS example and the "leave blank to hide a VM" comment already above them. Previously uncommented, so a fresh `cp .env.example .env` populated the UI's fleet picker with 4 example VMs by default.
