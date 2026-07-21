@@ -223,9 +223,9 @@ Self-contained Python modules that encapsulate the core processing logic, all lo
 
 [Vitest](https://vitest.dev/) + [React Testing Library](https://testing-library.com/docs/react-testing-library/intro/) tests for React components and utilities. Run with `cd frontend && npm test`.
 
-### `config/` — Configuration Templates
+### `backend/app/core/config.py` — Settings
 
-Python modules for database, logging, and general settings. These provide defaults and helpers used during app initialization.
+Typed settings classes for database, JWT, CORS, logging, and every other configurable piece of the app. Reads from environment variables (see `.env.example`) with validation and sane development defaults, so `docker compose up -d` boots without any required configuration.
 
 ### `scripts/` — Utility Scripts
 

@@ -402,3 +402,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - docs: VidDocs_UI_UX_Audit_Report.md "Prepared for" line set to the repo owner's name, at their request.
+
+## [1.12.10] - 2026-07-21
+
+### Fixed
+- docs(readme): the "Explanation of Each Part" section described a `config/` directory that does not exist. Corrected to describe the actual location, `backend/app/core/config.py`. Found during a fresh /readme-audit re-validation; every other referenced directory (backend/, frontend/, migrations/, tests/, scripts/, terraform/, .github/workflows/) checked and confirmed accurate.
