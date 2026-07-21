@@ -62,6 +62,7 @@ class AuthService:
         user_id: int,
         username: str,
         expires_delta: Optional[timedelta] = None,
+        token_version: int = 0,
     ) -> Tuple[str, int]:
         """
         Create a JWT access token.
@@ -96,6 +97,9 @@ class AuthService:
             # verify_token cannot tell an access token from a refresh or
             # password-reset token.
             "type": "access",
+            # Token version at mint time. Rejected on verify if the user's
+            # current version has moved past it (logout / password reset).
+            "tv": token_version,
         }
 
         # Encode JWT token
@@ -221,6 +225,7 @@ class AuthService:
                 sub=user_id,
                 exp=payload.get("exp"),
                 iat=payload.get("iat"),
+                tv=payload.get("tv", 0),
             )
 
         except JWTError as e:
@@ -423,6 +428,8 @@ class AuthService:
         user.password_hash = AuthService.hash_password(new_password)
         user.password_reset_token = None
         user.password_reset_expires = None
+        # Revoke every session issued under the old password.
+        user.token_version = (user.token_version or 0) + 1
 
         try:
             db.commit()
@@ -462,5 +469,10 @@ class AuthService:
 
         if not user.is_active:
             raise AuthenticationException("User account is inactive")
+
+        # Reject tokens minted before the user's current version (revoked by a
+        # logout or password reset). Missing/old tokens default to tv=0.
+        if getattr(token_payload, "tv", 0) != user.token_version:
+            raise AuthenticationException("Token has been revoked")
 
         return user
