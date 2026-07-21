@@ -463,32 +463,30 @@ class Settings(BaseSettings):
     Load from environment variables and .env files.
     """
 
-    database: DatabaseSettings = DatabaseSettings()
-    # default_factory, not a call: a bare JWTSettings() here is evaluated when
-    # this class is defined, so an unset JWT_SECRET_KEY in production would make
-    # the module itself un-importable (breaking migrations, tooling and --help).
-    # Deferring construction moves that failure to Settings() instantiation,
-    # where it belongs. The other fields below share the import-time-evaluation
-    # pattern but are not security-gated, so they are left alone here.
+    # Every sub-settings field uses default_factory. A bare `DatabaseSettings()`
+    # here is evaluated when this class is *defined*, i.e. at import, freezing
+    # whatever env vars happened to be set then and making the module itself
+    # un-importable if a security-gated field (jwt) fails to validate. With
+    # default_factory the env is read when Settings() is constructed — which,
+    # with the lru_cache on get_settings(), is the first real access — so tests,
+    # tooling and per-deploy env all see the current environment.
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     jwt: JWTSettings = Field(default_factory=JWTSettings)
-    logging: LoggingSettings = LoggingSettings()
-    cors: CorsSettings = CorsSettings()
-    ollama: OllamaSettings = OllamaSettings()
-    youtube: YouTubeSettings = YouTubeSettings()
-    service_timeouts: ServiceTimeouts = ServiceTimeouts()
-    rate_limiting: RateLimitingConfig = RateLimitingConfig()
-    cache: CacheSettings = CacheSettings()
-    features: FeatureFlags = FeatureFlags()
-    slide_detection: SlideDetectionSettings = SlideDetectionSettings()
-    sentry: SentrySettings = SentrySettings()
-    email: EmailSettings = EmailSettings()
-    password_reset: PasswordResetSettings = PasswordResetSettings()
-    # default_factory, not a class-definition-time instance: the media routes
-    # resolve DATA_DIR per request, which only works if the env is read when
-    # Settings is constructed rather than when this module is imported.
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    cors: CorsSettings = Field(default_factory=CorsSettings)
+    ollama: OllamaSettings = Field(default_factory=OllamaSettings)
+    youtube: YouTubeSettings = Field(default_factory=YouTubeSettings)
+    service_timeouts: ServiceTimeouts = Field(default_factory=ServiceTimeouts)
+    rate_limiting: RateLimitingConfig = Field(default_factory=RateLimitingConfig)
+    cache: CacheSettings = Field(default_factory=CacheSettings)
+    features: FeatureFlags = Field(default_factory=FeatureFlags)
+    slide_detection: SlideDetectionSettings = Field(default_factory=SlideDetectionSettings)
+    sentry: SentrySettings = Field(default_factory=SentrySettings)
+    email: EmailSettings = Field(default_factory=EmailSettings)
+    password_reset: PasswordResetSettings = Field(default_factory=PasswordResetSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
-    api_key: ApiKeySettings = ApiKeySettings()
-    vllm_fleet: VLLMFleetSettings = VLLMFleetSettings()
+    api_key: ApiKeySettings = Field(default_factory=ApiKeySettings)
+    vllm_fleet: VLLMFleetSettings = Field(default_factory=VLLMFleetSettings)
     environment: Environment = Environment.DEVELOPMENT
 
     # Hosts the backend may use as an LLM / vLLM endpoint. These legitimately
