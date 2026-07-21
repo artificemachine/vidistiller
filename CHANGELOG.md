@@ -386,3 +386,8 @@ All notable changes to this project will be documented in this file.
 - fix(docs): CONTRIBUTING.md had three factual errors: claimed Apache 2.0 license (actual LICENSE is MIT), described backend/frontend as `api/`/`web/` (actual dirs are `backend/`/`frontend/`), and stated Python 3.10+ (pyproject.toml requires 3.12+). Also updated the stale "Ollama/Mistral 7B only" LLM description to reflect the current multi-provider support.
 - fix(docs): docs/README.md linked to 6 files that do not exist (DEPLOYMENT.md, DEVELOPMENT.md, PROGRESS.md, ARCHITECTURE.md, API.md, API_DOCUMENTATION.md) — a 100%-dead-link documentation index. Rewritten to link only files that exist, each labeled with its actual status.
 - chore: removed a dead `main.py` scaffold stub at the repo root (untouched since v0.2.0, disconnected from the real app in backend/app/main.py).
+
+## [1.12.7] - 2026-07-21
+
+### Changed
+- chore: renamed the internal machine-to-machine service-account identifier from a named sibling private project ("semblar") to a generic `m2m-client`. Renamed in code (`SEMBLAR_SERVICE_USERNAME` -> `M2M_SERVICE_USERNAME`), comments, `.env.example`, and the design doc (`docs/SEMBLAR_INTEGRATION.md` -> `docs/M2M_AUTH_DESIGN.md`, stripped project-specific naming and topology, status corrected from stale "Proposed" to "Implemented"). No behavior change — this is an internal identifier the calling client never sends or sees. Production service-user row renamed to match after this deploy.
