@@ -23,7 +23,7 @@
     "react-dom": "^19.2.5",
     "react-player": "^3.4.0",
     "react-resizable-panels": "^4.6.2",
-    "swr": "^2.2.0",
+    "swr": "^2.4.2",
     "zustand": "^4.4.0"
   },
   "devDependencies": {
