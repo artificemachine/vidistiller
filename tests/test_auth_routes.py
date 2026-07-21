@@ -184,8 +184,9 @@ class TestLogoutEndpoint:
         resp = client.post("/api/auth/logout")
         assert resp.status_code == 401
 
-    def test_token_still_valid_after_logout(self, client: TestClient, test_db: Session, test_user: User, auth_headers):
+    def test_token_revoked_after_logout(self, client: TestClient, test_db: Session, test_user: User, auth_headers):
+        # Logout bumps token_version, revoking the token used to log out.
         client.post("/api/auth/logout", headers=auth_headers)
-        # Documents no-blacklist: token still works
+        test_db.expire_all()
         resp = client.get("/api/auth/me", headers=auth_headers)
-        assert resp.status_code == 200
+        assert resp.status_code == 401

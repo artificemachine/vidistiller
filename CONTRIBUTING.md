@@ -5,7 +5,7 @@ Thanks for your interest in contributing! Here's how to get started.
 ## Prerequisites
 
 - Docker and Docker Compose
-- Python 3.10+
+- Python 3.12+
 - Node.js >= 18
 
 ## Setup
@@ -35,12 +35,12 @@ Issues labeled `good first issue` or `help wanted` are a great starting point.
 
 ## Architecture
 
-- **api/** — FastAPI backend
-- **web/** — Next.js frontend (React + TypeScript + Tailwind)
-- **celery_worker** — Background tasks (YouTube download, Whisper transcription, FFmpeg snapshots, LLM doc generation)
+- **backend/** — FastAPI backend
+- **frontend/** — Next.js frontend (React + TypeScript + Tailwind)
+- **celery_worker** — Background tasks (video download, Whisper transcription, FFmpeg snapshots, LLM doc generation)
 - **postgres** — Data storage
 - **redis** — Task queue broker
-- **ollama** — Local LLM (Mistral 7B)
+- **LLM provider** — Ollama (local, default), OpenAI, Anthropic, or a self-hosted vLLM endpoint — configurable per user in Settings (`backend/app/services/llm_providers.py`)
 
 ## Commit messages
 
@@ -56,4 +56,4 @@ Open an issue with:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE).
+By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE).

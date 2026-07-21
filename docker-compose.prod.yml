@@ -18,6 +18,8 @@ services:
   postgres:
     image: postgres:15-alpine
     restart: unless-stopped
+    mem_limit: 512m
+    cpus: '1.0'
     container_name: tutorial_postgres
     logging:
       driver: json-file
@@ -43,6 +45,8 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    mem_limit: 256m
+    cpus: '0.5'
     container_name: tutorial_redis
     command: redis-server --requirepass ${REDIS_PASSWORD}
     logging:
@@ -67,6 +71,8 @@ services:
     command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     container_name: tutorial_api
     restart: unless-stopped
+    mem_limit: 2g
+    cpus: '2.0'
     logging:
       driver: json-file
       options:
@@ -169,6 +175,8 @@ services:
     image: newblacc/vidistiller-frontend:${VIDISTILLER_IMAGE_TAG:-latest}
     container_name: tutorial_web
     restart: unless-stopped
+    mem_limit: 512m
+    cpus: '1.0'
     logging:
       driver: json-file
       options:
@@ -195,6 +203,8 @@ services:
   pgadmin:
     image: dpage/pgadmin4:8.14
     restart: unless-stopped
+    mem_limit: 256m
+    cpus: '0.5'
     container_name: tutorial_pgadmin
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}

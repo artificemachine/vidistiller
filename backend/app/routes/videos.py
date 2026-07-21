@@ -81,7 +81,10 @@ class VideoCheckResponse(BaseModel):
     summary="Get video metadata",
     description="Extract metadata from a YouTube video URL",
 )
-def get_video_metadata(request: YouTubeURLRequest) -> VideoMetadataResponse:
+def get_video_metadata(
+    request: YouTubeURLRequest,
+    current_user: User = Depends(get_current_user),
+) -> VideoMetadataResponse:
     """
     Retrieve metadata for a YouTube video.
 
@@ -141,6 +144,7 @@ def get_video_metadata(request: YouTubeURLRequest) -> VideoMetadataResponse:
 def get_video_captions(
     request: YouTubeURLRequest,
     language: str = "en",
+    current_user: User = Depends(get_current_user),
 ) -> CaptionsResponse:
     """
     Extract captions from a YouTube video.
@@ -232,7 +236,10 @@ def get_caption_tracks(
     summary="Check video availability",
     description="Verify that a video is accessible and downloadable",
 )
-def check_video_availability(request: YouTubeURLRequest) -> VideoCheckResponse:
+def check_video_availability(
+    request: YouTubeURLRequest,
+    current_user: User = Depends(get_current_user),
+) -> VideoCheckResponse:
     """
     Check if a YouTube video is accessible and available for processing.
 

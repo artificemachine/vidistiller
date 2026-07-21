@@ -283,8 +283,14 @@ def verify_import_task_ownership(task_id: str, current_user: User = Depends(get_
     except ResourceNotFoundException:
         raise
     except Exception as _e:
-        logger.warning("Could not verify import task ownership from Redis: %s", _e)
-        # Redis unavailable — fail open rather than blocking all status checks
+        # Redis unavailable — fail CLOSED. This is a cross-user authorization
+        # check; skipping it on a Redis error would let any authenticated user
+        # read another user's import status during an outage. Deny instead.
+        logger.error(
+            "Could not verify import task ownership from Redis, denying (fail closed): %s",
+            _e,
+        )
+        raise ResourceNotFoundException("ImportTask", task_id)
 
 
 @router.get(

@@ -165,6 +165,7 @@ def login(
     access_token, expires_in = AuthService.create_access_token(
         user_id=user.id,
         username=user.username,
+        token_version=user.token_version,
     )
     refresh_token_str, _ = AuthService.create_refresh_token(user_id=user.id)
 
@@ -261,6 +262,7 @@ def refresh_token(
     new_access_token, expires_in = AuthService.create_access_token(
         user_id=user.id,
         username=user.username,
+        token_version=user.token_version,
     )
     new_refresh_token, _ = AuthService.create_refresh_token(user_id=user.id)
 
@@ -295,24 +297,25 @@ def refresh_token(
 def logout(
     user: User = Depends(get_current_user_from_token),
     response: Response = None,
+    db: Session = Depends(get_db),
 ) -> None:
     """
-    Logout the current user.
+    Logout the current user and revoke outstanding tokens.
 
-    **Note:** This is a stateless logout (JWT tokens cannot be revoked on server).
-    Client should discard the token after this endpoint is called.
-    To implement token revocation, you would need a token blacklist service.
+    Bumps the user's token_version, which invalidates every access token issued
+    before now — including this one and any issued to another device. The
+    HttpOnly auth_token cookie is also cleared so the Next.js middleware stops
+    treating the session as authenticated.
 
     **Required:** Bearer token in Authorization header
-
-    **Response:** No content
 
     **Status codes:**
     - 204: Logout successful
     - 401: Missing or invalid token
     """
-    # In a stateless JWT system, logout is handled client-side by discarding token.
-    # We clear the HttpOnly auth_token cookie so Next.js middleware stops seeing the user as authenticated.
+    user.token_version = (user.token_version or 0) + 1
+    db.commit()
+
     if response is not None:
         response.delete_cookie(key="auth_token", path="/", samesite="lax")
 
