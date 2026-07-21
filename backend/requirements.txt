@@ -25,7 +25,7 @@ opencv-python>=5.0.0.93
 moviepy>=1.0.3
 pillow>=12.3.0
 ffmpeg-python>=0.2.0
-scikit-image>=0.22.0
+scikit-image>=0.26.0
 pytesseract>=0.3.10
 
 # Task Queue & Caching

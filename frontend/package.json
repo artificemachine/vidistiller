@@ -22,8 +22,8 @@
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-player": "^3.4.0",
-    "react-resizable-panels": "^4.6.2",
-    "swr": "^2.2.0",
+    "react-resizable-panels": "^4.12.2",
+    "swr": "^2.4.2",
     "zustand": "^4.4.0"
   },
   "devDependencies": {
@@ -35,10 +35,10 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.7.0",
-    "autoprefixer": "^10.4.0",
+    "autoprefixer": "^10.5.4",
     "axios-mock-adapter": "^2.1.0",
     "esbuild": "^0.28.0",
-    "jsdom": "^25.0.1",
+    "jsdom": "^29.1.1",
     "postcss": "^8.5.10",
     "tailwindcss": "^3.3.0",
     "typescript": "^5.0.0",
