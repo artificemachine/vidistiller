@@ -267,6 +267,16 @@ def process_transcript(self, job_id: int):
             logger.error(f"Job {job_id} not found")
             return {"error": f"Job {job_id} not found"}
 
+        # Idempotency guard. task_acks_late=True means a worker killed after
+        # finishing but before acking gets the same job redelivered. Reprocessing
+        # a completed job would overwrite its transcript and re-run the LLM, so
+        # skip anything already in a terminal state.
+        if job.status in (ProcessingStatus.COMPLETED, ProcessingStatus.CANCELLED):
+            logger.info(
+                "Job %s already %s; skipping duplicate delivery", job_id, job.status.value
+            )
+            return {"job_id": job_id, "status": job.status.value, "skipped": True}
+
         video_url = job.video_url
         if not video_url:
             _add_log(db, job_id, "No video URL provided", "error", "init")

@@ -13,9 +13,21 @@ from app.exceptions import ValidationException, VideoProcessingException
 # Get Video Metadata — POST /api/videos/metadata
 # ===========================================================================
 
+class TestVideoEndpointsRequireAuth:
+    """The metadata/captions/check endpoints trigger outbound fetches, so they
+    must not be callable unauthenticated (they used to be)."""
+
+    @pytest.mark.parametrize("path", ["metadata", "captions", "check"])
+    def test_requires_auth(self, path, client: TestClient, test_db: Session):
+        resp = client.post(f"/api/videos/{path}", json={
+            "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        })
+        assert resp.status_code == 401
+
+
 class TestGetVideoMetadataEndpoint:
     @patch("app.routes.videos.youtube_service")
-    def test_valid_url(self, mock_yt, client: TestClient, test_db: Session):
+    def test_valid_url(self, mock_yt, client: TestClient, test_db: Session, auth_headers: dict):
         mock_yt.get_video_metadata.return_value = {
             "video_id": "dQw4w9WgXcQ",
             "title": "Never Gonna Give You Up",
@@ -28,22 +40,22 @@ class TestGetVideoMetadataEndpoint:
         }
         resp = client.post("/api/videos/metadata", json={
             "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        })
+        }, headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert data["video_id"] == "dQw4w9WgXcQ"
         assert data["title"] == "Never Gonna Give You Up"
 
-    def test_invalid_url_422(self, client: TestClient, test_db: Session):
-        resp = client.post("/api/videos/metadata", json={"url": ""})
+    def test_invalid_url_422(self, client: TestClient, test_db: Session, auth_headers: dict):
+        resp = client.post("/api/videos/metadata", json={"url": ""}, headers=auth_headers)
         assert resp.status_code == 422
 
     @patch("app.routes.videos.youtube_service")
-    def test_ytdlp_failure(self, mock_yt, client: TestClient, test_db: Session):
+    def test_ytdlp_failure(self, mock_yt, client: TestClient, test_db: Session, auth_headers: dict):
         mock_yt.get_video_metadata.side_effect = Exception("Network error")
         resp = client.post("/api/videos/metadata", json={
             "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        })
+        }, headers=auth_headers)
         # ValidationException wraps the error -> 422
         assert resp.status_code == 422
 
@@ -55,13 +67,13 @@ class TestGetVideoMetadataEndpoint:
 class TestGetCaptionsEndpoint:
     @patch("app.routes.videos.youtube_service")
     @patch("app.routes.videos.YouTubeService")
-    def test_valid_captions(self, MockYTClass, mock_yt, client: TestClient, test_db: Session):
+    def test_valid_captions(self, MockYTClass, mock_yt, client: TestClient, test_db: Session, auth_headers: dict):
         MockYTClass.extract_video_id.return_value = "dQw4w9WgXcQ"
         mock_yt.get_captions.return_value = "Hello world caption text"
 
         resp = client.post("/api/videos/captions", json={
             "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        })
+        }, headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert data["video_id"] == "dQw4w9WgXcQ"
@@ -69,13 +81,13 @@ class TestGetCaptionsEndpoint:
 
     @patch("app.routes.videos.youtube_service")
     @patch("app.routes.videos.YouTubeService")
-    def test_no_captions_422(self, MockYTClass, mock_yt, client: TestClient, test_db: Session):
+    def test_no_captions_422(self, MockYTClass, mock_yt, client: TestClient, test_db: Session, auth_headers: dict):
         MockYTClass.extract_video_id.return_value = "dQw4w9WgXcQ"
         mock_yt.get_captions.return_value = None
 
         resp = client.post("/api/videos/captions", json={
             "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        })
+        }, headers=auth_headers)
         assert resp.status_code == 422
 
 
@@ -130,25 +142,25 @@ class TestCaptionTracksEndpoint:
 class TestCheckVideoAvailability:
     @patch("app.routes.videos.youtube_service")
     @patch("app.routes.videos.YouTubeService")
-    def test_accessible_true(self, MockYTClass, mock_yt, client: TestClient, test_db: Session):
+    def test_accessible_true(self, MockYTClass, mock_yt, client: TestClient, test_db: Session, auth_headers: dict):
         MockYTClass.extract_video_id.return_value = "dQw4w9WgXcQ"
         mock_yt.get_video_metadata.return_value = {"title": "Test"}
 
         resp = client.post("/api/videos/check", json={
             "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        })
+        }, headers=auth_headers)
         assert resp.status_code == 200
         assert resp.json()["available"] is True
 
     @patch("app.routes.videos.youtube_service")
     @patch("app.routes.videos.YouTubeService")
-    def test_failed_false(self, MockYTClass, mock_yt, client: TestClient, test_db: Session):
+    def test_failed_false(self, MockYTClass, mock_yt, client: TestClient, test_db: Session, auth_headers: dict):
         MockYTClass.extract_video_id.return_value = "dQw4w9WgXcQ"
         mock_yt.get_video_metadata.side_effect = Exception("Not found")
 
         resp = client.post("/api/videos/check", json={
             "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        })
+        }, headers=auth_headers)
         assert resp.status_code == 200
         assert resp.json()["available"] is False
 
@@ -158,14 +170,14 @@ class TestCheckVideoAvailability:
 # ===========================================================================
 
 class TestVideoRoutesInputValidation:
-    def test_empty_url_rejected(self, client: TestClient, test_db: Session):
-        resp = client.post("/api/videos/metadata", json={"url": ""})
+    def test_empty_url_rejected(self, client: TestClient, test_db: Session, auth_headers: dict):
+        resp = client.post("/api/videos/metadata", json={"url": ""}, headers=auth_headers)
         assert resp.status_code == 422
 
     @patch("app.routes.videos.youtube_service")
-    def test_unsupported_url_rejected(self, mock_yt, client: TestClient, test_db: Session):
+    def test_unsupported_url_rejected(self, mock_yt, client: TestClient, test_db: Session, auth_headers: dict):
         mock_yt.get_video_metadata.side_effect = ValidationException("Unsupported URL")
         resp = client.post("/api/videos/metadata", json={
             "url": "https://example.com/not-supported",
-        })
+        }, headers=auth_headers)
         assert resp.status_code == 422

@@ -136,6 +136,29 @@ class TestJWTSettingsEnvContract:
         monkeypatch.setenv("SECRET_KEY", "AnotherStrongKey!2024#DifferentValue")
         assert JWTSettings().secret_key.get_secret_value() == self.KEY
 
+    def test_blank_jwt_secret_key_treated_as_unset_in_development(self, monkeypatch):
+        """docker-compose.yml passes JWT_SECRET_KEY: ${JWT_SECRET_KEY} with no
+        default, so an unset value in .env arrives in the container as an empty
+        string, not an absent variable. A blank secret must fall through to the
+        same auto-generate path as a truly-unset one, or a genuinely fresh
+        `docker compose up -d` refuses to boot."""
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        monkeypatch.setenv("JWT_SECRET_KEY", "")
+        s = JWTSettings(_env_file=None)
+        assert len(s.secret_key.get_secret_value()) >= 32
+
+    def test_blank_jwt_secret_key_still_fails_in_production(self, monkeypatch):
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("JWT_SECRET_KEY", "")
+        with pytest.raises(ValidationError):
+            JWTSettings(_env_file=None)
+
+    def test_whitespace_only_jwt_secret_key_treated_as_unset(self, monkeypatch):
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        monkeypatch.setenv("JWT_SECRET_KEY", "   ")
+        s = JWTSettings(_env_file=None)
+        assert len(s.secret_key.get_secret_value()) >= 32
+
     def test_blank_allowed_llm_hosts_falls_back_to_defaults(self, monkeypatch):
         """docker-compose passes `${ALLOWED_LLM_HOSTS:-}`, i.e. an empty string
         when the operator has not set it. Taking that literally would produce an

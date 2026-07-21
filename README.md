@@ -4,6 +4,12 @@
 
 Vidistiller is a local-first, source-agnostic video-to-documentation engine. Paste a URL from YouTube, Vimeo, Twitch, X, Reddit, Rumble, or any direct MP4 link — Vidistiller distills the video down to what matters: the spoken words, the slides, the structure. Hours of watching become minutes of reading.
 
+![Vidistiller — paste a video URL, pick a mode, get a document](docs/assets/vidistiller-home.jpg)
+
+A completed job: a timestamped transcript, the video player, auto-detected slides, and per-slide notes side by side.
+
+![Vidistiller workspace — timestamped transcript, player, detected slides, and slide notes](docs/assets/vidistiller-workspace.jpg)
+
 ---
 
 ## Architecture Diagram
@@ -137,7 +143,7 @@ The Vidistiller UI supports three palettes switchable at runtime: **Monokai** (d
 ### Design Files & Documentation
 
 - **Design File:** [`new_vidistiller_ui.pen`](./new_vidistiller_ui.pen) — Complete Pencil design with all screens and Monokai colors
-- **Design Specification:** [`DESIGN_SPEC.md`](./DESIGN_SPEC.md) — Full design system details, colors, typography, and spacing
+- **Design Specification:** [`docs/DESIGN_SPEC.md`](docs/DESIGN_SPEC.md) — Full design system details, colors, typography, and spacing
 
 ### Key Design Tokens
 
@@ -217,9 +223,9 @@ Self-contained Python modules that encapsulate the core processing logic, all lo
 
 [Vitest](https://vitest.dev/) + [React Testing Library](https://testing-library.com/docs/react-testing-library/intro/) tests for React components and utilities. Run with `cd frontend && npm test`.
 
-### `config/` — Configuration Templates
+### `backend/app/core/config.py` — Settings
 
-Python modules for database, logging, and general settings. These provide defaults and helpers used during app initialization.
+Typed settings classes for database, JWT, CORS, logging, and every other configurable piece of the app. Reads from environment variables (see `.env.example`) with validation and sane development defaults, so `docker compose up -d` boots without any required configuration.
 
 ### `scripts/` — Utility Scripts
 

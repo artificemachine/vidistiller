@@ -131,22 +131,12 @@ class TestAuthRequiredOnOperationalRoutes:
         resp = client.get("/api/jobs/import-upload/fake-task-id")
         assert resp.status_code == 401
 
-    def test_video_metadata_requires_no_auth(self, client: TestClient, test_db: Session):
-        with patch("app.routes.videos.youtube_service") as mock_yt:
-            mock_yt.get_video_metadata.return_value = {
-                "video_id": "abc12345678",
-                "title": "Test",
-                "description": "desc",
-                "duration": 100,
-                "channel": "Ch",
-                "upload_date": "2024-01-01T00:00:00",
-                "view_count": 1000,
-                "thumbnail_url": "https://example.com/thumb.jpg",
-            }
-            resp = client.post("/api/videos/metadata", json={
-                "url": "https://www.youtube.com/watch?v=abc12345678",
-            })
-            assert resp.status_code == 200
+    def test_video_metadata_requires_auth(self, client: TestClient, test_db: Session):
+        # This endpoint triggers an outbound fetch, so it must require auth.
+        resp = client.post("/api/videos/metadata", json={
+            "url": "https://www.youtube.com/watch?v=abc12345678",
+        })
+        assert resp.status_code == 401
 
 
 # ===========================================================================
@@ -169,14 +159,14 @@ class TestDiagnosticsAccessControl:
 class TestTokenRefreshNoBlacklist:
     """Document that tokens are not invalidated after logout."""
 
-    def test_token_valid_after_logout(self, client: TestClient, test_db: Session, test_user, auth_headers):
-        # Logout
+    def test_token_revoked_after_logout(self, client: TestClient, test_db: Session, test_user, auth_headers):
+        # Logout bumps token_version, revoking the token.
         resp = client.post("/api/auth/logout", headers=auth_headers)
         assert resp.status_code == 204
 
-        # Token still works (no blacklist)
+        test_db.expire_all()
         resp = client.get("/api/auth/me", headers=auth_headers)
-        assert resp.status_code == 200
+        assert resp.status_code == 401
 
     def test_access_token_rejected_at_refresh(self, client: TestClient, test_db: Session, test_user, auth_headers):
         """Access tokens must be rejected at /auth/refresh — only refresh tokens accepted."""
