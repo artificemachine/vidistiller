@@ -112,6 +112,8 @@ async def lifespan(app: FastAPI):
     with engine.connect() as conn:
         for col_def in [
             "ALTER TABLE processing_jobs ADD COLUMN slide_status VARCHAR(20)",
+            "ALTER TABLE processing_jobs ADD COLUMN caption_language VARCHAR(10)",
+            "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 conn.execute(text(col_def))
