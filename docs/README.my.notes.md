@@ -541,7 +541,9 @@ If the data comes from your **Server** or **Deployment Environment**, use **Base
   ✅ Security (JWT, password hashing)
   ✅ Docker-ready deployment
 
-  The project is production-ready and can be deployed immediately!
+  The stack runs end to end and can be deployed with the documented steps. Known
+  limitations (no token revocation, Redis-outage fail-open on rate limiting) are
+  tracked in the audit reports under docs/audits/.
 
 ✻ Baked for 2m 15s
 

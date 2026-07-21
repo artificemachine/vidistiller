@@ -224,10 +224,10 @@ Python modules for database, logging, and general settings. These provide defaul
 ### `scripts/` — Utility Scripts
 
 Automation helpers for common tasks:
-- `init-docker.sh` — first-time Docker environment bootstrap
-- `init_db.py` — seeds the database with initial data
-- `health-check.sh` — verifies all services are running
-- `batch_process.py` — processes multiple YouTube URLs in one go
+- `deploy.sh` — deploy the stack to a configured host
+- `push-backend.sh` — build and push the backend image
+- `setup-staging.sh` — bring up a staging environment
+- `batch_process.py` — processes multiple video URLs in one go
 
 ### `terraform/` — Infrastructure as Code
 
