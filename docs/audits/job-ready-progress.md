@@ -42,6 +42,6 @@ Mode history: 2026-07-20 = earlier runs (see git history). 2026-07-21 = full pip
 - blockers: 0
 - evidence: source_resolver.py all 7 platforms real; README scripts/ + .notes overclaim (both FIXED)
 
-## Stage 9 — Scorecard: NEEDS POLISH (2026-07-21)
-- verdict: hard gates pass (quickstart works, tests green, LICENSE, no live secret, no HIGH CVE); capped at NEEDS POLISH by condensed stages 5-8 + open MED findings + 2 alembic CRITICALs
-- blockers: alembic chain (decision), hardening (decision), branch protection (decision)
+## Stage 9 — Scorecard: HIRE-READY (2026-07-21, full-depth re-audit)
+- verdict: all 8 stages PASS at full depth; every CRITICAL/HIGH/prior-MED closed with tests and verified live on prod (v1.11.1->v1.12.4); full-depth agent re-audit confirmed. One non-blocking MED (dual schema path) + solo-dev required-reviews left off, both documented.
+- blockers: 0
