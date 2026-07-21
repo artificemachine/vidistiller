@@ -143,7 +143,7 @@ The Vidistiller UI supports three palettes switchable at runtime: **Monokai** (d
 ### Design Files & Documentation
 
 - **Design File:** [`new_vidistiller_ui.pen`](./new_vidistiller_ui.pen) — Complete Pencil design with all screens and Monokai colors
-- **Design Specification:** [`DESIGN_SPEC.md`](./DESIGN_SPEC.md) — Full design system details, colors, typography, and spacing
+- **Design Specification:** [`docs/DESIGN_SPEC.md`](docs/DESIGN_SPEC.md) — Full design system details, colors, typography, and spacing
 
 ### Key Design Tokens
 

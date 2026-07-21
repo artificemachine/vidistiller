@@ -1,6 +1,6 @@
 {
   "name": "vidistiller",
-  "version": "1.12.7",
+  "version": "1.12.8",
   "description": "Turn YouTube videos into structured documentation",
   "private": true,
   "scripts": {
