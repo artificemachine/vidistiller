@@ -189,3 +189,74 @@ describe('Home — slide mode toggle', () => {
     });
   });
 });
+
+describe('Home — caption language', () => {
+  it('shows a language dropdown once tracks are fetched for a YouTube URL', async () => {
+    const user = userEvent.setup();
+    mockPost.mockResolvedValue({
+      data: {
+        video_id: 'abc',
+        tracks: [
+          { language_code: 'ar', language_name: 'Arabic', is_generated: false },
+          { language_code: 'en', language_name: 'English', is_generated: true },
+        ],
+      },
+    });
+
+    render(<Home />);
+    const urlInput = document.querySelector('input[type="url"]') as HTMLInputElement;
+    await user.type(urlInput, 'https://youtu.be/abc');
+
+    const select = await screen.findByLabelText(/caption language/i);
+    expect(select).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /Arabic/i })).toBeInTheDocument();
+  });
+
+  it('sends the chosen caption_language when a track is selected', async () => {
+    const user = userEvent.setup();
+    mockPost.mockImplementation((path: string) => {
+      if (path === '/videos/caption-tracks') {
+        return Promise.resolve({
+          data: { video_id: 'abc', tracks: [{ language_code: 'en', language_name: 'English', is_generated: true }] },
+        });
+      }
+      return Promise.resolve({ data: { job_id: 'lang-job-1' } });
+    });
+
+    render(<Home />);
+    const urlInput = document.querySelector('input[type="url"]') as HTMLInputElement;
+    await user.type(urlInput, 'https://youtu.be/abc');
+
+    const select = await screen.findByLabelText(/caption language/i);
+    await user.selectOptions(select, 'en');
+    await user.click(screen.getByRole('button', { name: /create document/i }));
+
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith(
+        '/jobs',
+        expect.objectContaining({ caption_language: 'en' }),
+      );
+    });
+  });
+
+  it('omits caption_language when left on auto', async () => {
+    const user = userEvent.setup();
+    mockPost.mockImplementation((path: string) => {
+      if (path === '/videos/caption-tracks') {
+        return Promise.resolve({ data: { video_id: 'abc', tracks: [] } });
+      }
+      return Promise.resolve({ data: { job_id: 'auto-job-1' } });
+    });
+
+    render(<Home />);
+    const urlInput = document.querySelector('input[type="url"]') as HTMLInputElement;
+    await user.type(urlInput, 'https://youtube.com/watch?v=xyz');
+    await user.click(screen.getByRole('button', { name: /create document/i }));
+
+    await waitFor(() => {
+      const jobCall = mockPost.mock.calls.find((c) => c[0] === '/jobs');
+      expect(jobCall).toBeTruthy();
+      expect(jobCall![1]).not.toHaveProperty('caption_language');
+    });
+  });
+});

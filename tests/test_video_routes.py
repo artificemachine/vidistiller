@@ -80,6 +80,50 @@ class TestGetCaptionsEndpoint:
 
 
 # ===========================================================================
+# List Caption Tracks — POST /api/videos/caption-tracks
+# ===========================================================================
+
+class TestCaptionTracksEndpoint:
+    URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+    def test_requires_auth(self, client: TestClient, test_db: Session):
+        resp = client.post("/api/videos/caption-tracks", json={"url": self.URL})
+        assert resp.status_code == 401
+
+    @patch("app.routes.videos.list_youtube_caption_tracks")
+    @patch("app.routes.videos.YouTubeService")
+    def test_lists_available_tracks(
+        self, MockYTClass, mock_list, client: TestClient, test_db: Session, auth_headers: dict
+    ):
+        MockYTClass.extract_video_id.return_value = "dQw4w9WgXcQ"
+        mock_list.return_value = [
+            {"language_code": "ar", "language_name": "Arabic", "is_generated": False},
+            {"language_code": "en", "language_name": "English (auto-generated)", "is_generated": True},
+        ]
+        resp = client.post("/api/videos/caption-tracks", json={"url": self.URL}, headers=auth_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["video_id"] == "dQw4w9WgXcQ"
+        codes = [t["language_code"] for t in data["tracks"]]
+        assert codes == ["ar", "en"]
+
+    @patch("app.routes.videos.list_youtube_caption_tracks")
+    @patch("app.routes.videos.YouTubeService")
+    def test_empty_when_no_tracks(
+        self, MockYTClass, mock_list, client: TestClient, test_db: Session, auth_headers: dict
+    ):
+        MockYTClass.extract_video_id.return_value = "dQw4w9WgXcQ"
+        mock_list.return_value = []
+        resp = client.post("/api/videos/caption-tracks", json={"url": self.URL}, headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.json()["tracks"] == []
+
+    def test_invalid_url_422(self, client: TestClient, test_db: Session, auth_headers: dict):
+        resp = client.post("/api/videos/caption-tracks", json={"url": ""}, headers=auth_headers)
+        assert resp.status_code == 422
+
+
+# ===========================================================================
 # Check Video Availability — POST /api/videos/check
 # ===========================================================================
 

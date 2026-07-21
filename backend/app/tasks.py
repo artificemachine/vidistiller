@@ -289,7 +289,10 @@ def process_transcript(self, job_id: int):
         source = "yt_dlp_captions"
         detected_language = "en"
 
-        transcript_text, detected_language = _fetch_platform_captions(db, job_id, video_service, video_url)
+        preferred_language = job.caption_language or "en"
+        transcript_text, detected_language = _fetch_platform_captions(
+            db, job_id, video_service, video_url, preferred_language
+        )
 
         # Determine the source label based on what was resolved
         if transcript_text:

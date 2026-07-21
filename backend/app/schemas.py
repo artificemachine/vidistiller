@@ -374,6 +374,13 @@ class JobCreate(BaseModel):
         default=False,
         description="Enable presentation/slide-aware processing mode"
     )
+    caption_language: Optional[str] = Field(
+        default=None,
+        min_length=2,
+        max_length=10,
+        pattern=r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$",
+        description="Preferred caption language (ISO 639-1, e.g. 'en', 'fr', 'ar'). None = English/auto.",
+    )
 
     @field_validator("video_url")
     @classmethod
@@ -446,6 +453,7 @@ class JobResponse(BaseSchema):
     processing_mode: Optional[str] = Field(None, description="Processing mode (standard or slide_aware)")
     video_url: Optional[str] = Field(None, description="Original video URL")
     source_type: Optional[str] = Field(None, description="Source platform (youtube, vimeo, twitch, etc.)")
+    caption_language: Optional[str] = Field(None, description="Requested caption language (ISO 639-1); null = English/auto")
     user_id: Optional[int] = Field(None, description="Owner user ID")
     created_at: datetime = Field(..., description="Job creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")

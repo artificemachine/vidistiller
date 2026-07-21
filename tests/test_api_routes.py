@@ -55,6 +55,31 @@ class TestCreateJob:
         })
         assert resp.status_code == 401
 
+    def test_persists_caption_language(self, client: TestClient, test_db: Session, auth_headers: dict, mock_celery):
+        resp = client.post("/api/jobs", json={
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "caption_language": "fr",
+        }, headers=auth_headers)
+        assert resp.status_code == 201
+        job_id = resp.json()["job_id"]
+        job = test_db.query(ProcessingJob).filter(ProcessingJob.job_id == job_id).first()
+        assert job.caption_language == "fr"
+
+    def test_caption_language_defaults_to_none(self, client: TestClient, test_db: Session, auth_headers: dict, mock_celery):
+        resp = client.post("/api/jobs", json={
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        }, headers=auth_headers)
+        job_id = resp.json()["job_id"]
+        job = test_db.query(ProcessingJob).filter(ProcessingJob.job_id == job_id).first()
+        assert job.caption_language is None
+
+    def test_rejects_malformed_caption_language(self, client: TestClient, test_db: Session, auth_headers: dict, mock_celery):
+        resp = client.post("/api/jobs", json={
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "caption_language": "not-a-code!!",
+        }, headers=auth_headers)
+        assert resp.status_code == 422
+
 
 # ===========================================================================
 # Get Job — GET /api/jobs/{job_id}
