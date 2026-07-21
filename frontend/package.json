@@ -35,7 +35,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.7.0",
-    "autoprefixer": "^10.4.0",
+    "autoprefixer": "^10.5.4",
     "axios-mock-adapter": "^2.1.0",
     "esbuild": "^0.28.0",
     "jsdom": "^29.1.1",
