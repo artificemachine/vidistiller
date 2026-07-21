@@ -332,3 +332,8 @@ All notable changes to this project will be documented in this file.
 
 ### Security
 - fix(security): the rate limiter and the import-task ownership check now fail CLOSED on a Redis error instead of open. Previously a Redis outage silently disabled brute-force protection on the auth endpoints and let any authenticated user read another user's import status. Both now deny on Redis failure (auth requests get a retry-able rate-limit response; import status returns not-found), trading availability during an outage for the security control staying enforced. Regression tests added in tests/test_fail_closed.py.
+
+## [1.11.3] - 2026-07-21
+
+### Fixed
+- fix(migrations): consolidate the broken alembic chain into a single squashed baseline and restore migrations/env.py. The prior chain was unrunnable from a fresh clone — revisions 001/007/009/011 were committed as empty stubs then deleted, leaving dangling down_revision references, and env.py had been removed. Both dev and prod build the schema from the models via create_all at startup, so alembic had drifted into a decorative broken state. `alembic upgrade head` now works from a fresh clone and builds the full current schema (verified: 10 tables incl. caption_language). The baseline uses create_all with checkfirst, so it is a safe no-op on an already-populated database. Prod reconciliation (schema already create_all-built): `alembic stamp --purge 0001_squashed_baseline` if a stale version stamp exists.
