@@ -57,7 +57,7 @@ celery_app.conf.update(
 # ==============================================================================
 
 def _fetch_platform_captions(
-    db, job_id: int, video_service, video_url: str
+    db, job_id: int, video_service, video_url: str, language: str = "en"
 ) -> tuple[str | None, str]:
     """
     Fetch captions using the appropriate provider for the detected platform.
@@ -65,6 +65,10 @@ def _fetch_platform_captions(
     For YouTube: uses YouTubeCaptionProvider (native API with timestamps).
     For all other sources: uses YtdlpCaptionProvider (subtitle download).
     Returns (text, detected_language) or (None, "en") when unavailable.
+
+    ``language`` is the preferred caption language (ISO 639-1). It matters for
+    auto-dubbed videos, which expose a caption track per dub language; without
+    it the provider could return a dub instead of the original.
     """
     from app.core.source_type import SourceType
     from app.services.caption_providers import YouTubeCaptionProvider, YtdlpCaptionProvider
@@ -80,7 +84,7 @@ def _fetch_platform_captions(
         provider = YtdlpCaptionProvider()
         step = "yt_dlp_captions"
 
-    text, lang = provider.fetch(video_url, source_id)
+    text, lang = provider.fetch(video_url, source_id, language)
 
     if text:
         _add_log(db, job_id, f"Captions retrieved ({len(text)} chars, lang={lang})", "info", step)
@@ -89,7 +93,7 @@ def _fetch_platform_captions(
     # For YouTube, also try yt-dlp as a secondary fallback before Whisper
     if source_type == SourceType.YOUTUBE:
         _add_log(db, job_id, "YouTube native captions unavailable, trying yt-dlp...", "warning", "yt_dlp_captions")
-        text, lang = YtdlpCaptionProvider().fetch(video_url, source_id)
+        text, lang = YtdlpCaptionProvider().fetch(video_url, source_id, language)
         if text:
             _add_log(db, job_id, f"yt-dlp captions retrieved ({len(text)} chars)", "info", "yt_dlp_captions")
             return text, lang

@@ -43,12 +43,22 @@ class YouTubeCaptionProvider(CaptionProvider):
             ytt = YouTubeTranscriptApi()
             transcript_list = ytt.list(source_id)
 
+            # Selection priority:
+            #   1. the requested language, manual or auto-generated;
+            #   2. any manually-created track;
+            #   3. whatever the list yields first.
+            # Step 1 is what stops an auto-dubbed video (which exposes a manual
+            # caption track per dub language) from returning a dub — e.g.
+            # Arabic — in place of the requested original language.
             try:
-                obj = transcript_list.find_manually_created_transcript(
-                    [t.language_code for t in transcript_list]
-                )
+                obj = transcript_list.find_transcript([language])
             except Exception:
-                obj = next(iter(transcript_list))
+                try:
+                    obj = transcript_list.find_manually_created_transcript(
+                        [t.language_code for t in transcript_list]
+                    )
+                except Exception:
+                    obj = next(iter(transcript_list))
 
             detected = obj.language_code
             lines = [f"{_fmt(s.start)} {s.text.replace(chr(10), ' ')}" for s in obj.fetch()]
