@@ -109,17 +109,21 @@ async def lifespan(app: FastAPI):
 
     # Ensure nullable columns added after initial schema creation exist on older DBs.
     # create_all() does not ALTER existing tables, so we add missing columns explicitly.
-    with engine.connect() as conn:
-        for col_def in [
-            "ALTER TABLE processing_jobs ADD COLUMN slide_status VARCHAR(20)",
-            "ALTER TABLE processing_jobs ADD COLUMN caption_language VARCHAR(10)",
-            "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0",
-        ]:
+    # Each statement runs in its own transaction: on Postgres, an ALTER that
+    # fails because the column already exists aborts the current transaction, and
+    # without a rollback every subsequent statement in the loop would also fail
+    # with "current transaction is aborted" — silently skipping real new columns.
+    for col_def in [
+        "ALTER TABLE processing_jobs ADD COLUMN slide_status VARCHAR(20)",
+        "ALTER TABLE processing_jobs ADD COLUMN caption_language VARCHAR(10)",
+        "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0",
+    ]:
+        with engine.connect() as conn:
             try:
                 conn.execute(text(col_def))
                 conn.commit()
             except Exception:
-                pass  # column already exists
+                conn.rollback()  # column already exists (or unsupported) — move on cleanly
 
     yield
 

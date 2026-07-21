@@ -363,3 +363,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(tasks): process_transcript is now idempotent for terminal-state jobs. With task_acks_late, a worker killed after finishing but before acking gets the job redelivered; reprocessing a completed job would overwrite its transcript and re-run the LLM. Jobs already completed or cancelled are now skipped on redelivery.
+
+## [1.12.3] - 2026-07-21
+
+### Fixed
+- fix(startup): the startup column-add loop ran every ALTER on one shared connection. On Postgres, the first ALTER that fails because the column already exists aborts the transaction, so every subsequent ALTER silently fails with "current transaction is aborted" — which caused a deploy to ship without users.token_version and break login. Each ALTER now runs in its own transaction and rolls back on failure. Regression test added.
