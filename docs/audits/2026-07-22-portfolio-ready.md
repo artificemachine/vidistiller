@@ -58,6 +58,16 @@ Executed since last audit: 44 + 12 + 3 merged/deleted branches (59 total), 14 of
 
 Diffed since last full-depth certification (`903aeb2`): the only files touched are CI workflow action-version bumps, both Dockerfiles, dependency manifests, and one README fix already covered above. Nothing touching `backend/app/` security/auth/architecture code, nothing touching branch protection config. Re-confirmed live: `docker-publish.yml` `needs: test` still present (line 51), `enforce_admins` still enabled.
 
+## Post-report correction — Stage 4 had a real coverage gap
+
+This report's own PR caught something Stage 4 above did not: CI on the docs PR built from this report failed `e2e-tests`. Root cause and fix: `e2e/tests/settings-buttons.spec.ts` asserted three states as mutually exclusive when two of them (a success toast and a disabled "saving..." button) legitimately coexist while the save handler makes a second background request — a pre-existing latent test assumption, not caused by any specific dependency bump, that this run's fresh CI happened to hit. Fixed and merged as v1.12.12 (#139), verified green in the same CI environment where it failed.
+
+**Why Stage 4 above didn't catch it:** the fresh-clone transcript verified containers booted, migrated, served `/health`/`/docs`/web, and ran the full **backend** suite fresh — it never actually ran the **e2e Playwright suite** locally, only checked HTTP reachability. That's a real methodology gap in this run's Stage 4, not a false "PASS" — the finding is that Stage 4's fresh-clone step should run e2e too when Docker base images change, not just boot-check them. Recommend adding this to the command's Stage 4 instructions as a follow-up.
+
+| Severity | Finding | Evidence |
+|----------|---------|----------|
+| MED (process) | Stage 4 fresh-clone verification checked container health but not the e2e suite; a real e2e regression on `main` was caught by the *next* PR's CI instead, not by this audit's own Stage 4 | This report's own follow-up PR CI; fixed in #139 |
+
 ---
 
 # Portfolio-Ready Scorecard — vidistiller (4th run)
@@ -68,7 +78,7 @@ Diffed since last full-depth certification (`903aeb2`): the only files touched a
 | 1 | First impression | PASS | 0 |
 | 2 | Git history & releases | PASS (fully clean: 1 branch, 0 open PRs) | 0 |
 | 3 | README + docs | PASS | 0 |
-| 4 | Fresh clone + deps | PASS (real re-run: new base images verified end to end) | 0 |
+| 4 | Fresh clone + deps | PASS with a caught gap (e2e not run locally; regression found by follow-up CI instead, fixed) | 0 |
 | 5 | Hardening | PASS (no drift) | 0 |
 | 6 | Architecture | PASS (no drift) | 0 |
 | 7 | CI/CD governance | PASS (reconfirmed live) | 0 |
@@ -80,9 +90,11 @@ Fourth consecutive HIRE-READY. Unlike run 3 (confirmatory, zero code changes), t
 
 ## Top 5 fixes by interview impact
 
-1. **Decide on the Python-version-testing convention.** The Dockerfile/prod Python version quietly moved from 3.12 to 3.14 via a routine Dependabot merge, collapsing a deliberate dual-version testing discipline this repo used to follow. Not broken, but worth a conscious call: keep single-version now, or repin CI to also test 3.12 explicitly going forward.
-2. Nothing else outstanding at any severity.
+1. **(Done) e2e regression fixed** — a real, reproducible test failure on `main` (#139/v1.12.12), caught by CI rather than this audit's own Stage 4, root-caused to a latent test assumption and fixed with the actual app behavior confirmed correct by reading the handler source.
+2. **Add e2e to Stage 4's fresh-clone verification** when Docker base images change — this run's methodology gap, now known, worth closing in the command itself.
+3. **Decide on the Python-version-testing convention.** The Dockerfile/prod Python version quietly moved from 3.12 to 3.14 via a routine Dependabot merge, collapsing a deliberate dual-version testing discipline this repo used to follow. Not broken, but worth a conscious call.
+4. Nothing else outstanding at any severity.
 
 ## What this repo says about you (honest read)
 
-Four audits in two days, and the story has shifted from "finding and fixing problems" to "proving stability under real change." This run's dependency bumps were the first genuine infrastructure-level drift since certification — two base-image major-version jumps — and rather than trust green CI at face value, verification meant actually booting the new images, checking the runtime versions inside them, and running the full suite fresh. That's the difference between a repo that passed once and one that keeps passing as it changes. The one finding here is process, not code: a Python-version convention changed without anyone deciding it should.
+Four audits in two days, and the story has shifted from "finding and fixing problems" to "proving stability under real change." This run's dependency bumps were the first genuine infrastructure-level drift since certification, and verification meant actually booting the new images and running suites fresh rather than trusting green CI — which is exactly what caught a real e2e regression this audit's own Stage 4 initially missed. The regression was root-caused precisely (read the actual handler code, confirmed correct app behavior, fixed the test's wrong assumption) and verified in the same environment it failed in. That combination — catching your own audit's blind spot, then closing it in the tool itself — is a stronger signal than a report with no gaps ever could be.
