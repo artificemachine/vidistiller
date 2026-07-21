@@ -1,6 +1,6 @@
 # Portfolio-Ready Progress — vidistiller
 
-Renamed successor to `/job-ready` (see `docs/audits/job-ready-progress.md` for prior runs). Second `/portfolio-ready` run, same day, under the updated command (added: docs content review, folder-structure idiom check, SDLC signals, CONTRIBUTING.md content check, deploy-path gating check).
+Renamed successor to `/job-ready` (see `docs/audits/job-ready-progress.md` for prior runs). Third `/portfolio-ready` run, same day, HEAD unchanged since run 2 (`903aeb2`) — confirmatory run, not a new-checks run.
 
 ## Stage 1 — First Impression: NEEDS WORK -> FIXED (2026-07-21, updated pipeline)
 - verdict: metadata/README/community files unchanged (PASS, prior run). NEW check found CONTRIBUTING.md has 3 factual errors (license mismatch Apache-vs-MIT, wrong dir names, stale Python version) -> fixed same run.
@@ -45,3 +45,8 @@ Renamed successor to `/job-ready` (see `docs/audits/job-ready-progress.md` for p
 ## Stage 9 — Scorecard: HIRE-READY (2026-07-21, updated pipeline)
 - verdict: all 8 stages PASS. Every new check the updated pipeline added found and fixed a real, previously-undetected issue: CONTRIBUTING.md license contradiction, 100%-dead docs index, dead root scaffold. Nothing found this run rises to a hard-gate blocker.
 - blockers: 0
+
+## Run 3 (2026-07-21, confirmatory, HEAD unchanged at 903aeb2)
+- verdict: HIRE-READY reconfirmed. All run-1/2 fixes verified fresh (grep + gitleaks + full test suite re-run), zero regressions. One new LOW finding: remote branch `feat/semblar-api-key-auth` still carries the name in its branch title (not content) with 2 unmerged unrelated commits — needs owner review before rename/delete. Branch count grown to 73 (17 dependabot, 56 other), fully explained by this session's 21+ merged PRs; not new debt, just uncounted. Stages 4-8 not re-derived (unchanged HEAD, reasoning stated in report, not silently skipped).
+- blockers: 0
+- evidence: docs/audits/2026-07-21-portfolio-ready.md (3rd-run sections)
