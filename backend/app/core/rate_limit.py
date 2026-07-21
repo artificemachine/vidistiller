@@ -44,8 +44,14 @@ def _check_rate_limit(key: str, max_requests: int, window_seconds: int) -> None:
     except RateLimitException:
         raise
     except Exception as e:
-        # Redis unavailable — log and allow the request through (fail open)
-        logger.warning("Rate limiter unavailable, skipping check: %s", e)
+        # Redis unavailable — fail CLOSED. Letting requests through when the
+        # limiter is down silently disables brute-force protection on the auth
+        # endpoints, which is exactly when it matters. Denying degrades
+        # availability during a Redis outage, which is the safer trade.
+        logger.error("Rate limiter unavailable, denying request (fail closed): %s", e)
+        raise RateLimitException(
+            "Rate limiting is temporarily unavailable. Please retry shortly."
+        )
 
 
 def auth_rate_limit(request: Request) -> None:
