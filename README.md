@@ -4,6 +4,12 @@
 
 Vidistiller is a local-first, source-agnostic video-to-documentation engine. Paste a URL from YouTube, Vimeo, Twitch, X, Reddit, Rumble, or any direct MP4 link — Vidistiller distills the video down to what matters: the spoken words, the slides, the structure. Hours of watching become minutes of reading.
 
+![Vidistiller — paste a video URL, pick a mode, get a document](docs/assets/vidistiller-home.jpg)
+
+A completed job: a timestamped transcript, the video player, auto-detected slides, and per-slide notes side by side.
+
+![Vidistiller workspace — timestamped transcript, player, detected slides, and slide notes](docs/assets/vidistiller-workspace.jpg)
+
 ---
 
 ## Architecture Diagram

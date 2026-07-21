@@ -368,3 +368,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(startup): the startup column-add loop ran every ALTER on one shared connection. On Postgres, the first ALTER that fails because the column already exists aborts the transaction, so every subsequent ALTER silently fails with "current transaction is aborted" — which caused a deploy to ship without users.token_version and break login. Each ALTER now runs in its own transaction and rolls back on failure. Regression test added.
+
+## [1.12.4] - 2026-07-21
+
+### Added
+- docs(readme): add a landing-page and workspace screenshot above the fold so the README shows what the product does at a glance. Assets live in docs/assets/ (allowlisted via .allow-binary-paths).
