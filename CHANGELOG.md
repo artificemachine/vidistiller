@@ -397,3 +397,8 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - docs: executed the Stage 2 /docs-organize cleanup plan — moved DESIGN_SPEC.md, ROADMAP.md, TECH_STACK.md and VidDocs_UI_UX_Audit_Report.md from repo root into docs/, updated the README design-spec link and the docs/README.md index to match.
 - docs: redacted a personal name from docs/VidDocs_UI_UX_Audit_Report.md's "Prepared for" line (the email there was already a safe @example.com placeholder).
+
+## [1.12.9] - 2026-07-21
+
+### Changed
+- docs: VidDocs_UI_UX_Audit_Report.md "Prepared for" line set to the repo owner's name, at their request.
