@@ -379,3 +379,10 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - fix(config): docker-compose.yml passes `JWT_SECRET_KEY: ${JWT_SECRET_KEY}` with no default, so leaving it unset in .env (the documented way to get an auto-generated dev key) arrives in the container as an EMPTY STRING, not an absent variable. The v1.10.16 alias fix made the field read that empty string as "set" and reject it outright, which broke `docker compose up -d` on a genuinely fresh clone — the api container never became healthy. A blank/whitespace-only value is now treated the same as unset. Found by an actual fresh-clone `docker compose up -d` verification, not a config test alone.
 - docs(env): .env.example VLLM_VM913_URL and siblings are now commented out, matching the neighboring ALLOWED_LLM_HOSTS example and the "leave blank to hide a VM" comment already above them. Previously uncommented, so a fresh `cp .env.example .env` populated the UI's fleet picker with 4 example VMs by default.
+
+## [1.12.6] - 2026-07-21
+
+### Fixed
+- fix(docs): CONTRIBUTING.md had three factual errors: claimed Apache 2.0 license (actual LICENSE is MIT), described backend/frontend as `api/`/`web/` (actual dirs are `backend/`/`frontend/`), and stated Python 3.10+ (pyproject.toml requires 3.12+). Also updated the stale "Ollama/Mistral 7B only" LLM description to reflect the current multi-provider support.
+- fix(docs): docs/README.md linked to 6 files that do not exist (DEPLOYMENT.md, DEVELOPMENT.md, PROGRESS.md, ARCHITECTURE.md, API.md, API_DOCUMENTATION.md) — a 100%-dead-link documentation index. Rewritten to link only files that exist, each labeled with its actual status.
+- chore: removed a dead `main.py` scaffold stub at the repo root (untouched since v0.2.0, disconnected from the real app in backend/app/main.py).
