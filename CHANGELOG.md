@@ -391,3 +391,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore: renamed the internal machine-to-machine service-account identifier from a named sibling private project ("semblar") to a generic `m2m-client`. Renamed in code (`SEMBLAR_SERVICE_USERNAME` -> `M2M_SERVICE_USERNAME`), comments, `.env.example`, and the design doc (`docs/SEMBLAR_INTEGRATION.md` -> `docs/M2M_AUTH_DESIGN.md`, stripped project-specific naming and topology, status corrected from stale "Proposed" to "Implemented"). No behavior change — this is an internal identifier the calling client never sends or sees. Production service-user row renamed to match after this deploy.
+
+## [1.12.8] - 2026-07-21
+
+### Changed
+- docs: executed the Stage 2 /docs-organize cleanup plan — moved DESIGN_SPEC.md, ROADMAP.md, TECH_STACK.md and VidDocs_UI_UX_Audit_Report.md from repo root into docs/, updated the README design-spec link and the docs/README.md index to match.
+- docs: redacted a personal name from docs/VidDocs_UI_UX_Audit_Report.md's "Prepared for" line (the email there was already a safe @example.com placeholder).

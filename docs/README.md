@@ -5,6 +5,12 @@ The canonical project overview lives in the [root README](../README.md). This fo
 ## Deployment & Ops
 - [VM_DEPLOYMENT.md](VM_DEPLOYMENT.md): production VM deployment guide (Proxmox VM 900). Prod was previously hosted in an LXC; that target is deprecated.
 - [ops-runbook.md](ops-runbook.md): operational troubleshooting reference.
+- [TECH_STACK.md](TECH_STACK.md): technology stack overview and architecture summary.
+
+## Design & Product
+- [DESIGN_SPEC.md](DESIGN_SPEC.md): design system — colors, typography, spacing.
+- [VidDocs_UI_UX_Audit_Report.md](VidDocs_UI_UX_Audit_Report.md) (2026-02-26): UI/UX design audit report.
+- [ROADMAP.md](ROADMAP.md): planned features, unchecked items not yet built.
 
 ## Historical Planning & Audit Docs
 Snapshots of design decisions and hardening work, each self-labeled with a status. Not living documentation — read the code and CHANGELOG.md for current behavior.
