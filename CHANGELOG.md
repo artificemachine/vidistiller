@@ -358,3 +358,8 @@ All notable changes to this project will be documented in this file.
 ### Security
 - feat(auth): token revocation via a per-user token_version. Each access token carries the version it was minted with; logout and password reset bump the version, invalidating every token issued before the bump (this token and any on other devices). Gives the stateless JWT a real revocation path without a denylist. Existing DBs get the users.token_version column via the startup ALTER block; fresh clones via the alembic baseline.
 - fix(security): /api/videos/metadata, /captions and /check now require authentication. They trigger outbound fetches (yt_dlp / caption APIs) and were previously callable unauthenticated. Not used by the frontend, so no UX impact.
+
+## [1.12.2] - 2026-07-21
+
+### Fixed
+- fix(tasks): process_transcript is now idempotent for terminal-state jobs. With task_acks_late, a worker killed after finishing but before acking gets the job redelivered; reprocessing a completed job would overwrite its transcript and re-run the LLM. Jobs already completed or cancelled are now skipped on redelivery.
