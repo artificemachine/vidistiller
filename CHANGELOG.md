@@ -327,3 +327,8 @@ All notable changes to this project will be documented in this file.
 - chore(community): CODE_OF_CONDUCT.md (Contributor Covenant 2.1), PR template, and bug/feature issue templates.
 - chore(ci): Dependabot now covers npm (frontend) and docker (backend + frontend Dockerfiles) in addition to pip and github-actions.
 - docs(audits): 2026-07-21 job-ready audit report.
+
+## [1.11.2] - 2026-07-21
+
+### Security
+- fix(security): the rate limiter and the import-task ownership check now fail CLOSED on a Redis error instead of open. Previously a Redis outage silently disabled brute-force protection on the auth endpoints and let any authenticated user read another user's import status. Both now deny on Redis failure (auth requests get a retry-able rate-limit response; import status returns not-found), trading availability during an outage for the security control staying enforced. Regression tests added in tests/test_fail_closed.py.
