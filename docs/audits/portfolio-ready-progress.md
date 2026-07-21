@@ -17,10 +17,10 @@ Renamed successor to `/job-ready` (see `docs/audits/job-ready-progress.md` for p
 - blockers: 0
 - evidence: fresh link + version-claim check
 
-## Stage 4 — Fresh-Clone + Deps: PASS (2026-07-22, real re-run)
-- verdict: genuine fresh clone on new base images (python:3.14-slim, node:26-alpine per Dependabot #111/#109). Verified inside containers: python 3.14.6, node v26.5.0. alembic upgrade head clean, /health+/docs+web 200. Fresh Python 3.14 venv + bumped requirements.txt: 499 pass/28 skip. pip-audit + npm audit: zero new CVEs across 9 bumps. Full teardown.
+## Stage 4 — Fresh-Clone + Deps: PASS with a caught gap (2026-07-22)
+- verdict: genuine fresh clone on new base images (python:3.14-slim, node:26-alpine per Dependabot #111/#109). Verified inside containers: python 3.14.6, node v26.5.0. alembic upgrade head clean, /health+/docs+web 200. Fresh Python 3.14 venv + bumped requirements.txt: 499 pass/28 skip. pip-audit + npm audit: zero new CVEs across 9 bumps. Full teardown. GAP: never ran the e2e Playwright suite locally, only HTTP health checks -- a real e2e regression on main was caught by the follow-up docs PR's CI instead, not by this stage. Fixed (#139/v1.12.12): settings-buttons.spec.ts asserted a transient "saving" state as mutually exclusive with success/error; app behavior was correct (confirmed via handler source), test assumption was wrong.
 - blockers: 0
-- evidence: docs/audits/2026-07-22-portfolio-ready.md Stage 4 transcript
+- evidence: docs/audits/2026-07-22-portfolio-ready.md Stage 4 transcript + Post-report correction section
 
 ## Stage 5 — Hardening: PASS (2026-07-22, no drift)
 - verdict: diff since 903aeb2 touches only CI/Dockerfile/deps/README, nothing security-surface
@@ -40,5 +40,5 @@ Renamed successor to `/job-ready` (see `docs/audits/job-ready-progress.md` for p
 - blockers: 0
 
 ## Stage 9 — Scorecard: HIRE-READY (2026-07-22)
-- verdict: 4th consecutive HIRE-READY. First run to genuinely re-verify real infra drift (not confirmatory). One process-level finding, not a defect: Dockerfile/prod Python version quietly moved 3.12->3.14 via Dependabot, collapsing a previously-deliberate dual-version testing convention. Owner decision, not a fix.
+- verdict: 4th consecutive HIRE-READY. First run to genuinely re-verify real infra drift (not confirmatory), and the first to catch a real regression via its own follow-up CI rather than the audit itself -- Stage 4's fresh-clone check didn't run e2e locally, a real e2e failure on main slipped past it, caught by the next PR's CI and fixed (#139). Two follow-ups: (1) add e2e to Stage 4 when Docker base images change (command-level fix, not yet applied), (2) decide the Python-version-testing convention (3.12->3.14 drift via Dependabot, owner decision).
 - blockers: 0
