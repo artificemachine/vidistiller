@@ -412,3 +412,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(deps): pytest requirement bumped from >=7.4.0 to >=9.1.1 (applied manually — Dependabot PR #83 had gone stale/conflicting after other same-day dependency merges touched the same file).
+
+## [1.12.12] - 2026-07-22
+
+### Fixed
+- fix(e2e): settings-buttons.spec.ts asserted `successMsg.or(errorMsg).or(savingBtn)` as if the three were mutually exclusive. The save handler sets the success message, then makes a second request (GET /auth/me) before clearing the saving state in a finally block, so the success toast and a disabled "saving..." button are legitimately visible at the same time -- not a third outcome, an implementation detail of a real success. Playwright's strict mode failed the assertion on 2 simultaneous matches. Assert on the two actual terminal states (success/error) instead. Found by a genuine `/portfolio-ready` fresh-clone re-verification surfacing a real e2e failure on main after 9 dependency bumps -- not caused by any single bump, a pre-existing latent test assumption that finally got hit.
