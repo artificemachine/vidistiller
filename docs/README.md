@@ -13,7 +13,7 @@ Snapshots of design decisions and hardening work, each self-labeled with a statu
 - [PLAN-presentation-mode-hardening.md](PLAN-presentation-mode-hardening.md) (approved 2026-06-09): hardening plan following the audit above.
 - [PLAN-two-pass-json-fix.md](PLAN-two-pass-json-fix.md) (2026-06-08, executed): fix plan for the two-pass summarization JSON parsing bug.
 - [PLAN-backlog-sonnet46.md](PLAN-backlog-sonnet46.md): implementation backlog snapshot.
-- [SEMBLAR_INTEGRATION.md](SEMBLAR_INTEGRATION.md) (2026-04-28, "Proposed"): integration plan with a separate internal project; describes a machine-to-machine auth design for this API.
+- [M2M_AUTH_DESIGN.md](M2M_AUTH_DESIGN.md) (implemented): design notes for the API key authentication path used by non-interactive clients.
 
 ## Internal
 - [README.my.notes.md](README.my.notes.md): personal/internal notes, not canonical documentation.

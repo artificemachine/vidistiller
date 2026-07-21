@@ -2,7 +2,7 @@
 API Key Authentication for Machine-to-Machine Clients
 
 Provides a FastAPI dependency that accepts either:
-- X-API-Key header (machine-to-machine, e.g. Semblar calling vidistiller)
+- X-API-Key header (machine-to-machine, e.g. an internal automation client)
 - JWT Bearer token (standard user login, existing behavior)
 
 When VIDISTILLER_API_KEY is not configured, API key auth is silently skipped
@@ -24,7 +24,7 @@ from app.exceptions import AuthenticationException
 logger = logging.getLogger(__name__)
 
 # Username for the synthetic service user created on first API key call
-SEMBLAR_SERVICE_USERNAME = "semblar"
+M2M_SERVICE_USERNAME = "m2m-client"
 
 
 def _get_or_create_service_user(db: Session, username: str) -> User:
@@ -68,7 +68,7 @@ async def get_current_user(
     if x_api_key and configured_key:
         if not secrets.compare_digest(x_api_key, configured_key):
             raise AuthenticationException("Invalid API key")
-        return _get_or_create_service_user(db, SEMBLAR_SERVICE_USERNAME)
+        return _get_or_create_service_user(db, M2M_SERVICE_USERNAME)
 
     # Option B: standard JWT (user login)
     # Import here to avoid circular dependency — the route module

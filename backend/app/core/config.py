@@ -385,7 +385,7 @@ class SentrySettings(BaseSettings):
 
 
 class ApiKeySettings(BaseSettings):
-    """Machine-to-machine API key for trusted internal services (e.g. Semblar)."""
+    """Machine-to-machine API key for trusted internal automation clients."""
 
     vidistiller_api_key: str = Field(default="", validation_alias="VIDISTILLER_API_KEY")
 
