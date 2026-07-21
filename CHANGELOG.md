@@ -407,3 +407,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - docs(readme): the "Explanation of Each Part" section described a `config/` directory that does not exist. Corrected to describe the actual location, `backend/app/core/config.py`. Found during a fresh /readme-audit re-validation; every other referenced directory (backend/, frontend/, migrations/, tests/, scripts/, terraform/, .github/workflows/) checked and confirmed accurate.
+
+## [1.12.11] - 2026-07-21
+
+### Changed
+- chore(deps): pytest requirement bumped from >=7.4.0 to >=9.1.1 (applied manually — Dependabot PR #83 had gone stale/conflicting after other same-day dependency merges touched the same file).
