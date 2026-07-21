@@ -51,10 +51,14 @@ test.describe("Settings page controls", () => {
 
   test("save settings button submits form", async ({ page }) => {
     await page.click("button[type='submit']:has-text('save settings')");
+    // The handler shows the success toast, then makes a second request (GET
+    // /auth/me) before re-enabling the button, so the toast and a disabled
+    // "saving..." button are legitimately visible at the same time -- that's
+    // not a third outcome, it's an implementation detail of a real success.
+    // Assert on the two actual terminal states, not the transient one.
     const successMsg = page.locator("text=Settings saved successfully");
     const errorMsg = page.locator(".bg-red-50, .dark\\:bg-red-900\\/20").first();
-    const savingBtn = page.locator("button:has-text('saving...')");
-    await expect(successMsg.or(errorMsg).or(savingBtn)).toBeVisible({ timeout: 10_000 });
+    await expect(successMsg.or(errorMsg)).toBeVisible({ timeout: 10_000 });
   });
 
   test("api key input has password placeholder for openai", async ({ page }) => {
