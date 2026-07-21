@@ -5,10 +5,15 @@ Provides endpoints for YouTube video metadata retrieval and analysis.
 Used to validate videos before creating processing jobs.
 """
 
-from fastapi import APIRouter, status
+from typing import List
+
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 
 from app.services.youtube import YouTubeService
+from app.services.caption_providers import list_youtube_caption_tracks
+from app.core.api_key_auth import get_current_user
+from app.db.models import User
 from app.exceptions import ValidationException
 
 router = APIRouter(prefix="/videos", tags=["Videos"])
@@ -43,6 +48,19 @@ class CaptionsResponse(BaseModel):
     video_id: str = Field(..., description="YouTube video ID")
     captions: str = Field(..., description="Caption text")
     language: str = Field(..., description="Language code")
+
+
+class CaptionTrack(BaseModel):
+    """One selectable caption track."""
+    language_code: str = Field(..., description="ISO 639-1 language code")
+    language_name: str = Field(..., description="Human-readable track name")
+    is_generated: bool = Field(..., description="True for auto-generated tracks")
+
+
+class CaptionTracksResponse(BaseModel):
+    """Available caption tracks for a video."""
+    video_id: str = Field(..., description="YouTube video ID")
+    tracks: List[CaptionTrack] = Field(default_factory=list, description="Available caption tracks")
 
 
 class VideoCheckResponse(BaseModel):
@@ -159,6 +177,48 @@ def get_video_captions(
         raise
     except Exception as e:
         raise ValidationException(f"Failed to retrieve captions: {str(e)}")
+
+
+# ==============================================================================
+# LIST CAPTION TRACKS - POST /videos/caption-tracks
+# ==============================================================================
+
+@router.post(
+    "/caption-tracks",
+    response_model=CaptionTracksResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List caption tracks",
+    description="List the caption languages a YouTube video offers, so a user can choose one before a job runs.",
+)
+def get_caption_tracks(
+    request: YouTubeURLRequest,
+    current_user: User = Depends(get_current_user),
+) -> CaptionTracksResponse:
+    """
+    List available caption tracks for a YouTube video.
+
+    Requires authentication: the request triggers an outbound fetch to YouTube.
+    Manually-created tracks (including dubs) are listed before auto-generated
+    ones. Returns an empty list when no tracks are available or the source is
+    not YouTube.
+
+    **Request body:**
+    - `url`: YouTube video URL
+
+    **Response:** `{video_id, tracks: [{language_code, language_name, is_generated}]}`
+
+    **Status codes:**
+    - 200: Listed (possibly empty)
+    - 401: Not authenticated
+    - 422: Invalid YouTube URL
+    """
+    try:
+        video_id = YouTubeService.extract_video_id(request.url)
+    except Exception as e:
+        raise ValidationException(f"Invalid YouTube URL: {str(e)}")
+
+    tracks = list_youtube_caption_tracks(video_id)
+    return CaptionTracksResponse(video_id=video_id, tracks=tracks)
 
 
 # ==============================================================================

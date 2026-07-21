@@ -74,6 +74,34 @@ class YouTubeCaptionProvider(CaptionProvider):
         return None, language
 
 
+def list_youtube_caption_tracks(video_id: str) -> list[dict]:
+    """Return the caption tracks a YouTube video exposes.
+
+    Each entry is {language_code, language_name, is_generated}. Used to offer
+    the user a language choice before a job runs. Returns [] on any failure —
+    the caller treats "no listing" the same as "let the pipeline decide".
+    """
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+
+        transcript_list = YouTubeTranscriptApi().list(video_id)
+        tracks = [
+            {
+                "language_code": t.language_code,
+                "language_name": t.language,
+                "is_generated": t.is_generated,
+            }
+            for t in transcript_list
+        ]
+        # Manually-created (dub or human) tracks first, then auto-generated, so
+        # the most deliberate options surface at the top of a dropdown.
+        tracks.sort(key=lambda t: t["is_generated"])
+        return tracks
+    except Exception as e:
+        logger.warning(f"list_youtube_caption_tracks failed for {video_id}: {e}")
+        return []
+
+
 class YtdlpCaptionProvider(CaptionProvider):
     """
     Subtitle download via yt-dlp.

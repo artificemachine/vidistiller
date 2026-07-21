@@ -14,6 +14,12 @@ interface RecentJob {
   created_at: string;
 }
 
+interface CaptionTrack {
+  language_code: string;
+  language_name: string;
+  is_generated: boolean;
+}
+
 function getStatusColor(status: string) {
   switch (status) {
     case 'completed':
@@ -49,6 +55,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [slideMode, setSlideMode] = useState(false);
+  const [captionLang, setCaptionLang] = useState('');
+  const [captionTracks, setCaptionTracks] = useState<CaptionTrack[]>([]);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
@@ -62,6 +70,26 @@ export default function Home() {
       .then((res) => setRecentJobs(res.data))
       .catch(() => {});
   }, [isAuthenticated]);
+
+  // Offer a caption-language choice only when the video actually has tracks.
+  // Debounced so we do not query YouTube on every keystroke.
+  useEffect(() => {
+    if (!isAuthenticated || !/youtu\.?be/.test(url)) {
+      setCaptionTracks([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      apiClient.post('/videos/caption-tracks', { url })
+        .then((res) => setCaptionTracks(res.data.tracks || []))
+        .catch(() => setCaptionTracks([]));
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [url, isAuthenticated]);
+
+  // A track list from a different video invalidates the previous selection.
+  useEffect(() => {
+    setCaptionLang('');
+  }, [captionTracks]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,7 +105,13 @@ export default function Home() {
     try {
       const response = await apiClient.post(
         '/jobs',
-        { video_url: url, output_format: 'markdown', extract_snapshots: true, is_slide_mode: slideMode }
+        {
+          video_url: url,
+          output_format: 'markdown',
+          extract_snapshots: true,
+          is_slide_mode: slideMode,
+          ...(captionLang ? { caption_language: captionLang } : {}),
+        }
       );
       router.push(`/jobs/${response.data.job_id}`);
     } catch (err: any) {
@@ -172,6 +206,28 @@ export default function Home() {
                 transcript mode
               </button>
             </div>
+
+            {captionTracks.length > 0 && (
+              <div>
+                <label htmlFor="captionLang" className="block text-[14px] font-semibold text-text-dark dark:text-text-light mb-2">
+                  caption language
+                </label>
+                <select
+                  id="captionLang"
+                  aria-label="caption language"
+                  value={captionLang}
+                  onChange={(e) => setCaptionLang(e.target.value)}
+                  className="w-full px-4 h-12 rounded-lg bg-card-light dark:bg-input-bg text-text-dark dark:text-text-light focus:ring-2 focus:ring-primary focus:outline-none"
+                >
+                  <option value="">auto (default)</option>
+                  {captionTracks.map((t) => (
+                    <option key={t.language_code} value={t.language_code}>
+                      {t.language_name}{t.is_generated ? ' — auto' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {error && (
               <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400">

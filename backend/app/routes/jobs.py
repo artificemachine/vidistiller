@@ -112,6 +112,7 @@ def create_job(
             video_url=job_data.video_url,
             source_type=source_type.value,
             processing_mode=processing_mode,
+            caption_language=job_data.caption_language,
             user_id=current_user.id,
         )
 

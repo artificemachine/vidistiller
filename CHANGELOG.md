@@ -311,3 +311,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(captions): YouTubeCaptionProvider ignored the requested language and handed every available language code to find_manually_created_transcript, returning the first match. For an auto-dubbed video (which exposes a manually-created caption track per dub language) that was a dub, not the original, so an English video could be transcribed in Arabic. Selection now prefers the requested language via find_transcript, then any manual track, then the first available. _fetch_platform_captions threads the language through to both providers.
+
+## [1.11.0] - 2026-07-21
+
+### Added
+- feat(captions): users can choose the caption language for a job. The create form fetches the video's available caption tracks (new `POST /api/videos/caption-tracks`, authenticated) and shows a language dropdown when tracks exist; the choice is persisted as `caption_language` on the job and threaded into caption fetching. Defaults to auto (English) when unset. Migration 014 adds the nullable `processing_jobs.caption_language` column. This selects among existing tracks only — it does not translate.

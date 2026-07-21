@@ -76,6 +76,10 @@ class ProcessingJob(Base):
     summarize_status: Optional[str] = Column(String(20), nullable=True)
     slide_status: Optional[str] = Column(String(20), nullable=True)
     processing_mode: Optional[str] = Column(String(20), nullable=True, server_default="standard")
+    # Preferred caption language (ISO 639-1). None means "let the pipeline
+    # decide" (defaults to English). Set explicitly so an auto-dubbed video is
+    # transcribed in the language the user asked for, not the first dub track.
+    caption_language: Optional[str] = Column(String(10), nullable=True)
     user_id: Optional[int] = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: datetime = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at: datetime = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
