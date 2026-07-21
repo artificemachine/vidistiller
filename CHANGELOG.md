@@ -316,3 +316,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - feat(captions): users can choose the caption language for a job. The create form fetches the video's available caption tracks (new `POST /api/videos/caption-tracks`, authenticated) and shows a language dropdown when tracks exist; the choice is persisted as `caption_language` on the job and threaded into caption fetching. Defaults to auto (English) when unset. Migration 014 adds the nullable `processing_jobs.caption_language` column. This selects among existing tracks only — it does not translate.
+
+## [1.11.1] - 2026-07-21
+
+### Changed
+- docs(readme): correct the `scripts/` list to the files that actually exist (deploy.sh, push-backend.sh, setup-staging.sh, batch_process.py).
+- docs: soften a stray "production-ready" line in docs/README.my.notes.md; point to the audit reports for known limitations.
+
+### Added
+- chore(community): CODE_OF_CONDUCT.md (Contributor Covenant 2.1), PR template, and bug/feature issue templates.
+- chore(ci): Dependabot now covers npm (frontend) and docker (backend + frontend Dockerfiles) in addition to pip and github-actions.
+- docs(audits): 2026-07-21 job-ready audit report.

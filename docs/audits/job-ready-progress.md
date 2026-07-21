@@ -1,34 +1,47 @@
 # Job-Ready Progress — vidistiller
 
-Mode history: 2026-07-20 morning = full default run (stages 1–9, condensed 5–8). 2026-07-20 evening = `--quick` validation run of the updated skill (stages 1–3 + 9). Schema below follows the updated Progress File Schema; entries updated in place, newest state wins.
+Mode history: 2026-07-20 = earlier runs (see git history). 2026-07-21 = full pipeline with fix-through goal; stages 5–8 delegated to parallel audit agents (marked [condensed] since the standalone /gauntlet, /arch-audit, /ci-gate, /bulletproof skills were not run directly). Newest state wins.
 
-## Stage 1 — First Impression: FAIL (2026-07-20, --quick re-run)
-- verdict: unchanged from full run — topology leak + missing community files + no demo visual stand.
-- blockers: 2 HIGH, 2 MED, 2 LOW
-- evidence: deploy/ (terraform+ansible node names, 10.255.x.x, bridges), .env.example:72-75, .github/workflows/deploy.yml:187, .superharness/ (8 tracked files); features_to_add/Handoff_SlideFeature_Max.docx; README.md:9 pink span; no SECURITY.md/CODE_OF_CONDUCT/templates.
-- secret triage (new rule applied): gitleaks full history = 50 candidates → 0 live secrets. 48× internal-IPv4 fixtures (severity MED, topology finding above), 2× example/fixture (doc JWT schemas.py:574, example Fernet key .env.example:33 — LOW hygiene). No halt, no rotation.
-- visibility: PUBLIC (confirmed via gh repo view).
+## Stage 1 — Recruiter First-Impression: PASS (2026-07-21)
+- verdict: strong metadata + clean tracked tree; no visual demo above fold
+- blockers: 0 (no live secret; scanner hits all category-b fixture/history)
+- evidence: gh repo view; gitleaks 85 hits (84 ipv4 10.255.x, 1 historical Fernet at e680e2a4); README.md:1-40
 
-## Stage 2 — Git History & Releases: FAIL (2026-07-20, --quick re-run)
-- verdict: unchanged — branch litter + version drift.
-- blockers: 2 MED, 1 LOW
-- evidence (tooling-caution rule applied, direct unpiped counts): main = 108 commits, all refs = 245 commits, 47 local + 88 remote branches. Morning's piped "50 commits" was proxy truncation — corrected.
-- squash-merge-aware classification (new rule): 33/47 local branches match merged-PR head refs → deletable; 78/88 remote same. Unmatched locals: main + fix/gitleaks-pii-regex-backport (active) + ~12 no-PR leftovers (need individual review). Ancestry method had reported only 2 local / 15 remote — the new rule roughly triples the defensible delete list.
-- version drift: pyproject 1.10.6 / frontend 1.10.11 / latest tag v1.10.10.
+## Stage 2 — Git History & Release Hygiene: PASS (2026-07-21)
+- verdict: recent history exemplary; 27 stale merged branches to delete
+- blockers: 0
+- evidence: git cherry classification (27 patch-equiv, 21 unmerged incl 11 dependabot); 41 tags; releases current
 
-## Stage 3 — README + Docs: NEEDS WORK (2026-07-20, --quick re-run)
-- verdict: unchanged — 4 broken links, stale AWS-terraform claim, 4 root-level docs, docs/README.my.notes.md.
-- blockers: 0 (4 risks, 3 nits)
-- evidence: README.md:141,142,327 (broken links), README.md:236 (AWS claim), DESIGN_SPEC.md / ROADMAP.md / TECH_STACK.md / VidDocs_UI_UX_Audit_Report.md at root.
+## Stage 3 — README + Docs: NEEDS WORK (2026-07-21)
+- verdict: honest, well-structured; scripts/ drift + no demo
+- blockers: 0
+- evidence: README ~227 stale script names (FIXED in chore/job-ready-polish); no screenshot
 
-## Stage 4 — not run (--quick). Last full result 2026-07-20 morning: FAIL — quickstart broken from fresh clone (bind mount shadows /app/deps); 1 HIGH npm CVE (form-data); ecdsa PYSEC-2026-1325 (no fix).
-## Stage 5 — not run (--quick). Last full result: PASS [condensed] — 411+224 tests, ShipGuard 0 CRIT/HIGH, 14 MED.
-## Stage 6 — not run (--quick). Last full result: PASS [condensed].
-## Stage 7 — not run (--quick). Last full result: FAIL [condensed] — no branch protection, gitleaks scans only latest commit, npm install vs ci, toolchain drift.
-## Stage 8 — not run (--quick). Last full result: FAIL [condensed] — quickstart/AWS/version claims falsified.
+## Stage 4 — Fresh-Clone + Deps: PASS quickstart / FAIL alembic (2026-07-21)
+- verdict: docker compose up works via create_all; alembic path broken (Stage 6)
+- blockers: 0 for quickstart
+- evidence: main.py:107 create_all; 474 backend + 235 frontend tests; pip-audit gated
 
-## Skill-validation notes (--quick run of the 2026-07-20 updated skill)
-- Tooling caution rule caught a real error retroactively (commit count).
-- Squash-merge trap rule changed the Stage 2 cleanup plan materially (2→33 local deletable branches).
-- Secret triage rule formalized what was previously improvised; pipeline correctly did not halt.
-- Progress file now follows the schema; `continue` can resume at Stage 4.
+## Stage 5 — Hardening: NEEDS WORK [condensed] (2026-07-21)
+- verdict: no criticals; fail-open paths, no token revocation, 3 unauth fetch endpoints
+- blockers: 0 critical
+- evidence: rate_limit.py:46-48; jobs.py:283-287; videos.py:84,141,235; docker resource limits
+
+## Stage 6 — Architecture: NEEDS WORK [condensed] (2026-07-21)
+- verdict: 2 CRITICAL — alembic env.py missing + broken revision chain; fresh alembic setup impossible
+- blockers: 2 (alembic/DR only; quickstart unaffected)
+- evidence: git ls-files migrations/ (no env.py); 001/007/009/011 empty stubs at a661f2aa
+
+## Stage 7 — CI Governance: NEEDS WORK [condensed] (2026-07-21)
+- verdict: gating + SHA-pinning solid; no required reviews, admins exempt, ungated tag-publish, dependabot gaps (npm/docker FIXED)
+- blockers: 0
+- evidence: branches/main/protection; docker-publish.yml no needs:; dependabot.yml
+
+## Stage 8 — Claims vs Reality: PASS [condensed] (2026-07-21)
+- verdict: underclaims deliberately; honesty 9/10; cosmetic drift only (FIXED)
+- blockers: 0
+- evidence: source_resolver.py all 7 platforms real; README scripts/ + .notes overclaim (both FIXED)
+
+## Stage 9 — Scorecard: NEEDS POLISH (2026-07-21)
+- verdict: hard gates pass (quickstart works, tests green, LICENSE, no live secret, no HIGH CVE); capped at NEEDS POLISH by condensed stages 5-8 + open MED findings + 2 alembic CRITICALs
+- blockers: alembic chain (decision), hardening (decision), branch protection (decision)
