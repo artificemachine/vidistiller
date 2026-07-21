@@ -306,3 +306,8 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - chore(deploy): docker-compose.prod.yml image tags are now `${VIDISTILLER_IMAGE_TAG:-latest}` instead of a hardcoded `latest`. Pinning a release makes the running version knowable from configuration and turns a rollback into a one-line .env change. Behaviour is unchanged when the variable is unset.
 - docs: .env.example documents VIDISTILLER_IMAGE_TAG. The production host has been pinned to 1.10.16 and its incident-era SECRET_KEY entry removed, now that 1.10.16 reads JWT_SECRET_KEY; that entry never existed in this repository's compose file.
+
+## [1.10.18] - 2026-07-21
+
+### Fixed
+- fix(captions): YouTubeCaptionProvider ignored the requested language and handed every available language code to find_manually_created_transcript, returning the first match. For an auto-dubbed video (which exposes a manually-created caption track per dub language) that was a dub, not the original, so an English video could be transcribed in Arabic. Selection now prefers the requested language via find_transcript, then any manual track, then the first available. _fetch_platform_captions threads the language through to both providers.
