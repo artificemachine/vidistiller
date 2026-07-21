@@ -337,3 +337,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(migrations): consolidate the broken alembic chain into a single squashed baseline and restore migrations/env.py. The prior chain was unrunnable from a fresh clone — revisions 001/007/009/011 were committed as empty stubs then deleted, leaving dangling down_revision references, and env.py had been removed. Both dev and prod build the schema from the models via create_all at startup, so alembic had drifted into a decorative broken state. `alembic upgrade head` now works from a fresh clone and builds the full current schema (verified: 10 tables incl. caption_language). The baseline uses create_all with checkfirst, so it is a safe no-op on an already-populated database. Prod reconciliation (schema already create_all-built): `alembic stamp --purge 0001_squashed_baseline` if a stale version stamp exists.
+
+## [1.11.4] - 2026-07-21
+
+### Changed
+- chore(ci): docker-publish.yml now gates image publishing on a test job (`build-and-push` needs `test`). A `v*` tag push previously built and pushed images to Docker Hub with no test run; backend + frontend tests must now pass first.
