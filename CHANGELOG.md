@@ -342,3 +342,13 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(ci): docker-publish.yml now gates image publishing on a test job (`build-and-push` needs `test`). A `v*` tag push previously built and pushed images to Docker Hub with no test run; backend + frontend tests must now pass first.
+
+## [1.12.0] - 2026-07-21
+
+### Changed
+- fix(config): all 16 sub-settings now use default_factory instead of building at class-definition time, so environment changes are read when Settings() is constructed rather than frozen at module import.
+- fix(db): the Video, Transcript, TranscriptSegment, Snapshot and Document foreign keys now declare ON DELETE CASCADE at the database level, matching the ORM cascade so raw/bulk deletes cannot orphan rows.
+- fix(ops): prod docker-compose now sets mem_limit and cpus on every service (postgres, redis, api, web, pgadmin), not just celery_worker.
+
+### Added
+- feat(health): /readyz readiness probe that checks database and Redis liveness and returns 503 when a dependency is down, distinct from the static /health liveness probe.

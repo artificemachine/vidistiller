@@ -157,7 +157,7 @@ class Video(Base):
     __tablename__ = "videos"
 
     id: int = Column(Integer, primary_key=True)
-    job_id: int = Column(Integer, ForeignKey("processing_jobs.id"), nullable=False)
+    job_id: int = Column(Integer, ForeignKey("processing_jobs.id", ondelete="CASCADE"), nullable=False)
     url: str = Column(String(512), nullable=False)
     video_id: str = Column(String(100), nullable=False)
     source_type: Optional[str] = Column(String(20), nullable=True)
@@ -196,7 +196,7 @@ class Transcript(Base):
     __tablename__ = "transcripts"
 
     id: int = Column(Integer, primary_key=True)
-    job_id: int = Column(Integer, ForeignKey("processing_jobs.id"), nullable=False)
+    job_id: int = Column(Integer, ForeignKey("processing_jobs.id", ondelete="CASCADE"), nullable=False)
     full_text: str = Column(Text, nullable=False)
     language: str = Column(String(10), default="en", nullable=False)
     source: Optional[str] = Column(String(50), nullable=True)  # youtube_captions, whisper_api, whisper_local
@@ -233,7 +233,7 @@ class TranscriptSegment(Base):
     __tablename__ = "transcript_segments"
 
     id: int = Column(Integer, primary_key=True)
-    transcript_id: int = Column(Integer, ForeignKey("transcripts.id"), nullable=False)
+    transcript_id: int = Column(Integer, ForeignKey("transcripts.id", ondelete="CASCADE"), nullable=False)
     text: str = Column(String(2048), nullable=False)
     start_time: float = Column(Float, nullable=False)  # seconds
     end_time: float = Column(Float, nullable=False)  # seconds
@@ -269,7 +269,7 @@ class Snapshot(Base):
     __tablename__ = "snapshots"
 
     id: int = Column(Integer, primary_key=True)
-    job_id: int = Column(Integer, ForeignKey("processing_jobs.id"), nullable=False)
+    job_id: int = Column(Integer, ForeignKey("processing_jobs.id", ondelete="CASCADE"), nullable=False)
     file_path: str = Column(String(512), nullable=False)  # relative path to image
     timestamp: float = Column(Float, nullable=False)  # seconds in video
     relevance_score: Optional[float] = Column(Float, nullable=True)  # 0.0-1.0, importance
@@ -306,7 +306,7 @@ class Document(Base):
     __tablename__ = "documents"
 
     id: int = Column(Integer, primary_key=True)
-    job_id: int = Column(Integer, ForeignKey("processing_jobs.id"), nullable=False)
+    job_id: int = Column(Integer, ForeignKey("processing_jobs.id", ondelete="CASCADE"), nullable=False)
     title: str = Column(String(512), nullable=False)
     content: str = Column(Text, nullable=False)
     format: str = Column(String(50), default="markdown", nullable=False)  # markdown, html, pdf
