@@ -435,3 +435,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - refactor(ui): the portrait aspect-ratio fix (1.12.15) now sources dimensions primarily from the backend-captured `image_width`/`image_height` (measured once at frame capture and already stored per snapshot/slide) instead of the browser's on-load natural size. Deterministic, no 16:9-to-real layout shift on load. The `page.tsx` snapshot mapping was dropping those fields; now threaded through. On-load natural size is retained only as a fallback for legacy rows with null dimensions.
+
+## [1.12.16] - 2026-07-22
+
+### Changed
+- chore: commit GEMINI.md (Gemini agent doctrine, was untracked since scaffold) and two session audit reports (docs/audits/2026-07-20-job-ready-final.md, docs/bulletproof-report-2026-07-22.md) that follow the repo's existing committed-audit convention. gitignore e2e/test-results/ (Playwright transient run artifacts, was never excluded) and delete the stray directory.

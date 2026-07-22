@@ -193,3 +193,4 @@ features_to_add/
 .voice-toolkit-project
 HANDOFF.md
 frontend/test-results/
+e2e/test-results/
