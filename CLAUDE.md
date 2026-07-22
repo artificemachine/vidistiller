@@ -45,7 +45,7 @@ Project-specific rules and conventions. For global rules, see `~/.claude/CLAUDE.
 ---
 
 ## Backend Conventions
-- Python 3.12, PEP 8, type hints on all signatures
+- Python 3.12+ (floor set by `pyproject.toml` `requires-python`; Docker/prod track whatever version Dependabot has most recently verified — no separate pinned version to keep in sync manually), PEP 8, type hints on all signatures
 - SQLAlchemy 2.0+ with DeclarativeBase
 - Pydantic for API schemas, FastAPI Depends() for DI
 - Celery + Redis for background job processing
