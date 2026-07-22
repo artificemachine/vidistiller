@@ -422,3 +422,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - docs(claude): CLAUDE.md's stated Python version updated from a hardcoded "3.12" to reflect the actual convention -- 3.12+ is the floor (pyproject.toml), CI pins 3.12 explicitly (test.yml), and Docker/prod track whatever version Dependabot has most recently verified (currently 3.14, per the python:3.12-slim->3.14-slim base image bump). Decision: single-version-tracking going forward rather than restoring the old deliberate dual-version testing split, since CI's pinned 3.12 matrix already provides that coverage automatically.
+
+## [1.12.14] - 2026-07-22
+
+### Fixed
+- fix(ci): Deploy workflow's SAST gate failed on every main push. `shipguard scan` exits non-zero on ANY finding, and GitHub's default `bash -eo pipefail` aborted the step before the python severity-gate (which fails only on critical/high) could run -- so `publish` and `deploy-production` (both `needs: [security]`) were perpetually SKIPPED. Added `|| true` to the scan line so the python gate is the real decision point. Prod was unaffected (deploys were done manually); this restores the intended auto-publish/auto-deploy path.
