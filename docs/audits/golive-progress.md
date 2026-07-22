@@ -38,7 +38,7 @@ Resume state only. `continue` resumes at the first stage with no entry below.
 - duration: 20
 
 ## Stage 7 — CI/CD Governance + 7b Conditional Checks: PASS (2026-07-22)
-- verdict: ran-full (ci-gate + infra-probe both available). ci-gate PASS (0 fail/warn, 1 MED: e2e-tests not in required checks). infra-probe PASS live against prod 10.255.181.20 v1.12.17 (2 LOW: public /docs+/openapi.json, .env backup accumulation). 7b installability N/A (not an installable tool)
+- verdict: ran-full (ci-gate + infra-probe both available). ci-gate PASS (0 fail/warn, 1 MED: e2e-tests not in required checks). infra-probe PASS live against prod (operator IPv4 redacted per repo gitleaks rule) v1.12.17 (2 LOW: public /docs+/openapi.json, .env backup accumulation). 7b installability N/A (not an installable tool)
 - blockers: 0
 - evidence: 2 subagent audits (ci-gate + live infra-probe with real HTTP/redis/rate-limit tests against prod)
 - duration: 45
