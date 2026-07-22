@@ -17,8 +17,8 @@
 
 ## Infra
 - [ ] HTTPS/TLS via Caddy reverse proxy
-- [ ] CI/CD pipeline (GitHub Actions)
-- [ ] Backup strategy (PostgreSQL + data)
+- [x] CI/CD pipeline (GitHub Actions) — `.github/workflows/{test,security,deploy,docker-publish,gitleaks}.yml` all run on every push/PR; the 2026-04-26 incident (green CI didn't catch a broken release) was a fix to the run-on-push posture, so the pipeline blocks a release on broken tests
+- [ ] Backup strategy (PostgreSQL + data) — backup scripts drafted at `docs/VM_DEPLOYMENT.md` ~line 840; automated-restore drill not yet run, leaving this `[ ]` until that drill confirms end-to-end recoverability
 
 ## Quality
 - [x] E2E tests with Playwright

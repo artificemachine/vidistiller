@@ -22,7 +22,7 @@ Snapshots of design decisions and hardening work, each self-labeled with a statu
 - [M2M_AUTH_DESIGN.md](M2M_AUTH_DESIGN.md) (implemented): design notes for the API key authentication path used by non-interactive clients.
 
 ## Internal
-- [README.my.notes.md](README.my.notes.md): personal/internal notes, not canonical documentation.
+Personal/internal agent session notes are gitignored (see root `.gitignore`'s `docs/README.my.notes.md` entry). The file may exist as a local untracked artifact; do not commit it.
 
 ## Maintenance Rule
 When adding or changing behavior, update the most relevant doc in this folder in the same PR. When linking a new doc here, verify the link resolves before committing — this index previously linked to six files that did not exist.
