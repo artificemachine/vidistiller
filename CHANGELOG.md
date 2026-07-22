@@ -480,3 +480,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(docker): backend/Dockerfile never COPYed alembic.ini or migrations/ into the image at all -- only backend/ was copied. Prod and staging compose files bind-mount both over the top at runtime (compose-file-specific, fragile), which is why prod's migration step worked while docker-compose.e2e.yml (no such bind mount) failed with "No script_location key found in configuration" the moment main.py stopped silently creating tables via create_all(). Baked both into the image directly so `alembic upgrade head` works in any context, bind-mounted or not.
+
+## [Unreleased] - 2026-07-22
+
+### Changed
+- chore(audits): commit the 2026-07-22 /golive report (docs/audits/2026-07-22-golive.md + .json) and per-stage progress file (docs/audits/golive-progress.md). Verdict was NOT READY on a mechanical trigger (the sharp/libvips HIGH CVE, since fixed in v1.12.18); the report's substantive findings are being addressed by the follow-up entries below. Follows the repo's existing committed-audit convention (prior docs/audits/* reports are tracked).
