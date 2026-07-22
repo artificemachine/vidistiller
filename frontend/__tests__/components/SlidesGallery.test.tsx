@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SlidesGallery from '@/components/SlidesGallery';
 
@@ -88,5 +88,47 @@ describe('SlidesGallery', () => {
     );
     await user.click(thumbnails[2]);
     expect(onChange).toHaveBeenCalledWith(2);
+  });
+
+  // Preview-aspect coverage mirroring SnapshotsGallery.test.tsx.
+  // Both galleries share useGalleryPreview; these guard the slide path against
+  // regressions (portrait slides must not be forced into a 16:9 box).
+  it('preview uses the backend-captured dimensions (portrait not forced to 16:9)', () => {
+    const portrait = [
+      {
+        id: 1,
+        slide_number: 1,
+        start_timestamp: 0,
+        end_timestamp: 60,
+        image_url: '/static/slides/job1/portrait.jpg',
+        image_width: 1080,
+        image_height: 1920,
+      },
+    ];
+    render(<SlidesGallery slides={portrait} />);
+    // Both the main preview and the thumbnail carry alt="slide 1"; the preview
+    // renders first in DOM order.
+    const preview = screen.getAllByAltText('slide 1')[0] as HTMLImageElement;
+    const box = preview.parentElement as HTMLElement;
+    // Set from backend dims immediately, before the image ever loads.
+    expect(box.style.aspectRatio).toBe('1080/1920');
+  });
+
+  it('falls back to the loaded image natural aspect ratio when backend dims are absent', () => {
+    render(<SlidesGallery slides={mockSlides} />);
+    const preview = screen.getAllByAltText('slide 1')[0] as HTMLImageElement;
+    const box = preview.parentElement as HTMLElement;
+    expect(box.style.aspectRatio).toBe('16/9'); // no dims yet, no load
+    Object.defineProperty(preview, 'naturalWidth', { value: 1080, configurable: true });
+    Object.defineProperty(preview, 'naturalHeight', { value: 1920, configurable: true });
+    fireEvent.load(preview);
+    expect(box.style.aspectRatio).toBe('1080/1920');
+  });
+
+  it('preview and thumbnail images use object-contain so portrait frames are not cropped', () => {
+    render(<SlidesGallery slides={mockSlides} />);
+    const imgs = screen.getAllByAltText(/^slide \d+$/) as HTMLImageElement[];
+    expect(imgs.length).toBeGreaterThanOrEqual(1);
+    imgs.forEach((img) => expect(img.className).toContain('object-contain'));
   });
 });

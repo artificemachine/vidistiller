@@ -11,8 +11,8 @@
     "type-check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test --config=../e2e/playwright.config.ts",
-    "test:e2e:ui": "playwright test --config=../e2e/playwright.config.ts --ui"
+    "test:e2e": "NODE_PATH=./node_modules playwright test --config=../e2e/playwright.config.ts",
+    "test:e2e:ui": "NODE_PATH=./node_modules playwright test --config=../e2e/playwright.config.ts --ui"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.49.0",

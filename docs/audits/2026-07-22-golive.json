@@ -1,0 +1,26 @@
+{
+  "date": "2026-07-22",
+  "project": "vidistiller",
+  "head": "e0641b8",
+  "version": "1.12.17",
+  "stages": [
+    {"n": 1, "name": "First impression", "verdict": "PASS", "blockers": 0, "provenance": "ran-full"},
+    {"n": 2, "name": "Git history & releases", "verdict": "PASS", "blockers": 0, "provenance": "ran-full"},
+    {"n": 3, "name": "README + docs", "verdict": "NEEDS WORK", "blockers": 0, "provenance": "ran-full"},
+    {"n": 4, "name": "Fresh clone + deps", "verdict": "NEEDS WORK", "blockers": 0, "provenance": "ran-full"},
+    {"n": 5, "name": "Gauntlet", "verdict": "NEEDS WORK", "blockers": 0, "provenance": "ran-full"},
+    {"n": 6, "name": "Architecture", "verdict": "NEEDS WORK", "blockers": 0, "provenance": "ran-full"},
+    {"n": 7, "name": "CI/CD governance", "verdict": "PASS", "blockers": 0, "provenance": "ran-full"},
+    {"n": 8, "name": "Deployment & installability", "verdict": "PASS", "blockers": 0, "provenance": "ran-full"},
+    {"n": 9, "name": "Claims vs reality", "verdict": "NEEDS WORK", "blockers": 0, "provenance": "ran-full"}
+  ],
+  "verdict": "NOT READY",
+  "not_ready_trigger": "unpatched HIGH-severity dependency CVE: sharp@0.34.5 (4x libvips CVE-2026-33327/33328/35590/35591), regression since 2026-07-20",
+  "top_fixes": [
+    "Pin sharp to >=0.35.0 (fixes the NOT READY trigger)",
+    "Delete/deprecate dead root services/ tree; implement or remove scripts/batch_process.py",
+    "Resolve Alembic-vs-startup-ALTER-loop schema-management gap (CRITICAL, arch-audit)",
+    "Fix documented `npm run test:e2e` command (fails on fresh clone, needs undocumented NODE_PATH)",
+    "Extract duplicated aspect-ratio logic to a shared hook; add SlidesGallery + crypto.py + api_key_auth.py test coverage"
+  ]
+}
