@@ -21,8 +21,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings, Settings, Environment
-from sqlalchemy import text
-from app.db.session import health_check, engine, Base
+from app.db.session import health_check
 from app.routes import router as api_router
 from app.routes.media import router as media_router
 from app.middleware import RequestLoggingMiddleware
@@ -96,34 +95,19 @@ _init_sentry(settings)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Verify database connectivity and ensure tables exist on startup."""
+    """Verify database connectivity on startup.
+
+    Schema is managed exclusively by Alembic (`alembic upgrade head`), run as
+    a separate deploy/quickstart step -- never here. Running DDL from inside
+    the app's own startup path let this drift silently for a long time: see
+    migrations/versions/0001_squashed_baseline.py for the incident history.
+    """
     try:
         health_check()
         logger.info("✅ Database connection healthy on startup")
     except Exception as e:
         logger.error(f"❌ Database health check failed on startup: {e}")
         raise
-
-    import app.db.models  # noqa: F401 — register models with Base metadata
-    Base.metadata.create_all(bind=engine)
-
-    # Ensure nullable columns added after initial schema creation exist on older DBs.
-    # create_all() does not ALTER existing tables, so we add missing columns explicitly.
-    # Each statement runs in its own transaction: on Postgres, an ALTER that
-    # fails because the column already exists aborts the current transaction, and
-    # without a rollback every subsequent statement in the loop would also fail
-    # with "current transaction is aborted" — silently skipping real new columns.
-    for col_def in [
-        "ALTER TABLE processing_jobs ADD COLUMN slide_status VARCHAR(20)",
-        "ALTER TABLE processing_jobs ADD COLUMN caption_language VARCHAR(10)",
-        "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0",
-    ]:
-        with engine.connect() as conn:
-            try:
-                conn.execute(text(col_def))
-                conn.commit()
-            except Exception:
-                conn.rollback()  # column already exists (or unsupported) — move on cleanly
 
     yield
 
