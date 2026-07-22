@@ -237,7 +237,6 @@ Automation helpers for common tasks:
 - `deploy.sh` — deploy the stack to a configured host
 - `push-backend.sh` — build and push the backend image
 - `setup-staging.sh` — bring up a staging environment
-- `batch_process.py` — processes multiple video URLs in one go
 
 ### `terraform/` — Infrastructure as Code
 

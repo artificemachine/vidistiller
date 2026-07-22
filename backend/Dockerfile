@@ -44,9 +44,8 @@ RUN groupadd --gid 1001 appgroup && \
 
 # Copy application source
 COPY backend/ ./
-COPY services/ /services/
 
-RUN chown -R appuser:appgroup /app /services /data
+RUN chown -R appuser:appgroup /app /data
 
 USER appuser
 
