@@ -22,7 +22,7 @@ httpx>=0.25.0
 
 # Video Processing
 opencv-python>=5.0.0.93
-moviepy>=1.0.3
+moviepy>=2.2.1
 pillow>=12.3.0
 ffmpeg-python>=0.2.0
 scikit-image>=0.26.0
