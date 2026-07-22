@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SnapshotsGallery from '@/components/SnapshotsGallery';
 
@@ -64,5 +64,26 @@ describe('SnapshotsGallery', () => {
     // Should clamp to last item
     const preview = screen.getByAltText('snapshot at 1:00');
     expect(preview).toBeInTheDocument();
+  });
+
+  it('preview adopts the loaded image natural aspect ratio (portrait not forced to 16:9)', () => {
+    render(<SnapshotsGallery snapshots={mockSnapshots} />);
+    const preview = screen.getByAltText('snapshot at 0:10') as HTMLImageElement;
+    // jsdom leaves naturalWidth/Height at 0; simulate a portrait Short frame.
+    Object.defineProperty(preview, 'naturalWidth', { value: 1080, configurable: true });
+    Object.defineProperty(preview, 'naturalHeight', { value: 1920, configurable: true });
+    fireEvent.load(preview);
+    const box = preview.parentElement as HTMLElement;
+    expect(box.style.aspectRatio).toBe('1080/1920');
+  });
+
+  it('thumbnails use object-contain so portrait frames are not cropped', () => {
+    render(<SnapshotsGallery snapshots={mockSnapshots} />);
+    const thumbImgs = screen
+      .getAllByRole('button')
+      .map((b) => b.querySelector('img'))
+      .filter((img): img is HTMLImageElement => img !== null);
+    expect(thumbImgs.length).toBe(3);
+    thumbImgs.forEach((img) => expect(img.className).toContain('object-contain'));
   });
 });

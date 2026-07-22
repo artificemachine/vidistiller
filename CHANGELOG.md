@@ -427,3 +427,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(ci): Deploy workflow's SAST gate failed on every main push. `shipguard scan` exits non-zero on ANY finding, and GitHub's default `bash -eo pipefail` aborted the step before the python severity-gate (which fails only on critical/high) could run -- so `publish` and `deploy-production` (both `needs: [security]`) were perpetually SKIPPED. Added `|| true` to the scan line so the python gate is the real decision point. Prod was unaffected (deploys were done manually); this restores the intended auto-publish/auto-deploy path.
+
+## [1.12.15] - 2026-07-22
+
+### Fixed
+- fix(ui): portrait snapshots/slides (e.g. YouTube Shorts, 9:16) were forced into a hardcoded 16:9 container -- cropped in thumbnail grids (object-cover) and letterboxed in previews. Galleries now derive the preview aspect ratio from each image's natural dimensions on load (SnapshotsGallery, SlidesGallery), thumbnails use object-contain (no crop), and inline summary/snapshot thumbs render at natural height. Capture was already correct; this was purely a display bug. Added regression tests asserting natural-AR adoption and no-crop thumbnails.

@@ -421,8 +421,7 @@ export default function JobDetail() {
           <img
             src={`${baseUrl}${snap.image_url}`}
             alt={`snapshot at ${Math.floor(snap.timestamp)}s`}
-            className="w-full object-cover"
-            style={{ aspectRatio: '16/9' }}
+            className="w-full h-auto block"
           />
           <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 text-center font-mono">
             {`${Math.floor(snap.timestamp / 3600).toString().padStart(2, '0')}:${Math.floor((snap.timestamp % 3600) / 60).toString().padStart(2, '0')}:${Math.floor(snap.timestamp % 60).toString().padStart(2, '0')}`}
@@ -465,8 +464,7 @@ export default function JobDetail() {
                   <img
                     src={imgUrl}
                     alt={`snapshot at ${imgMatch[1]}`}
-                    className="w-full object-cover"
-                    style={{ aspectRatio: '16/9' }}
+                    className="w-full h-auto block"
                   />
                   <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 text-center font-mono">
                     {imgMatch[1]}

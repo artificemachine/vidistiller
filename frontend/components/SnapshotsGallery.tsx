@@ -18,6 +18,10 @@ interface SnapshotsGalleryProps {
 
 export default function SnapshotsGallery({ snapshots, onDelete, externalSelectedIndex, onSelectedIndexChange }: SnapshotsGalleryProps) {
   const [internalIndex, setInternalIndex] = useState(0);
+  // Aspect ratio of the main preview, derived from the loaded image's natural
+  // dimensions. Portrait sources (e.g. YouTube Shorts, 9:16) must not be forced
+  // into a 16:9 box — that letterboxes or crops them. Fallback until first load.
+  const [previewAspect, setPreviewAspect] = useState('16/9');
 
   if (!snapshots || snapshots.length === 0) {
     return <div className="text-gray-500 dark:text-gray-400 text-sm">no snapshots captured yet. use the player above to capture frames.</div>;
@@ -46,12 +50,16 @@ export default function SnapshotsGallery({ snapshots, onDelete, externalSelected
 
       {/* Main preview */}
       <div className="mb-3">
-        <div className="relative bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
+        <div className="relative bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden mx-auto" style={{ aspectRatio: previewAspect, maxHeight: '70vh' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`${baseUrl}${current.image_url}`}
             alt={`snapshot at ${formatTime(current.timestamp)}`}
             className="w-full h-full object-contain"
+            onLoad={(e) => {
+              const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
+              if (w && h) setPreviewAspect(`${w}/${h}`);
+            }}
           />
         </div>
         <div className="flex justify-between items-center mt-1 text-sm">
@@ -80,7 +88,7 @@ export default function SnapshotsGallery({ snapshots, onDelete, externalSelected
               <img
                 src={`${baseUrl}${snapshot.image_url}`}
                 alt={`thumbnail at ${formatTime(snapshot.timestamp)}`}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-contain"
               />
               <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs px-1 py-0.5 text-center font-mono">
                 {formatTime(snapshot.timestamp)}

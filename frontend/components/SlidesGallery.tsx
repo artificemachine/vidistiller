@@ -28,6 +28,9 @@ export default function SlidesGallery({
   onSelectedIndexChange,
 }: SlidesGalleryProps) {
   const [internalIndex, setInternalIndex] = useState(0);
+  // Derived from the loaded image's natural dimensions so portrait sources
+  // (e.g. Shorts, 9:16) render at their true aspect instead of a forced 16:9.
+  const [previewAspect, setPreviewAspect] = useState('16/9');
 
   if (!slides || slides.length === 0) {
     return (
@@ -61,12 +64,16 @@ export default function SlidesGallery({
       {/* Main preview */}
       <div className="mb-3">
         {current.image_url ? (
-          <div className="relative bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
+          <div className="relative bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden mx-auto" style={{ aspectRatio: previewAspect, maxHeight: '70vh' }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={`${baseUrl}${current.image_url}`}
               alt={`slide ${current.slide_number}`}
               className="w-full h-full object-contain"
+              onLoad={(e) => {
+                const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
+                if (w && h) setPreviewAspect(`${w}/${h}`);
+              }}
             />
             <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded font-mono">
               slide {current.slide_number}
@@ -109,7 +116,7 @@ export default function SlidesGallery({
               <img
                 src={`${baseUrl}${slide.image_url}`}
                 alt={`slide ${slide.slide_number}`}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-contain"
               />
             ) : (
               <div className="w-full h-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
