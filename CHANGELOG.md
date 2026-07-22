@@ -445,3 +445,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - docs(readme): replaced the two README screenshots (stale at v1.10.16, unredacted username visible in the nav) with three current v1.12.16 captures -- landing page, job workspace (transcript + player + snapshots), and jobs dashboard. Converted PNG source captures to WebP (5.5MB -> 148KB combined; per-image 4.2MB -> 22-84KB) so no image exceeds the pre-commit binary-size gate and no git-lfs is needed. Username redacted via solid-box overlay (not blur) on all three before compression. Assets live under the existing docs/assets/ convention.
+
+## [1.12.18] - 2026-07-22
+
+### Fixed
+- fix(deps): sharp@0.34.5 (transitive via next, production) carried 4 unpatched HIGH-severity libvips CVEs (CVE-2026-33327/33328/35590/35591). Added an npm `overrides` pin (`sharp: ^0.35.0`) since sharp isn't a direct dependency. `npm audit --production` now reports 0 vulnerabilities (was 2 high, 1 low pre-fix on the dev-dependency side). Verified: 238/238 frontend tests pass, production build succeeds on all 11 routes. Found by /golive Stage 4's fresh-clone dependency-health check -- this was the pipeline's single mechanical NOT READY trigger.
