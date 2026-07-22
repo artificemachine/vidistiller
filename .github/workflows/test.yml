@@ -125,6 +125,11 @@ jobs:
           timeout 120 bash -c 'until curl -sf http://localhost:8000/health; do sleep 3; done'
           timeout 60 bash -c 'until curl -sf http://localhost:3000; do sleep 3; done'
 
+      - name: Run e2e migrations
+        run: |
+          sleep 5
+          docker compose -f docker-compose.e2e.yml exec -T api sh -c 'cd /app && python -m alembic upgrade head'
+
       - name: Run e2e tests
         env:
           E2E_BASE_URL: http://localhost:3000
