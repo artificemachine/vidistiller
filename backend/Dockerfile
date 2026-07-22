@@ -45,6 +45,15 @@ RUN groupadd --gid 1001 appgroup && \
 # Copy application source
 COPY backend/ ./
 
+# Alembic config/migrations live at the repo root, not under backend/. Prod
+# and staging bind-mount these over the top at runtime (see
+# docker-compose.prod.yml), but that's compose-file-specific and fragile --
+# baking them into the image means `alembic upgrade head` works in any
+# context (e2e, a plain `docker run`, a compose file that forgets the
+# bind mount) without depending on it.
+COPY alembic.ini ./alembic.ini
+COPY migrations/ ./migrations/
+
 RUN chown -R appuser:appgroup /app /data
 
 USER appuser

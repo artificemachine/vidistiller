@@ -477,3 +477,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(ci): e2e-tests broke after removing main.py's create_all() (v1.12.20) -- create_all() running automatically on every api boot was the only thing that ever created tables for the e2e stack; nothing in docker-compose.e2e.yml or the e2e CI job ran migrations. Added an explicit "Run e2e migrations" step (alembic upgrade head inside the api container), matching deploy.yml's existing pattern for prod/staging.
+
+### Fixed
+- fix(docker): backend/Dockerfile never COPYed alembic.ini or migrations/ into the image at all -- only backend/ was copied. Prod and staging compose files bind-mount both over the top at runtime (compose-file-specific, fragile), which is why prod's migration step worked while docker-compose.e2e.yml (no such bind mount) failed with "No script_location key found in configuration" the moment main.py stopped silently creating tables via create_all(). Baked both into the image directly so `alembic upgrade head` works in any context, bind-mounted or not.
