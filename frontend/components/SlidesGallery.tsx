@@ -12,6 +12,8 @@ export interface SlideItem {
   transcript_text?: string;
   is_incremental_build?: boolean;
   ssim_transition_score?: number;
+  image_width?: number;
+  image_height?: number;
 }
 
 interface SlidesGalleryProps {
@@ -28,6 +30,9 @@ export default function SlidesGallery({
   onSelectedIndexChange,
 }: SlidesGalleryProps) {
   const [internalIndex, setInternalIndex] = useState(0);
+  // Fallback aspect from the loaded image's natural size, used only when the
+  // backend didn't record image_width/image_height (legacy rows).
+  const [loadedAspect, setLoadedAspect] = useState<string | null>(null);
 
   if (!slides || slides.length === 0) {
     return (
@@ -40,6 +45,12 @@ export default function SlidesGallery({
   const rawIndex = externalSelectedIndex !== undefined ? externalSelectedIndex : internalIndex;
   const safeIndex = rawIndex < 0 ? slides.length - 1 : Math.min(rawIndex, slides.length - 1);
   const current = slides[safeIndex];
+
+  // Prefer the dimensions the backend captured; fall back to natural size, then 16:9.
+  const previewAspect =
+    current.image_width && current.image_height
+      ? `${current.image_width}/${current.image_height}`
+      : loadedAspect ?? '16/9';
 
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
@@ -61,12 +72,17 @@ export default function SlidesGallery({
       {/* Main preview */}
       <div className="mb-3">
         {current.image_url ? (
-          <div className="relative bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
+          <div className="relative bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden mx-auto" style={{ aspectRatio: previewAspect, maxHeight: '70vh' }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={`${baseUrl}${current.image_url}`}
               alt={`slide ${current.slide_number}`}
               className="w-full h-full object-contain"
+              onLoad={(e) => {
+                // Only used when the backend didn't record dimensions.
+                const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
+                if (w && h) setLoadedAspect(`${w}/${h}`);
+              }}
             />
             <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded font-mono">
               slide {current.slide_number}
@@ -109,7 +125,7 @@ export default function SlidesGallery({
               <img
                 src={`${baseUrl}${slide.image_url}`}
                 alt={`slide ${slide.slide_number}`}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-contain"
               />
             ) : (
               <div className="w-full h-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">

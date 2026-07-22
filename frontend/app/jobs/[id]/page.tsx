@@ -22,6 +22,8 @@ interface SnapshotItem {
   image_url: string;
   timestamp: number;
   detected_text?: string;
+  image_width?: number;
+  image_height?: number;
 }
 
 interface JobDetail {
@@ -59,6 +61,8 @@ interface JobDetail {
     relevance_score: number;
     detected_text?: string;
     image_url?: string;
+    image_width?: number;
+    image_height?: number;
   }>;
   slides: Array<{
     id: number;
@@ -70,6 +74,8 @@ interface JobDetail {
     transcript_text?: string;
     is_incremental_build?: boolean;
     ssim_transition_score?: number;
+    image_width?: number;
+    image_height?: number;
   }>;
 }
 
@@ -142,6 +148,8 @@ export default function JobDetail() {
             image_url: s.image_url || s.file_path,
             timestamp: s.timestamp,
             detected_text: s.detected_text,
+            image_width: s.image_width,
+            image_height: s.image_height,
           }))
         );
       }
@@ -217,6 +225,8 @@ export default function JobDetail() {
         image_url: response.data.image_url,
         timestamp: response.data.timestamp,
         detected_text: response.data.detected_text,
+        image_width: response.data.image_width,
+        image_height: response.data.image_height,
       };
       setSnapshots((prev) => [...prev, newSnapshot]);
       setSelectedSnapshotIndex(-1); // -1 signals "select last"
@@ -421,8 +431,7 @@ export default function JobDetail() {
           <img
             src={`${baseUrl}${snap.image_url}`}
             alt={`snapshot at ${Math.floor(snap.timestamp)}s`}
-            className="w-full object-cover"
-            style={{ aspectRatio: '16/9' }}
+            className="w-full h-auto block"
           />
           <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 text-center font-mono">
             {`${Math.floor(snap.timestamp / 3600).toString().padStart(2, '0')}:${Math.floor((snap.timestamp % 3600) / 60).toString().padStart(2, '0')}:${Math.floor(snap.timestamp % 60).toString().padStart(2, '0')}`}
@@ -465,8 +474,7 @@ export default function JobDetail() {
                   <img
                     src={imgUrl}
                     alt={`snapshot at ${imgMatch[1]}`}
-                    className="w-full object-cover"
-                    style={{ aspectRatio: '16/9' }}
+                    className="w-full h-auto block"
                   />
                   <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 text-center font-mono">
                     {imgMatch[1]}
