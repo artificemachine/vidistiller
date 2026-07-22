@@ -25,11 +25,10 @@ Project-specific rules and conventions. For global rules, see `~/.claude/CLAUDE.
 ## Project Structure
 - `frontend/` — Next.js 14 + React 18 + TypeScript (App Router)
 - `backend/` — FastAPI + SQLAlchemy + Celery
-- `services/` — Reusable service modules (youtube, transcript, snapshot, llm)
 - `scripts/` — Automation scripts (start-app, ship, deploy)
 - `migrations/` — Alembic database migrations
-- `e2e/` — Playwright E2E tests (35 tests across 6 suites; run against `docker-compose.e2e.yml`)
-- Frontend unit tests: 221 tests across 22 suites (Vitest + RTL)
+- `e2e/` — Playwright E2E tests (run against `docker-compose.e2e.yml`)
+- Frontend unit tests: 241 tests across 23 suites (Vitest + RTL)
 
 ---
 
