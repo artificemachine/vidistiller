@@ -440,3 +440,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore: commit GEMINI.md (Gemini agent doctrine, was untracked since scaffold) and two session audit reports (docs/audits/2026-07-20-job-ready-final.md, docs/bulletproof-report-2026-07-22.md) that follow the repo's existing committed-audit convention. gitignore e2e/test-results/ (Playwright transient run artifacts, was never excluded) and delete the stray directory.
+
+## [1.12.17] - 2026-07-22
+
+### Changed
+- docs(readme): replaced the two README screenshots (stale at v1.10.16, unredacted username visible in the nav) with three current v1.12.16 captures -- landing page, job workspace (transcript + player + snapshots), and jobs dashboard. Converted PNG source captures to WebP (5.5MB -> 148KB combined; per-image 4.2MB -> 22-84KB) so no image exceeds the pre-commit binary-size gate and no git-lfs is needed. Username redacted via solid-box overlay (not blur) on all three before compression. Assets live under the existing docs/assets/ convention.
