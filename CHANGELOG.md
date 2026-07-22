@@ -417,3 +417,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(e2e): settings-buttons.spec.ts asserted `successMsg.or(errorMsg).or(savingBtn)` as if the three were mutually exclusive. The save handler sets the success message, then makes a second request (GET /auth/me) before clearing the saving state in a finally block, so the success toast and a disabled "saving..." button are legitimately visible at the same time -- not a third outcome, an implementation detail of a real success. Playwright's strict mode failed the assertion on 2 simultaneous matches. Assert on the two actual terminal states (success/error) instead. Found by a genuine `/portfolio-ready` fresh-clone re-verification surfacing a real e2e failure on main after 9 dependency bumps -- not caused by any single bump, a pre-existing latent test assumption that finally got hit.
+
+## [1.12.13] - 2026-07-22
+
+### Changed
+- docs(claude): CLAUDE.md's stated Python version updated from a hardcoded "3.12" to reflect the actual convention -- 3.12+ is the floor (pyproject.toml), CI pins 3.12 explicitly (test.yml), and Docker/prod track whatever version Dependabot has most recently verified (currently 3.14, per the python:3.12-slim->3.14-slim base image bump). Decision: single-version-tracking going forward rather than restoring the old deliberate dual-version testing split, since CI's pinned 3.12 matrix already provides that coverage automatically.
