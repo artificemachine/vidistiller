@@ -456,3 +456,6 @@ All notable changes to this project will be documented in this file.
 ### Removed
 - chore: deleted the dead root `services/{llm,snapshot,transcript,youtube}/` scaffold -- 9 tracked files, every one a comment-only planning stub with zero implementation, zero imports anywhere in the codebase. Predated and fully superseded by the real implementations under `backend/app/services/`. Undisclosed duplicate naming was flagged independently by three separate audit methodologies (folder-structure idiom check, /bulletproof claim-harvesting, /user-reviewer) in the 2026-07-22 /golive audit.
 - chore: deleted `scripts/batch_process.py` -- README-advertised ("processes multiple video URLs in one go") but 100% comments, zero implementation; ran silently as a no-op instead of erroring. Removed rather than implemented (out of scope for a hygiene pass) per the audit's own "implement or remove" framing. Removed the corresponding README.md scripts/ table entry.
+
+### Fixed
+- fix: docker build/dev-stack broke after removing the dead services/ directory (backend/Dockerfile's `COPY services/ /services/`, docker-compose.yml's `./services:/services` volume mounts on api and celery_worker). Directory was never referenced by PYTHONPATH or runtime code -- removed the dead references, verified docker build succeeds clean.
