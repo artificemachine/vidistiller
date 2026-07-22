@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { formatGalleryTime, useGalleryPreview } from '@/hooks/useGalleryPreview';
 
 interface Snapshot {
   id: number;
@@ -20,11 +21,6 @@ interface SnapshotsGalleryProps {
 
 export default function SnapshotsGallery({ snapshots, onDelete, externalSelectedIndex, onSelectedIndexChange }: SnapshotsGalleryProps) {
   const [internalIndex, setInternalIndex] = useState(0);
-  // Preview aspect ratio. Primary source is the frame shape the backend measured
-  // at capture (image_width/image_height); portrait sources (e.g. YouTube Shorts,
-  // 9:16) must not be forced into a 16:9 box. `loadedAspect` is a fallback derived
-  // from the loaded image's natural size, used only for legacy rows with null dims.
-  const [loadedAspect, setLoadedAspect] = useState<string | null>(null);
 
   if (!snapshots || snapshots.length === 0) {
     return <div className="text-gray-500 dark:text-gray-400 text-sm">no snapshots captured yet. use the player above to capture frames.</div>;
@@ -35,20 +31,10 @@ export default function SnapshotsGallery({ snapshots, onDelete, externalSelected
   const safeIndex = rawIndex < 0 ? snapshots.length - 1 : Math.min(rawIndex, snapshots.length - 1);
   const current = snapshots[safeIndex];
 
-  // Prefer the dimensions the backend captured; fall back to the loaded image's
-  // natural size (legacy rows), then a neutral 16:9.
-  const previewAspect =
-    current.image_width && current.image_height
-      ? `${current.image_width}/${current.image_height}`
-      : loadedAspect ?? '16/9';
-
-  const formatTime = (seconds: number) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
+  // Preview aspect ratio follows the backend-captured frame shape (portrait
+  // sources must not be forced into 16:9); natural-size fallback for legacy
+  // rows without captured dims. See frontend/hooks/useGalleryPreview.ts.
+  const { previewAspect, onImageLoad } = useGalleryPreview(current.image_width, current.image_height);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
   // Strip /api suffix if present to get base URL for static files
@@ -64,17 +50,13 @@ export default function SnapshotsGallery({ snapshots, onDelete, externalSelected
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`${baseUrl}${current.image_url}`}
-            alt={`snapshot at ${formatTime(current.timestamp)}`}
+            alt={`snapshot at ${formatGalleryTime(current.timestamp)}`}
             className="w-full h-full object-contain"
-            onLoad={(e) => {
-              // Only used when the backend didn't record dimensions.
-              const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
-              if (w && h) setLoadedAspect(`${w}/${h}`);
-            }}
+            onLoad={onImageLoad}
           />
         </div>
         <div className="flex justify-between items-center mt-1 text-sm">
-          <span className="text-gray-600 dark:text-gray-400 font-mono">{formatTime(current.timestamp)}</span>
+          <span className="text-gray-600 dark:text-gray-400 font-mono">{formatGalleryTime(current.timestamp)}</span>
           {current.detected_text && (
             <span className="text-gray-500 dark:text-gray-400 truncate ml-2">{current.detected_text}</span>
           )}
@@ -98,11 +80,11 @@ export default function SnapshotsGallery({ snapshots, onDelete, externalSelected
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={`${baseUrl}${snapshot.image_url}`}
-                alt={`thumbnail at ${formatTime(snapshot.timestamp)}`}
+                alt={`thumbnail at ${formatGalleryTime(snapshot.timestamp)}`}
                 className="w-full h-full object-contain"
               />
               <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs px-1 py-0.5 text-center font-mono">
-                {formatTime(snapshot.timestamp)}
+                {formatGalleryTime(snapshot.timestamp)}
               </span>
             </button>
             {onDelete && (
