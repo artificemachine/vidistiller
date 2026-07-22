@@ -62,7 +62,10 @@ jobs:
 
       - name: Run SAST scan
         run: |
-          shipguard scan . --format json > shipguard.json
+          # shipguard exits non-zero on ANY finding; the python block below is
+          # the real gate (fails only on critical/high). Without `|| true` the
+          # default `bash -eo pipefail` aborts here before the gate can run.
+          shipguard scan . --format json > shipguard.json || true
           python3 - << 'EOF'
           import json, sys
           data = json.load(open("shipguard.json"))
