@@ -194,3 +194,6 @@ features_to_add/
 HANDOFF.md
 frontend/test-results/
 e2e/test-results/
+
+# Personal/internal notes (raw AI coding-session transcript; was tracked 2026-04-02 -> 2026-07-22, removed in v1.12.22 cleanup)
+docs/README.my.notes.md

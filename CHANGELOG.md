@@ -484,6 +484,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-07-22
 
 ### Changed
+- chore(docs): `git rm docs/README.my.notes.md` + add to `.gitignore`. That file was a 1,329-line raw AI-coding-session transcript committed 2026-04-02 at the very start of the project, surfaced as a HIGH finding in the 2026-07-22 `/golive` audit (and again in the same-day `--quick` re-run). It remained in the tracked `docs/` tree where any reviewer browsing the folder listing on GitHub could click into it directly; the prior disambiguation line in `docs/README.md:25` only reached readers navigating through the docs index. The file is now an explicit untracked local-only artifact, and `docs/README.md` §Internal was rewritten to reflect that. The full content remains recoverable from any old clone via `git log -p` (this is forward-only, no history rewrite).
+
+### Changed
 - chore(audits): commit the 2026-07-22 /golive report (docs/audits/2026-07-22-golive.md + .json) and per-stage progress file (docs/audits/golive-progress.md). Verdict was NOT READY on a mechanical trigger (the sharp/libvips HIGH CVE, since fixed in v1.12.18); the report's substantive findings are being addressed by the follow-up entries below. Follows the repo's existing committed-audit convention (prior docs/audits/* reports are tracked).
 
 ### Fixed
