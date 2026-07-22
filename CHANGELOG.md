@@ -432,3 +432,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(ui): portrait snapshots/slides (e.g. YouTube Shorts, 9:16) were forced into a hardcoded 16:9 container -- cropped in thumbnail grids (object-cover) and letterboxed in previews. Galleries now derive the preview aspect ratio from each image's natural dimensions on load (SnapshotsGallery, SlidesGallery), thumbnails use object-contain (no crop), and inline summary/snapshot thumbs render at natural height. Capture was already correct; this was purely a display bug. Added regression tests asserting natural-AR adoption and no-crop thumbnails.
+
+### Changed
+- refactor(ui): the portrait aspect-ratio fix (1.12.15) now sources dimensions primarily from the backend-captured `image_width`/`image_height` (measured once at frame capture and already stored per snapshot/slide) instead of the browser's on-load natural size. Deterministic, no 16:9-to-real layout shift on load. The `page.tsx` snapshot mapping was dropping those fields; now threaded through. On-load natural size is retained only as a fallback for legacy rows with null dimensions.

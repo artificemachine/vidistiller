@@ -7,6 +7,8 @@ interface Snapshot {
   image_url: string;
   timestamp: number;
   detected_text?: string;
+  image_width?: number;
+  image_height?: number;
 }
 
 interface SnapshotsGalleryProps {
@@ -18,10 +20,11 @@ interface SnapshotsGalleryProps {
 
 export default function SnapshotsGallery({ snapshots, onDelete, externalSelectedIndex, onSelectedIndexChange }: SnapshotsGalleryProps) {
   const [internalIndex, setInternalIndex] = useState(0);
-  // Aspect ratio of the main preview, derived from the loaded image's natural
-  // dimensions. Portrait sources (e.g. YouTube Shorts, 9:16) must not be forced
-  // into a 16:9 box — that letterboxes or crops them. Fallback until first load.
-  const [previewAspect, setPreviewAspect] = useState('16/9');
+  // Preview aspect ratio. Primary source is the frame shape the backend measured
+  // at capture (image_width/image_height); portrait sources (e.g. YouTube Shorts,
+  // 9:16) must not be forced into a 16:9 box. `loadedAspect` is a fallback derived
+  // from the loaded image's natural size, used only for legacy rows with null dims.
+  const [loadedAspect, setLoadedAspect] = useState<string | null>(null);
 
   if (!snapshots || snapshots.length === 0) {
     return <div className="text-gray-500 dark:text-gray-400 text-sm">no snapshots captured yet. use the player above to capture frames.</div>;
@@ -31,6 +34,13 @@ export default function SnapshotsGallery({ snapshots, onDelete, externalSelected
   const rawIndex = externalSelectedIndex !== undefined ? externalSelectedIndex : internalIndex;
   const safeIndex = rawIndex < 0 ? snapshots.length - 1 : Math.min(rawIndex, snapshots.length - 1);
   const current = snapshots[safeIndex];
+
+  // Prefer the dimensions the backend captured; fall back to the loaded image's
+  // natural size (legacy rows), then a neutral 16:9.
+  const previewAspect =
+    current.image_width && current.image_height
+      ? `${current.image_width}/${current.image_height}`
+      : loadedAspect ?? '16/9';
 
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
@@ -57,8 +67,9 @@ export default function SnapshotsGallery({ snapshots, onDelete, externalSelected
             alt={`snapshot at ${formatTime(current.timestamp)}`}
             className="w-full h-full object-contain"
             onLoad={(e) => {
+              // Only used when the backend didn't record dimensions.
               const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
-              if (w && h) setPreviewAspect(`${w}/${h}`);
+              if (w && h) setLoadedAspect(`${w}/${h}`);
             }}
           />
         </div>

@@ -22,6 +22,8 @@ interface SnapshotItem {
   image_url: string;
   timestamp: number;
   detected_text?: string;
+  image_width?: number;
+  image_height?: number;
 }
 
 interface JobDetail {
@@ -59,6 +61,8 @@ interface JobDetail {
     relevance_score: number;
     detected_text?: string;
     image_url?: string;
+    image_width?: number;
+    image_height?: number;
   }>;
   slides: Array<{
     id: number;
@@ -70,6 +74,8 @@ interface JobDetail {
     transcript_text?: string;
     is_incremental_build?: boolean;
     ssim_transition_score?: number;
+    image_width?: number;
+    image_height?: number;
   }>;
 }
 
@@ -142,6 +148,8 @@ export default function JobDetail() {
             image_url: s.image_url || s.file_path,
             timestamp: s.timestamp,
             detected_text: s.detected_text,
+            image_width: s.image_width,
+            image_height: s.image_height,
           }))
         );
       }
@@ -217,6 +225,8 @@ export default function JobDetail() {
         image_url: response.data.image_url,
         timestamp: response.data.timestamp,
         detected_text: response.data.detected_text,
+        image_width: response.data.image_width,
+        image_height: response.data.image_height,
       };
       setSnapshots((prev) => [...prev, newSnapshot]);
       setSelectedSnapshotIndex(-1); // -1 signals "select last"

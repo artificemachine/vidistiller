@@ -66,14 +66,22 @@ describe('SnapshotsGallery', () => {
     expect(preview).toBeInTheDocument();
   });
 
-  it('preview adopts the loaded image natural aspect ratio (portrait not forced to 16:9)', () => {
+  it('preview uses the backend-captured dimensions (portrait not forced to 16:9)', () => {
+    const portrait = [{ id: 1, image_url: '/s/p.jpg', timestamp: 10, image_width: 1080, image_height: 1920 }];
+    render(<SnapshotsGallery snapshots={portrait} />);
+    const box = (screen.getByAltText('snapshot at 0:10') as HTMLImageElement).parentElement as HTMLElement;
+    // Set from backend dims immediately, before the image ever loads.
+    expect(box.style.aspectRatio).toBe('1080/1920');
+  });
+
+  it('falls back to the loaded image natural aspect ratio when backend dims are absent', () => {
     render(<SnapshotsGallery snapshots={mockSnapshots} />);
     const preview = screen.getByAltText('snapshot at 0:10') as HTMLImageElement;
-    // jsdom leaves naturalWidth/Height at 0; simulate a portrait Short frame.
+    const box = preview.parentElement as HTMLElement;
+    expect(box.style.aspectRatio).toBe('16/9'); // no dims yet, no load
     Object.defineProperty(preview, 'naturalWidth', { value: 1080, configurable: true });
     Object.defineProperty(preview, 'naturalHeight', { value: 1920, configurable: true });
     fireEvent.load(preview);
-    const box = preview.parentElement as HTMLElement;
     expect(box.style.aspectRatio).toBe('1080/1920');
   });
 

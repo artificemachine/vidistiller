@@ -12,6 +12,8 @@ export interface SlideItem {
   transcript_text?: string;
   is_incremental_build?: boolean;
   ssim_transition_score?: number;
+  image_width?: number;
+  image_height?: number;
 }
 
 interface SlidesGalleryProps {
@@ -28,9 +30,9 @@ export default function SlidesGallery({
   onSelectedIndexChange,
 }: SlidesGalleryProps) {
   const [internalIndex, setInternalIndex] = useState(0);
-  // Derived from the loaded image's natural dimensions so portrait sources
-  // (e.g. Shorts, 9:16) render at their true aspect instead of a forced 16:9.
-  const [previewAspect, setPreviewAspect] = useState('16/9');
+  // Fallback aspect from the loaded image's natural size, used only when the
+  // backend didn't record image_width/image_height (legacy rows).
+  const [loadedAspect, setLoadedAspect] = useState<string | null>(null);
 
   if (!slides || slides.length === 0) {
     return (
@@ -43,6 +45,12 @@ export default function SlidesGallery({
   const rawIndex = externalSelectedIndex !== undefined ? externalSelectedIndex : internalIndex;
   const safeIndex = rawIndex < 0 ? slides.length - 1 : Math.min(rawIndex, slides.length - 1);
   const current = slides[safeIndex];
+
+  // Prefer the dimensions the backend captured; fall back to natural size, then 16:9.
+  const previewAspect =
+    current.image_width && current.image_height
+      ? `${current.image_width}/${current.image_height}`
+      : loadedAspect ?? '16/9';
 
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
@@ -71,8 +79,9 @@ export default function SlidesGallery({
               alt={`slide ${current.slide_number}`}
               className="w-full h-full object-contain"
               onLoad={(e) => {
+                // Only used when the backend didn't record dimensions.
                 const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
-                if (w && h) setPreviewAspect(`${w}/${h}`);
+                if (w && h) setLoadedAspect(`${w}/${h}`);
               }}
             />
             <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded font-mono">
