@@ -500,6 +500,22 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
             logger.error(f"Summarize: Job {job_id} not found")
             return {"error": f"Job {job_id} not found"}
 
+        # Staleness guard against concurrent deliveries: Celery can hold two
+        # executions of the same task (or a fresh task and a redelivered one)
+        # for the same job — long runs exceed Redis' visibility timeout, and
+        # force=true revokes + re-dispatches. If another delivery already
+        # claimed this job (different request id) or finished it, this
+        # delivery must not start a second generation or clobber the status.
+        if job.celery_task_id and job.celery_task_id != self.request.id:
+            logger.info(
+                "Summarize: job %s already processing under task %s, skipping duplicate delivery %s",
+                job_id, job.celery_task_id, self.request.id,
+            )
+            return {"status": "skipped", "reason": "another delivery is active"}
+        if job.summarize_status == "completed":
+            logger.info("Summarize: job %s already completed, skipping", job_id)
+            return {"status": "skipped", "reason": "already completed"}
+
         # Store Celery task ID for cancellation
         job.celery_task_id = self.request.id
         job.summarize_status = "processing"

@@ -598,3 +598,6 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.13.5` to `1.13.6` (fix: think-tag strip + redelivery race guard).
+
+### Changed
+- fix(tasks): staleness guard at the start of `summarize_transcript_task` — if the job is already claimed by another delivery (`celery_task_id` set and different from this request id) or already `completed`, the delivery skips instead of starting a second generation. Combined with the exception-handler guard (PR #179), concurrent deliveries of the same job can no longer race on the status write. Verified live: v1.13.6 doc 45 still ended `failed` because a force-revoked first dispatch was redelivered an hour later (visibility timeout) and ran concurrently; the guard prevents that.
