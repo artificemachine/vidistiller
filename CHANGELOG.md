@@ -549,3 +549,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(llm): `summarize_transcript_task` (the celery summarization task) now uses the shared `resolve_user_llm` helper, so fleet-model adoption from `app/services/llm_resolution.py` actually reaches it. Previously the inline task body carried a stale resolution path that bypassed the helper and still asked for a hardcoded model name — the prod summarize failure observed on 2026-08-07 (`The model qwen3-32b-awq does not exist`) persisted even after PR #167 shipped the fix on the diagnostics endpoint. New regression test `tests/test_llm_celery_task_resolution.py` pins the task body to the shared resolver.
+
+## [1.13.2] — 2026-08-07
+
+### Fixed
+- fix(llm): replace stale `model_name` reference with `_resolved_model` in the celery `summarize_transcript_task` body. The v1.13.1 PR renamed the locals but missed the `LLMService(model_name=model_name, ...)` call site, so prod summarize tasks failed at runtime with `NameError: name model_name is not defined`. Strengthened `tests/test_llm_celery_task_resolution.py` to assert the LLMService argument name so the regression cannot recur silently.

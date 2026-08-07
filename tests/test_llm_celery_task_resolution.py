@@ -30,4 +30,16 @@ def test_summarize_transcript_task_uses_shared_resolver() -> None:
         "summarize_transcript_task still carries the pre-fix inline fallback "
         "to qwen3-32b-awq."
     )
+    # The LLMService call must use the resolved model and not the old
+    # `model_name` local (which no longer exists in this scope).
+    assert "model_name=model_name" not in source, (
+        "summarize_transcript_task still passes the stale `model_name` "
+        "local into LLMService — must use the resolved model from "
+        "resolve_user_llm."
+    )
+    assert "model_name=_resolved_model" in source, (
+        "summarize_transcript_task should pass the resolved model into "
+        "LLMService via _resolved_model."
+    )
+
 
