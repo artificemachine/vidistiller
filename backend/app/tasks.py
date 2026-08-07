@@ -423,42 +423,21 @@ def _is_slide_cancelled(db, job_id: int) -> bool:
 # FLEET RESOLVER — find which VM has a given model loaded
 # ==============================================================================
 
-_FLEET_VMS = [
-    ("vm913", "VLLM_VM913_URL"),
-    ("vm903", "VLLM_VM903_URL"),
-    ("vm901", "VLLM_VM901_URL"),
-    ("vm2900", "VLLM_VM2900_URL"),
-]
+from app.services.llm_resolution import FLEET_VMS as _FLEET_VMS  # noqa: E402
 
 
 def _resolve_fleet_url(model_name: str) -> str | None:
     """
     Query all vLLM fleet VMs to find which one has *model_name* loaded.
 
-    Calls ``GET /v1/models`` directly on each VM's vLLM port (8000).
-    Returns the vLLM URL of the first match, or None if no VM has it.
+    Thin wrapper over the shared resolver (app.services.llm_resolution) so
+    jobs and diagnostics use one code path. Returns the vLLM URL of the
+    first match, or None if no VM has it.
     """
-    import requests as _requests
+    from app.services.llm_resolution import resolve_fleet_url
 
-    for _vm_label, _env_var in _FLEET_VMS:
-        _vllm_url = os.environ.get(_env_var)
-        if not _vllm_url:
-            continue
-        try:
-            _api = _vllm_url.rstrip("/") + "/v1/models"
-            _resp = _requests.get(_api, timeout=3)
-            if _resp.status_code == 200:
-                _models = [m["id"] for m in _resp.json().get("data", [])]
-                if model_name in _models:
-                    logger.info(
-                        "fleet: model %r found on %s (%s)", model_name, _vm_label, _vllm_url
-                    )
-                    return _vllm_url
-        except Exception:
-            continue
-
-    logger.warning("fleet: model %r not loaded on any VM", model_name)
-    return None
+    url, _label = resolve_fleet_url(model_name)
+    return url
 
 
 def _resolve_job_llm(db, job):
@@ -474,37 +453,23 @@ def _resolve_job_llm(db, job):
         a provider could not be built.
     """
     from app.db.models import User
-    from app.core.crypto import decrypt_field
-    from app.services.llm_providers import build_provider, DEFAULT_MODELS
+    from app.services.llm_providers import build_provider
+    from app.services.llm_resolution import resolve_user_llm
 
     owner = db.query(User).filter(User.id == job.user_id).first() if job.user_id else None
-    provider_name = owner.llm_provider if owner and owner.llm_provider else "vllm"
-    model_name = owner.llm_model if owner and owner.llm_model else None
-
-    resolved_model = model_name or DEFAULT_MODELS.get(provider_name) or "gemma4-31b"
-
-    fleet_url = _resolve_fleet_url(resolved_model) if provider_name == "vllm" else None
-    default_url = fleet_url or os.environ.get("VLLM_VM913_URL") or os.environ.get("OLLAMA_URL")
-    base_url = (owner.llm_ollama_url if owner and owner.llm_ollama_url else None) or default_url
-
-    api_key = None
-    if owner and owner.llm_api_key_encrypted:
-        try:
-            api_key = decrypt_field(owner.llm_api_key_encrypted)
-        except Exception as e:
-            logger.warning(f"Failed to decrypt API key for job {job.id}: {e}")
+    resolved = resolve_user_llm(owner)
 
     try:
         provider = build_provider(
-            provider_name,
-            api_key=api_key,
-            ollama_base_url=base_url or "http://localhost:11434",
+            resolved.provider_name,
+            api_key=resolved.api_key,
+            ollama_base_url=resolved.base_url or "http://localhost:11434",
         )
     except Exception as e:
         logger.warning(f"Could not build LLM provider for job {job.id}: {e}")
         return None, None
 
-    return provider, resolved_model
+    return provider, resolved.model
 
 
 # ==============================================================================
