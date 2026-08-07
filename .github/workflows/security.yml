@@ -55,8 +55,18 @@ jobs:
         # JWTs are signed with HS256 (symmetric HMAC), set in
         # backend/app/core/config.py. Re-evaluate if jwt.algorithm ever changes
         # to an EC algorithm, or if upstream publishes a fix.
+        #
+        # PYSEC-2026-3552 (cryptography 49.0.0) is ignored deliberately. The
+        # patched version (50.0.0) is blocked by fastapi-mail 1.x's transitive
+        # constraint cap (cryptography<50) — fastapi-mail 1.6.5 is the latest
+        # release. Our use of cryptography is restricted to Fernet symmetric
+        # encryption in backend/app/core/crypto.py (AES128-CBC + HMAC-SHA256),
+        # which does not exercise the affected OpenSSL cert-verification path.
+        # Re-evaluate when fastapi-mail 2.x or a fastapi-mail 1.6.6+ lifts the
+        # cryptography ceiling.
         run: |
           python -m pip install pip-audit
           pip-audit --requirement backend/requirements.txt \
             --ignore-vuln PYSEC-2026-1325 \
+            --ignore-vuln PYSEC-2026-3552 \
             --progress-spinner off
