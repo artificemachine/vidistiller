@@ -963,7 +963,31 @@ Documentation:"""
             if not summary:
                 return text
             stripped = self._strip_cot_leakage(summary)
-            return stripped if stripped else text
+            if stripped:
+                return stripped
+
+            # Reasoning-only response (CoT with no answer boundary): retry
+            # once with an explicit no-thinking instruction before giving up
+            # on the section.
+            no_cot_prompt = (
+                "Important: do NOT show any thinking process, reasoning steps, "
+                "or internal drafts. Answer directly with the summary only.\n\n"
+                f"{prompt}"
+            )
+            logger.warning("Section response was reasoning-only; retrying without chain-of-thought")
+            try:
+                retry = self._provider.generate(
+                    prompt=no_cot_prompt,
+                    model=self._model,
+                    timeout=self.settings.service_timeouts.llm_timeout,
+                ).strip()
+                if not retry:
+                    return text
+                retry_stripped = self._strip_cot_leakage(retry)
+                return retry_stripped if retry_stripped else text
+            except Exception as retry_exc:
+                logger.warning(f"Section no-CoT retry failed: {retry_exc}")
+                return text
 
         except requests.exceptions.Timeout:
             logger.warning("Section summarization timed out")
@@ -1267,7 +1291,29 @@ Documentation:"""
             if not summary:
                 return section.text
             stripped = self._strip_cot_leakage(summary)
-            return stripped if stripped else section.text
+            if stripped:
+                return stripped
+
+            # Reasoning-only response: retry once without chain-of-thought.
+            no_cot_prompt = (
+                "Important: do NOT show any thinking process, reasoning steps, "
+                "or internal drafts. Answer directly with the summary only.\n\n"
+                f"{prompt}"
+            )
+            logger.warning("Pass 2 section response was reasoning-only; retrying without chain-of-thought")
+            try:
+                retry = self._provider.generate(
+                    prompt=no_cot_prompt,
+                    model=self._model,
+                    timeout=self.settings.service_timeouts.llm_timeout,
+                ).strip()
+                if not retry:
+                    return section.text
+                retry_stripped = self._strip_cot_leakage(retry)
+                return retry_stripped if retry_stripped else section.text
+            except Exception as retry_exc:
+                logger.warning(f"Pass 2 no-CoT retry failed: {retry_exc}")
+                return section.text
 
         except TimeoutError:
             logger.warning("Pass 2 section summarization timed out")

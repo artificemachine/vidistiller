@@ -65,7 +65,7 @@ class TestStripCotLeakage:
         assert result == ""
 
     def test_section_path_falls_back_to_text_when_all_cot(self):
-        """When the model returns reasoning only, the section falls back to the original text."""
+        """When both the original and the no-CoT retry are reasoning-only, fall back to the text."""
         svc = _service()
         leaked = (
             "Here's a thinking process:\n"
@@ -77,11 +77,40 @@ class TestStripCotLeakage:
             "   *Self-Correction:*\n"
             "   Let's check against constraints."
         )
-        with patch.object(svc._provider, "generate", return_value=leaked):
+        with patch.object(svc._provider, "generate", side_effect=[leaked, leaked]):
             result = svc._summarize_section("ORIGINAL TRANSCRIPT TEXT", "en")
         assert result == "ORIGINAL TRANSCRIPT TEXT"
         assert "thinking process" not in result.lower()
         assert "Draft" not in result
+
+    def test_section_path_retries_without_cot_and_keeps_clean_answer(self):
+        """Reasoning-only first response triggers a no-CoT retry; the clean answer is kept."""
+        svc = _service()
+        leaked = (
+            "Here's a thinking process:\n"
+            "1.  **Analyze User Input:**\n"
+            "   - **Role:** Technical writer\n"
+            "2.  **Draft:**\n"
+            "   *Self-Correction:*\n"
+            "   Let's check."
+        )
+        clean = "Lambda functions provide a streamlined approach to creating threads."
+        with patch.object(svc._provider, "generate", side_effect=[leaked, clean]):
+            result = svc._summarize_section("ORIGINAL TRANSCRIPT TEXT", "en")
+            assert result == clean
+            # The retry prompt must explicitly forbid chain-of-thought
+            retry_prompt = svc._provider.generate.call_args_list[1].kwargs["prompt"]
+            assert "do NOT show any thinking process" in retry_prompt
+
+    def test_section_path_retry_failure_falls_back_to_text(self):
+        """If the no-CoT retry raises, fall back to the transcript text."""
+        svc = _service()
+        leaked = "Here's a thinking process:\n1. step one\n2. step two"
+        with patch.object(
+            svc._provider, "generate", side_effect=[leaked, Exception("retry boom")]
+        ):
+            result = svc._summarize_section("ORIGINAL TRANSCRIPT TEXT", "en")
+        assert result == "ORIGINAL TRANSCRIPT TEXT"
 
     def test_case_insensitive_marker(self):
         svc = _service()
