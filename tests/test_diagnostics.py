@@ -277,3 +277,34 @@ class TestLLMDiagnosticsEndpoint:
         """Without a token the endpoint must not resolve or probe anything."""
         resp = client.get("/api/diagnostics/llm")
         assert resp.status_code == 401
+
+    @patch("app.services.llm_health.probe_llm")
+    @patch("app.services.llm_resolution.resolve_user_llm")
+    def test_diagnostics_reports_adopted_model(self, mock_resolve, mock_probe, auth_headers):
+        """Adopted-from-fleet model flows through to the diagnostics endpoint."""
+        from app.services.llm_resolution import ResolvedLLM
+
+        # Simulates: user with no LLM settings, fleet discovery picks
+        # qwen3.6-27b-awq from vm903.
+        mock_resolve.return_value = ResolvedLLM(
+            provider_name="vllm",
+            model="qwen3.6-27b-awq",
+            base_url="http://vm903:8000",
+            api_key=None,
+            fleet_node="vm903",
+        )
+        mock_probe.return_value = self._probe_result(
+            provider="vllm", model="qwen3.6-27b-awq",
+            base_url="http://vm903:8000", fleet_node="vm903",
+        )
+
+        client = TestClient(app)
+        resp = client.get("/api/diagnostics/llm", headers=auth_headers)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["provider"] == "vllm"
+        assert data["model"] == "qwen3.6-27b-awq"
+        assert data["base_url"] == "http://vm903:8000"
+        assert data["fleet_node"] == "vm903"
+        assert data["reachable"] is True

@@ -40,6 +40,25 @@ class ResolvedLLM:
     fleet_node: Optional[str] = None  # label of the fleet VM serving the model
 
 
+def _get_vm_model_ids(url: str) -> list[str]:
+    """Return the model ids exposed by a fleet VM's ``GET /v1/models``.
+
+    Transport errors, non-200 responses, malformed JSON, and empty model
+    lists all return an empty list — callers treat that as "skip this VM".
+    """
+    try:
+        resp = requests.get(url.rstrip("/") + "/v1/models", timeout=3)
+    except Exception:
+        return []
+    if resp.status_code != 200:
+        return []
+    try:
+        body = resp.json()
+    except ValueError:
+        return []
+    return [m["id"] for m in body.get("data", []) if isinstance(m, dict)]
+
+
 def resolve_fleet_url(model_name: str) -> tuple[Optional[str], Optional[str]]:
     """
     Query all vLLM fleet VMs to find which one has *model_name* loaded.
@@ -54,21 +73,38 @@ def resolve_fleet_url(model_name: str) -> tuple[Optional[str], Optional[str]]:
         vllm_url = os.environ.get(env_var)
         if not vllm_url:
             continue
-        try:
-            api = vllm_url.rstrip("/") + "/v1/models"
-            resp = requests.get(api, timeout=3)
-            if resp.status_code == 200:
-                models = [m["id"] for m in resp.json().get("data", [])]
-                if model_name in models:
-                    logger.info(
-                        "fleet: model %r found on %s (%s)", model_name, vm_label, vllm_url
-                    )
-                    return vllm_url, vm_label
-        except Exception:
-            continue
+        model_ids = _get_vm_model_ids(vllm_url)
+        if model_name in model_ids:
+            logger.info(
+                "fleet: model %r found on %s (%s)", model_name, vm_label, vllm_url
+            )
+            return vllm_url, vm_label
 
     logger.warning("fleet: model %r not loaded on any VM", model_name)
     return None, None
+
+
+def discover_fleet_model() -> tuple[str, str, str] | None:
+    """
+    Return ``(model_id, vllm_url, vm_label)`` for the first model actually
+    loaded on the first reachable fleet VM.
+
+    Lets ``resolve_user_llm`` adopt the fleet's current default instead of
+    requesting a hardcoded model name. Returns ``None`` when no VM is
+    reachable or none reports a loaded model — the caller falls back to
+    the configured default.
+    """
+    for vm_label, env_var in FLEET_VMS:
+        vllm_url = os.environ.get(env_var)
+        if not vllm_url:
+            continue
+        model_ids = _get_vm_model_ids(vllm_url)
+        if model_ids:
+            logger.info(
+                "fleet: adopting %r from %s (%s)", model_ids[0], vm_label, vllm_url
+            )
+            return model_ids[0], vllm_url, vm_label
+    return None
 
 
 def resolve_user_llm(owner) -> ResolvedLLM:
@@ -76,8 +112,10 @@ def resolve_user_llm(owner) -> ResolvedLLM:
     Resolve the effective LLM provider + model for a user (fleet-aware).
 
     Honours the owner's configured provider/model, defaults to the vLLM fleet,
-    and for vllm without a pinned URL picks the VM that actually has the model
-    loaded. This mirrors what summarization jobs use.
+    and for vllm without a pinned model adopts the first loaded model on the
+    first reachable fleet VM. Hardcoded defaults remain only as the final
+    fallback when the fleet is unreachable. This mirrors what summarization
+    jobs use.
 
     Args:
         owner: User row (or None for anonymous/system resolution).
@@ -90,12 +128,31 @@ def resolve_user_llm(owner) -> ResolvedLLM:
     provider_name = owner.llm_provider if owner and owner.llm_provider else "vllm"
     model_name = owner.llm_model if owner and owner.llm_model else None
 
-    resolved_model = model_name or DEFAULT_MODELS.get(provider_name) or FALLBACK_MODEL
+    fleet_node: Optional[str] = None
+    fleet_url: Optional[str] = None
+    adopted_url: Optional[str] = None
+    resolved_model: str
+    if model_name:
+        resolved_model = model_name
+    else:
+        # vllm + no user model: adopt whatever the fleet is currently serving.
+        adopted = discover_fleet_model() if provider_name == "vllm" else None
+        if adopted is not None:
+            resolved_model, adopted_url, fleet_node = adopted
+        else:
+            resolved_model = DEFAULT_MODELS.get(provider_name) or FALLBACK_MODEL
 
-    fleet_url, fleet_node = (
-        resolve_fleet_url(resolved_model) if provider_name == "vllm" else (None, None)
+    if adopted_url is None and provider_name == "vllm":
+        # No adoption; fall back to the fleet lookup that finds a VM with the
+        # configured default model loaded.
+        fleet_url, fleet_node = resolve_fleet_url(resolved_model)
+
+    default_url = (
+        adopted_url
+        or fleet_url
+        or os.environ.get("VLLM_VM913_URL")
+        or os.environ.get("OLLAMA_URL")
     )
-    default_url = fleet_url or os.environ.get("VLLM_VM913_URL") or os.environ.get("OLLAMA_URL")
     base_url = (owner.llm_ollama_url if owner and owner.llm_ollama_url else None) or default_url
 
     api_key = None

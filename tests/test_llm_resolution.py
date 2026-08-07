@@ -12,6 +12,7 @@ import requests
 
 from app.services.llm_resolution import (
     FALLBACK_MODEL,
+    discover_fleet_model,
     resolve_fleet_url,
     resolve_user_llm,
 )
@@ -169,3 +170,117 @@ class TestResolveFleetUrl:
             monkeypatch.delenv(var, raising=False)
 
         assert resolve_fleet_url("gemma4-31b") == (None, None)
+
+
+# ---------------------------------------------------------------------------
+# discover_fleet_model + dynamic adoption in resolve_user_llm
+# ---------------------------------------------------------------------------
+
+class TestDynamicFleetAdoption:
+    """When the user has no model configured and the provider is vllm,
+    adopt the first model actually loaded on the first reachable fleet VM.
+
+    Hardcoded defaults remain only as the final fallback when the fleet is
+    unreachable or every VM reports no loaded models.
+    """
+
+    @patch("app.services.llm_resolution.resolve_fleet_url", return_value=(None, None))
+    @patch("app.services.llm_resolution.requests.get")
+    def test_vllm_no_user_model_adopts_first_loaded_model(
+        self, mock_get, _fleet, monkeypatch
+    ):
+        monkeypatch.setenv("VLLM_VM913_URL", "http://vm913:8000")
+        mock_get.return_value = _fleet_resp(200, ["gemma4-31b-awq", "qwen3.6-27b-awq"])
+
+        result = resolve_user_llm(_owner(provider="vllm"))
+
+        assert result.provider_name == "vllm"
+        assert result.model == "gemma4-31b-awq"
+        assert result.base_url == "http://vm913:8000"
+        assert result.fleet_node == "vm913"
+        _fleet.assert_not_called()  # adoption replaced the fleet-model lookup
+
+    @patch("app.services.llm_resolution.resolve_fleet_url", return_value=(None, None))
+    @patch("app.services.llm_resolution.requests.get")
+    def test_vllm_no_user_model_skips_dead_vm_adopts_from_next(
+        self, mock_get, _fleet, monkeypatch
+    ):
+        monkeypatch.setenv("VLLM_VM913_URL", "http://vm913:8000")
+        monkeypatch.setenv("VLLM_VM903_URL", "http://vm903:8000")
+        mock_get.side_effect = [
+            requests.exceptions.ConnectionError(),
+            _fleet_resp(200, ["qwen3.6-27b-awq"]),
+        ]
+
+        result = resolve_user_llm(_owner(provider="vllm"))
+
+        assert result.model == "qwen3.6-27b-awq"
+        assert result.base_url == "http://vm903:8000"
+        assert result.fleet_node == "vm903"
+        _fleet.assert_not_called()
+
+    @patch("app.services.llm_resolution.resolve_fleet_url", return_value=(None, None))
+    @patch("app.services.llm_resolution.requests.get", side_effect=requests.exceptions.ConnectionError())
+    def test_vllm_no_user_model_fleet_empty_falls_back_to_default(
+        self, _get, _fleet, monkeypatch
+    ):
+        monkeypatch.setenv("VLLM_VM913_URL", "http://vm913:8000")
+
+        result = resolve_user_llm(_owner(provider="vllm"))
+
+        # Adoption failed; the existing fleet/fallback chain runs and picks
+        # the configured default + the env-var fallback URL.
+        from app.services.llm_providers import DEFAULT_MODELS
+
+        assert result.model == DEFAULT_MODELS["vllm"]
+        assert result.base_url == "http://vm913:8000"
+        assert result.fleet_node is None
+        _fleet.assert_called_once_with(DEFAULT_MODELS["vllm"])
+
+    @patch("app.services.llm_resolution.resolve_fleet_url", return_value=(None, None))
+    @patch("app.services.llm_resolution.requests.get")
+    def test_vllm_no_user_model_skips_malformed_json(
+        self, mock_get, _fleet, monkeypatch
+    ):
+        monkeypatch.setenv("VLLM_VM913_URL", "http://vm913:8000")
+        monkeypatch.setenv("VLLM_VM903_URL", "http://vm903:8000")
+        bad = MagicMock()
+        bad.status_code = 200
+        bad.json.side_effect = ValueError("not json")
+        mock_get.side_effect = [bad, _fleet_resp(200, ["qwen3.6-27b-awq"])]
+
+        result = resolve_user_llm(_owner(provider="vllm"))
+
+        assert result.model == "qwen3.6-27b-awq"
+        assert result.fleet_node == "vm903"
+        _fleet.assert_not_called()
+
+    @patch("app.services.llm_resolution.resolve_fleet_url")
+    def test_vllm_user_pinned_model_behavior_unchanged(self, mock_fleet):
+        """Pinned-model path MUST NOT invoke adoption."""
+        mock_fleet.return_value = ("http://vm903:8000", "vm903")
+
+        result = resolve_user_llm(_owner(provider="vllm", model="gemma4-31b"))
+
+        mock_fleet.assert_called_once_with("gemma4-31b")
+        assert result.model == "gemma4-31b"
+        assert result.base_url == "http://vm903:8000"
+        assert result.fleet_node == "vm903"
+
+    @patch("app.services.llm_resolution.discover_fleet_model", return_value=None)
+    @patch("app.services.llm_resolution.resolve_fleet_url", return_value=(None, None))
+    def test_non_vllm_provider_never_runs_adoption(self, _fleet, mock_discover):
+        result = resolve_user_llm(_owner(provider="ollama", model="qwen3:8b"))
+
+        mock_discover.assert_not_called()
+        assert result.provider_name == "ollama"
+        assert result.model == "qwen3:8b"
+
+    @patch("app.services.llm_resolution.requests.get")
+    def test_discover_fleet_model_unit_returns_first_loaded_model(self, mock_get, monkeypatch):
+        monkeypatch.setenv("VLLM_VM913_URL", "http://vm913:8000")
+        mock_get.return_value = _fleet_resp(200, ["gemma4-31b-awq", "qwen3.6-27b-awq"])
+
+        result = discover_fleet_model()
+
+        assert result == ("gemma4-31b-awq", "http://vm913:8000", "vm913")
