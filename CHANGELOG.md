@@ -570,3 +570,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - ops(compose): pass `LLM_TIMEOUT` through to the `api` and `celery_worker` containers (`${LLM_TIMEOUT:-120}`). The backend already reads it via `ServiceTimeouts.llm_timeout`, but compose never forwarded the env var, so long-transcript summarization (68K chars observed) hit the 120s default and entered a retry loop even though vLLM is healthy. Set `LLM_TIMEOUT=600` in the prod `.env` for long-form videos.
+
+## [Unreleased] — 2026-08-07 (v1.13.2 follow-up)
+
+### Added
+- fix(llm): strip chain-of-thought leakage from section summaries — reasoning models (observed qwen3.6-27b-awq) emit a visible `Here is a thinking process:` preamble ending with `[Text to output]` before the real answer, which leaked into saved documents. New `LLMService._strip_cot_leakage` removes the preamble (keeping text after the answer boundary, or the tail after the marker line as best effort), applied in both `_summarize_section` and `_summarize_section_adaptive`. +11 tests in `tests/test_llm_cot_strip.py`.
+- fix(routes): prevent duplicate summarize tasks — `POST /jobs/{id}/summarize` now returns `202 already in progress` without dispatching when a summarization is already running (and the caller did not force). With `force=true` it first revokes the running task (`celery_app.control.revoke(terminate=True)`) so only one generation proceeds. Previously a second POST while one task ran dispatched a concurrent task that raced on the document row and could mark the job failed even though a valid summary was saved. +2 route tests.
