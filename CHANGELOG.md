@@ -544,3 +544,8 @@ All notable changes to this project will be documented in this file.
 
 ### Security (follow-up to PR #167 / Unreleased entry above)
 - fix(ci): revert iter-1 `cryptography>=50.0.0` floor in `backend/requirements.txt` — it transitively forced `fastapi-mail` down to 1.5.2, which fails to import (uses `SecretStr` without importing it) and breaks every backend test that imports `app.main`. Instead, ignore PYSEC-2026-3552 in `.github/workflows/security.yml` with a documented justification: cryptography 50.0.0 is blocked by fastapi-mail 1.6.5 (latest) at `<50`, and our cryptography usage is restricted to Fernet symmetric encryption (AES128-CBC + HMAC-SHA256) which does not exercise the affected OpenSSL cert-verification path. Re-evaluate when fastapi-mail 2.x or 1.6.6+ lifts the ceiling. Removed the now-stale `tests/test_dependencies.py::test_cryptography_at_least_50`.
+
+## [1.13.1] — 2026-08-07
+
+### Fixed
+- fix(llm): `summarize_transcript_task` (the celery summarization task) now uses the shared `resolve_user_llm` helper, so fleet-model adoption from `app/services/llm_resolution.py` actually reaches it. Previously the inline task body carried a stale resolution path that bypassed the helper and still asked for a hardcoded model name — the prod summarize failure observed on 2026-08-07 (`The model qwen3-32b-awq does not exist`) persisted even after PR #167 shipped the fix on the diagnostics endpoint. New regression test `tests/test_llm_celery_task_resolution.py` pins the task body to the shared resolver.

@@ -506,34 +506,25 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         db.commit()
         _add_log(db, job_id, "Starting LLM summarization...", "info", "summarize")
 
-        # Resolve user's LLM provider preferences
+        # Resolve user's LLM provider preferences via the shared helper so
+        # the celery path matches the diagnostics endpoint and the
+        # `_resolve_job_llm` path used by other tasks. Adoption (when the
+        # user has no model configured) lives in resolve_user_llm and
+        # reduces to DEFAULT_MODELS[vllm] only when the fleet is empty.
         owner = db.query(User).filter(User.id == job.user_id).first() if job.user_id else None
-        provider_name = owner.llm_provider if owner and owner.llm_provider else "vllm"
-        model_name = owner.llm_model if owner else None
+        from app.services.llm_resolution import resolve_user_llm
 
-        # Fleet-aware URL: find the VM that actually has the model loaded
-        _resolved_model = model_name
-        if not _resolved_model and provider_name == "vllm":
-            from app.services.llm_providers import DEFAULT_MODELS
-            _resolved_model = DEFAULT_MODELS.get("vllm", "qwen3-32b-awq")
-
-        if provider_name == "vllm" and _resolved_model:
-            _fleet_url = _resolve_fleet_url(_resolved_model)
-        else:
-            _fleet_url = None
-
-        _default_url = (
-            _fleet_url
-            or os.environ.get("VLLM_VM913_URL")
-            or os.environ.get("OLLAMA_URL")
-        )
-        ollama_url = (owner.llm_ollama_url if owner and owner.llm_ollama_url else None) or _default_url
-        api_key = None
-        if owner and owner.llm_api_key_encrypted:
-            try:
-                api_key = decrypt_field(owner.llm_api_key_encrypted)
-            except Exception as e:
-                logger.warning(f"Failed to decrypt API key for job {job_id}: {e}")
+        resolved = resolve_user_llm(owner)
+        provider_name = resolved.provider_name
+        _resolved_model = resolved.model
+        ollama_url = resolved.base_url
+        api_key = resolved.api_key
+        if resolved.fleet_node:
+            _add_log(
+                db, job_id,
+                f"fleet: adopted {resolved.model!r} from {resolved.fleet_node} ({resolved.base_url})",
+                "info", "summarize",
+            )
 
         if not job.transcripts:
             job.summarize_status = "failed"
