@@ -900,14 +900,17 @@ Documentation:"""
 
         Reasoning models (observed: qwen3.6-27b-awq on the vLLM fleet) may
         emit a visible ``Here's a thinking process:`` preamble followed by
-        their internal reasoning, ending with ``[Text to output]`` before
-        the real answer. The preamble leaks into saved documents otherwise.
+        their internal reasoning. Some responses end with an answer boundary
+        (``[Text to output]`` etc.); others are reasoning only, with the
+        answer drafts buried inside the steps.
 
         Strategy:
-        - If no CoT marker is present, return the text unchanged.
-        - If an answer-boundary marker (e.g. ``[Text to output]``) exists
-          after the CoT marker, keep only what follows it.
-        - Otherwise drop the marker line and keep the tail as a best effort.
+        - No CoT marker → text unchanged.
+        - Answer-boundary marker after the CoT marker → keep only what
+          follows it.
+        - No boundary → return ``""`` (pure reasoning): the caller falls
+          back to the transcript text for that section rather than leaking
+          the model's thinking into the saved document.
         """
         if not text:
             return text
@@ -930,10 +933,10 @@ Documentation:"""
             if pos != -1:
                 return tail[pos + len(boundary):].strip()
 
-        # No explicit boundary: drop the marker line (and the following
-        # blank line), keep whatever the model wrote after it.
-        after_marker = tail.split("\n", 1)[1] if "\n" in tail else ""
-        return after_marker.lstrip("\n").strip()
+        # No explicit boundary — the response is reasoning with the answer
+        # drafts buried inside it. Returning an empty summary makes the
+        # callers fall back to the section's original text.
+        return ""
 
     def _summarize_section(self, text: str, language: str = "en") -> str:
         """Call Ollama to summarize a single transcript section."""
@@ -957,7 +960,10 @@ Documentation:"""
                 model=self._model,
                 timeout=self.settings.service_timeouts.llm_timeout,
             ).strip()
-            return self._strip_cot_leakage(summary) if summary else text
+            if not summary:
+                return text
+            stripped = self._strip_cot_leakage(summary)
+            return stripped if stripped else text
 
         except requests.exceptions.Timeout:
             logger.warning("Section summarization timed out")
@@ -1258,7 +1264,10 @@ Documentation:"""
                 model=self._model,
                 timeout=self.settings.service_timeouts.llm_timeout,
             ).strip()
-            return self._strip_cot_leakage(summary) if summary else section.text
+            if not summary:
+                return section.text
+            stripped = self._strip_cot_leakage(summary)
+            return stripped if stripped else section.text
 
         except TimeoutError:
             logger.warning("Pass 2 section summarization timed out")

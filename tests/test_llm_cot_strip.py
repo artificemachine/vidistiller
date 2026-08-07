@@ -57,13 +57,31 @@ class TestStripCotLeakage:
         assert "Lambda functions provide a streamlined approach to creating threads." in result
         assert "Inline lambda expressions replace named functions." in result
 
-    def test_strips_when_no_answer_boundary_keeps_tail(self):
-        """No '[Text to output]' marker: keep everything after the marker line."""
+    def test_no_answer_boundary_returns_empty(self):
+        """No '[Text to output]' boundary: the whole response is reasoning, return ''."""
         svc = _service()
         leaked = "Here's a thinking process:\n1. step one\n2. step two\nActual summary text here."
         result = svc._strip_cot_leakage(leaked)
+        assert result == ""
+
+    def test_section_path_falls_back_to_text_when_all_cot(self):
+        """When the model returns reasoning only, the section falls back to the original text."""
+        svc = _service()
+        leaked = (
+            "Here's a thinking process:\n"
+            "1.  **Analyze User Input:**\n"
+            "   - **Role:** Technical writer\n"
+            "   - **Task:** Rewrite the transcript\n"
+            "2.  **Draft:**\n"
+            "   Some draft summary text.\n"
+            "   *Self-Correction:*\n"
+            "   Let's check against constraints."
+        )
+        with patch.object(svc._provider, "generate", return_value=leaked):
+            result = svc._summarize_section("ORIGINAL TRANSCRIPT TEXT", "en")
+        assert result == "ORIGINAL TRANSCRIPT TEXT"
         assert "thinking process" not in result.lower()
-        assert "Actual summary text here." in result
+        assert "Draft" not in result
 
     def test_case_insensitive_marker(self):
         svc = _service()
