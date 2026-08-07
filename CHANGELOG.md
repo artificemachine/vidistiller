@@ -561,3 +561,7 @@ All notable changes to this project will be documented in this file.
 - fix(deps): pin `moviepy>=1.0.3,<2.0` (was `>=1.0.3`) and uncap `pillow>=10.0` (was `>=12.3.0`). Pinning moviepy<2.0 keeps pillow 12.x installed (no CVEs); the Vidistiller app does not use moviepy directly.
 =======
 >>>>>>> 0dcd335 (chore(release): bump to v1.13.2)
+
+### Changed
+
+- fix(deps): pin `moviepy>=1.0.3,<2.0` (was `>=1.0.3`) and uncap `pillow>=10.0` (was `>=12.3.0`). Pinning moviepy<2.0 keeps pillow 12.x installed (no CVEs); the Vidistiller app does not use moviepy directly.
