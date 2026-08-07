@@ -591,3 +591,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.13.4` to `1.13.5` (fix: no-CoT retry for reasoning-only sections).
+
+### Changed
+- fix(llm): strip Qwen3 native `<think>...</think>` blocks in addition to the textual CoT marker — the no-CoT retry prompt was ignored by qwen3.6-27b-awq which emitted its reasoning wrapped in think tags (observed in doc 44). Unclosed think tag → empty (section falls back to transcript).
+- fix(tasks): a failed summarize delivery must not overwrite a successfully saved summary — Celery redelivers long tasks (Redis visibility timeout ~1h), so two executions of the same task can race on one job row; the second ones exception handler used to clobber the first ones `completed` status with `failed` even though a valid document exists. The handler now checks `summarize_status == "completed"` or an existing summary document before marking failed.

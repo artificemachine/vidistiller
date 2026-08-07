@@ -625,10 +625,23 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         _add_log(db, job_id, f"Summarization failed: {e}", "error", "summarize")
         try:
             job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+            # A concurrent delivery of the same task (Celery redelivery after
+            # a long run exceeds Redis' visibility timeout) may have already
+            # saved a valid document and marked the job completed. Do not
+            # overwrite that success with a failure — the document is the
+            # source of truth.
             if job:
-                job.summarize_status = "failed"
-                job.celery_task_id = None
-                db.commit()
+                already_done = (
+                    job.summarize_status == "completed"
+                    or db.query(Document)
+                    .filter(Document.job_id == job.id, Document.format == "summary")
+                    .first()
+                    is not None
+                )
+                if not already_done:
+                    job.summarize_status = "failed"
+                    job.celery_task_id = None
+                    db.commit()
         except Exception:
             pass
         return {"error": str(e)}

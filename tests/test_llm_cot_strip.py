@@ -118,6 +118,39 @@ class TestStripCotLeakage:
         result = svc._strip_cot_leakage(leaked)
         assert result.startswith("Real answer.")
 
+    def test_strips_qwen_think_tags(self):
+        svc = _service()
+        leaked = (
+            "Here's a thinking process:\n"
+            "1. Draft\n"
+            "<think>\n"
+            "The user wants a summary. Let me plan the steps.\n"
+            "1. Analyze\n"
+            "2. Draft\n"
+            "</think>\n"
+            "The real summary text after the think block."
+        )
+        result = svc._strip_cot_leakage(leaked)
+        assert "<think>" not in result
+        assert "Let me plan the steps" not in result
+        assert "The real summary text after the think block." in result
+
+    def test_strips_think_tags_without_marker(self):
+        """<think>...</think> is stripped even when no 'thinking process' marker is present."""
+        svc = _service()
+        leaked = "<think>internal reasoning here</think>\nClean answer only."
+        result = svc._strip_cot_leakage(leaked)
+        assert "<think>" not in result
+        assert "internal reasoning" not in result
+        assert result == "Clean answer only."
+
+    def test_unclosed_think_tag_returns_empty(self):
+        """Unclosed <think> tag: no safe content, return '' (caller falls back to transcript)."""
+        svc = _service()
+        leaked = "<think>reasoning never closed\nAnswer text."
+        result = svc._strip_cot_leakage(leaked)
+        assert result == ""
+
 
 # ---------------------------------------------------------------------------
 # Section summarization paths apply the strip
