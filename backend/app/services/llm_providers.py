@@ -195,7 +195,7 @@ DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-4o-mini",
     "ollama": None,  # Falls back to settings.ollama.model_name
-    "vllm": "qwen3-32b-awq",
+    "vllm": "gemma4-31b",
     "deepseek": "deepseek-chat",
     "minimax": "MiniMax-Text-01",
     "opencode": None,

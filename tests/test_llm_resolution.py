@@ -60,7 +60,7 @@ class TestResolveUserLLM:
         result = resolve_user_llm(None)
 
         assert result.provider_name == "vllm"
-        assert result.model == "qwen3-32b-awq"  # DEFAULT_MODELS["vllm"]
+        assert result.model == "gemma4-31b"  # DEFAULT_MODELS["vllm"] (aligned with FALLBACK_MODEL)
         assert result.base_url is None
         assert result.api_key is None
 
