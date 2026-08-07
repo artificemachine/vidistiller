@@ -557,3 +557,6 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.13.1` to `1.13.2` (hotfix).
+
+### Changed
+- fix(deps): cap `pillow>=10.0,<12.0` (was `>=12.3.0`) to satisfy the transitive constraint from `moviepy 2.x` (`pillow<12.0`). The latest CI pip install run hit a `ResolutionImpossible` on the old pin; the previous run had succeeded by picking a different moviepy version. Cap is a stop-gap; revisit when moviepy lifts the ceiling.
