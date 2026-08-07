@@ -549,3 +549,17 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(llm): `summarize_transcript_task` (the celery summarization task) now uses the shared `resolve_user_llm` helper, so fleet-model adoption from `app/services/llm_resolution.py` actually reaches it. Previously the inline task body carried a stale resolution path that bypassed the helper and still asked for a hardcoded model name — the prod summarize failure observed on 2026-08-07 (`The model qwen3-32b-awq does not exist`) persisted even after PR #167 shipped the fix on the diagnostics endpoint. New regression test `tests/test_llm_celery_task_resolution.py` pins the task body to the shared resolver.
+
+## [1.13.2] — 2026-08-07
+
+### Fixed
+- fix(llm): replace stale `model_name` reference with `_resolved_model` in the celery `summarize_transcript_task` body. The v1.13.1 PR renamed the locals but missed the `LLMService(model_name=model_name, ...)` call site, so prod summarize tasks failed at runtime with `NameError: name model_name is not defined`. Strengthened `tests/test_llm_celery_task_resolution.py` to assert the LLMService argument name so the regression cannot recur silently.
+
+### Changed
+- chore(release): bump `pyproject.toml` `version` from `1.13.1` to `1.13.2` (hotfix).
+
+### Changed
+- fix(deps): cap `pillow>=10.0,<12.0` (was `>=12.3.0`) to satisfy the transitive constraint from `moviepy 2.x` (`pillow<12.0`). The latest CI pip install run hit a `ResolutionImpossible` on the old pin; the previous run had succeeded by picking a different moviepy version. Cap is a stop-gap; revisit when moviepy lifts the ceiling.
+
+### Changed
+- fix(deps): pin `moviepy>=1.0.3,<2.0` (was `>=1.0.3`) and uncap `pillow>=10.0` (was `>=12.3.0`). The first attempt capped pillow<12.0 to satisfy moviepy 2.x, but that pulled pillow 11.3.0 which has 25 open CVEs. Pinning moviepy<2.0 instead keeps pillow 12.x installed (no CVEs); the Vidistiller app does not use moviepy directly.

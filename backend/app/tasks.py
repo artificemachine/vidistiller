@@ -584,7 +584,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         # Generate summary via LLM with user's provider settings and cancellation check
         llm = LLMService(
             provider_name=provider_name,
-            model_name=model_name,
+            model_name=_resolved_model,
             api_key=api_key,
             ollama_base_url=ollama_url,
         )
