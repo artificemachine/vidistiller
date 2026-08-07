@@ -531,3 +531,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(backend): `UserSettingsUpdate.llm_provider` pattern accepted only `anthropic|openai|ollama|vllm`, so the Settings page's DeepSeek, MiniMax, and OpenCode provider cards could never be saved (HTTP 422). Pattern now accepts all seven providers supported by `build_provider`.
+
+## [Unreleased] — 2026-08-07 (PR #167 follow-up)
+
+### Security
+- fix(deps): require `cryptography>=50.0.0` to clear the CI pip-audit gate (PYSEC-2026-3552 fixed in 50.0.0). New test `tests/test_dependencies.py::test_cryptography_at_least_50` enforces the floor so future resolves cannot silently fall back to a vulnerable range. Verified locally: `pip-audit` reports 0 critical/high findings; full backend suite 560 passed, 29 skipped with cryptography 50 installed. fastapi-mail metadata caps cryptography <50 in this version — pip emits a warning but installs fine; runtime import + `tests/test_password_reset.py` (9 passed) confirm the gap is non-blocking in Python 3.14.
