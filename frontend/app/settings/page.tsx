@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import apiClient from '@/lib/api';
 import { useAuthStore } from '@/lib/authStore';
 import { errorMessage } from '@/lib/utils';
+import LlmStatusCard from '@/components/LlmStatusCard';
 
 interface SettingsForm {
   llm_provider: string;
@@ -123,6 +124,8 @@ export default function SettingsPage() {
   const [vllmFleet, setVllmFleet] = useState<VLLMFleetNode[]>([]);
   const [vllmModelFetching, setVllmModelFetching] = useState(false);
   const [vllmAvailableModels, setVllmAvailableModels] = useState<string[]>([]);
+  // Bumped after save/clear so the LLM status card re-checks the new config.
+  const [llmStatusToken, setLlmStatusToken] = useState(0);
 
   const [form, setForm] = useState<SettingsForm>({
     llm_provider: user?.llm_provider || 'ollama',
@@ -245,6 +248,7 @@ export default function SettingsPage() {
       const response = await apiClient.patch('/settings/me', payload);
 
       setSuccess('Settings saved successfully!');
+      setLlmStatusToken((t) => t + 1);
       setForm((prev) => ({
         ...prev,
         llm_api_key: '',
@@ -272,6 +276,7 @@ export default function SettingsPage() {
       setSaving(true);
       await apiClient.delete('/settings/me/api-key');
       setSuccess('API key cleared successfully');
+      setLlmStatusToken((t) => t + 1);
       setForm((prev) => ({
         ...prev,
         llm_api_key: '',
@@ -327,6 +332,8 @@ export default function SettingsPage() {
                 choose your preferred llm provider for document summarization
               </p>
             </div>
+
+            <LlmStatusCard refreshToken={llmStatusToken} />
 
             {/* Provider Cards — radio group for keyboard accessibility */}
             <div className="flex flex-col gap-4" role="radiogroup" aria-label="llm provider">

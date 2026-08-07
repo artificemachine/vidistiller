@@ -190,3 +190,121 @@ class TestDiagnosticsEndpoint:
         assert data["reachable"] is True
         assert data["model_found"] is True
         assert data["response_time_ms"] == 42
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: GET /api/diagnostics/llm endpoint
+# ---------------------------------------------------------------------------
+
+class TestLLMDiagnosticsEndpoint:
+    """Test the /api/diagnostics/llm route (provider + reachability status)."""
+
+    def _probe_result(self, **overrides):
+        base = {
+            "provider": "vllm",
+            "model": "gemma4-31b",
+            "base_url": "http://vm913:8000",
+            "reachable": True,
+            "auth_ok": None,
+            "model_found": True,
+            "models_available": ["gemma4-31b"],
+            "latency_ms": 42,
+            "error": None,
+        }
+        base.update(overrides)
+        return base
+
+    @patch("app.services.llm_health.probe_llm")
+    @patch("app.services.llm_resolution.resolve_user_llm")
+    def test_returns_resolved_provider_and_status(self, mock_resolve, mock_probe, auth_headers):
+        """Endpoint reports the user's effective provider/model and probe result."""
+        from app.services.llm_resolution import ResolvedLLM
+
+        mock_resolve.return_value = ResolvedLLM(
+            provider_name="vllm",
+            model="gemma4-31b",
+            base_url="http://vm913:8000",
+            api_key=None,
+            fleet_node="vm913",
+        )
+        mock_probe.return_value = self._probe_result()
+
+        client = TestClient(app)
+        resp = client.get("/api/diagnostics/llm", headers=auth_headers)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["provider"] == "vllm"
+        assert data["model"] == "gemma4-31b"
+        assert data["reachable"] is True
+        assert data["model_found"] is True
+        assert data["fleet_node"] == "vm913"
+        # probe receives exactly the resolved config
+        mock_probe.assert_called_once_with(
+            "vllm", "gemma4-31b",
+            base_url="http://vm913:8000", api_key=None,
+        )
+
+    @patch("app.services.llm_health.probe_llm")
+    @patch("app.services.llm_resolution.resolve_user_llm")
+    def test_returns_unreachable_status(self, mock_resolve, mock_probe, auth_headers):
+        """Unreachable endpoints still return 200 with reachable=false."""
+        from app.services.llm_resolution import ResolvedLLM
+
+        mock_resolve.return_value = ResolvedLLM(
+            provider_name="ollama",
+            model="qwen3:8b",
+            base_url="http://localhost:11434",
+            api_key=None,
+        )
+        mock_probe.return_value = self._probe_result(
+            provider="ollama", model="qwen3:8b",
+            base_url="http://localhost:11434",
+            reachable=False, model_found=False, models_available=[],
+            latency_ms=0, error="connection refused",
+        )
+
+        client = TestClient(app)
+        resp = client.get("/api/diagnostics/llm", headers=auth_headers)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["reachable"] is False
+        assert data["error"] == "connection refused"
+        assert data["fleet_node"] is None
+
+    def test_requires_authentication(self, client):
+        """Without a token the endpoint must not resolve or probe anything."""
+        resp = client.get("/api/diagnostics/llm")
+        assert resp.status_code == 401
+
+    @patch("app.services.llm_health.probe_llm")
+    @patch("app.services.llm_resolution.resolve_user_llm")
+    def test_diagnostics_reports_adopted_model(self, mock_resolve, mock_probe, auth_headers):
+        """Adopted-from-fleet model flows through to the diagnostics endpoint."""
+        from app.services.llm_resolution import ResolvedLLM
+
+        # Simulates: user with no LLM settings, fleet discovery picks
+        # qwen3.6-27b-awq from vm903.
+        mock_resolve.return_value = ResolvedLLM(
+            provider_name="vllm",
+            model="qwen3.6-27b-awq",
+            base_url="http://vm903:8000",
+            api_key=None,
+            fleet_node="vm903",
+        )
+        mock_probe.return_value = self._probe_result(
+            provider="vllm", model="qwen3.6-27b-awq",
+            base_url="http://vm903:8000", fleet_node="vm903",
+        )
+
+        client = TestClient(app)
+        resp = client.get("/api/diagnostics/llm", headers=auth_headers)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["provider"] == "vllm"
+        assert data["model"] == "qwen3.6-27b-awq"
+        assert data["base_url"] == "http://vm903:8000"
+        assert data["fleet_node"] == "vm903"
+        assert data["reachable"] is True

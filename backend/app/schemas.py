@@ -592,8 +592,8 @@ class UserSettingsUpdate(BaseModel):
     """Schema for updating user LLM settings."""
     llm_provider: Optional[str] = Field(
         None,
-        description="LLM provider (anthropic, openai, ollama, or vllm)",
-        pattern="^(anthropic|openai|ollama|vllm)$"
+        description="LLM provider (anthropic, openai, ollama, vllm, deepseek, minimax, or opencode)",
+        pattern="^(anthropic|openai|ollama|vllm|deepseek|minimax|opencode)$"
     )
     llm_model: Optional[str] = Field(
         None,
