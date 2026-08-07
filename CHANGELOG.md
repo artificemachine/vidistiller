@@ -588,3 +588,6 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - fix(llm): when a section response is reasoning-only (CoT with no answer boundary), retry once with an explicit "do NOT show any thinking process" instruction before falling back to the transcript text. Prevents v1.13.4-style degraded documents where every section reverted to raw transcript because the model emitted reasoning only.
+
+### Changed
+- chore(release): bump `pyproject.toml` `version` from `1.13.4` to `1.13.5` (fix: no-CoT retry for reasoning-only sections).
