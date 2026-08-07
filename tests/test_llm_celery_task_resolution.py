@@ -43,3 +43,25 @@ def test_summarize_transcript_task_uses_shared_resolver() -> None:
     )
 
 
+def test_summarize_task_does_not_mark_failed_when_document_exists() -> None:
+    """A failed redelivery must not overwrite a successfully saved summary.
+
+    Celery redelivers long tasks (Redis visibility timeout) so two
+    executions of the same task can race on one job row. The exception
+    handler must check whether a summary document already exists before
+    setting summarize_status=failed — otherwise the second delivery
+    clobbers the first one's completed status.
+    """
+    from app.tasks import summarize_transcript_task
+
+    source = inspect.getsource(summarize_transcript_task)
+    assert 'job.summarize_status == "completed"' in source, (
+        "The exception handler must not mark the job failed when the "
+        "status is already completed (concurrent redelivery raced ahead)."
+    )
+    assert "Document.format == \"summary\"" in source, (
+        "The exception handler must check for an existing summary document "
+        "before marking the job failed."
+    )
+
+

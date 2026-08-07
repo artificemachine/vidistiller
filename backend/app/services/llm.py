@@ -915,6 +915,15 @@ Documentation:"""
         if not text:
             return text
 
+        # Qwen3-style native thinking tags: strip the whole <think>...</think>
+        # block regardless of any other marker.
+        think_start = text.lower().find("<think>")
+        think_end = text.lower().find("</think>")
+        if think_start != -1:
+            if think_end != -1 and think_end > think_start:
+                return (text[:think_start] + text[think_end + len("</think>"):]).strip()
+            return text[:think_start].strip()
+
         lowered = text.lower()
         marker_pos = -1
         for marker in ("here's a thinking process", "here is a thinking process", "thinking process:"):
