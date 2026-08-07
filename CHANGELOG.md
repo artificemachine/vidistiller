@@ -579,3 +579,6 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.13.2` to `1.13.3` (fixes: CoT leakage strip + duplicate summarize task guard).
+
+### Changed
+- fix(llm): strengthen CoT strip fallback — when a model response has a thinking marker but no answer boundary (observed: whole response is reasoning with drafts buried in numbered steps), return an empty summary so the section falls back to the transcript text instead of leaking reasoning into the saved document. Verified live: doc 42 (v1.13.3) still had step reasoning in sections without a `[Text to output]` boundary; this patch closes that.
