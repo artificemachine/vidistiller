@@ -554,3 +554,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(llm): replace stale `model_name` reference with `_resolved_model` in the celery `summarize_transcript_task` body. The v1.13.1 PR renamed the locals but missed the `LLMService(model_name=model_name, ...)` call site, so prod summarize tasks failed at runtime with `NameError: name model_name is not defined`. Strengthened `tests/test_llm_celery_task_resolution.py` to assert the LLMService argument name so the regression cannot recur silently.
+
+### Changed
+- chore(release): bump `pyproject.toml` `version` from `1.13.1` to `1.13.2` (hotfix).
