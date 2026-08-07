@@ -565,3 +565,8 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - fix(deps): pin `moviepy>=1.0.3,<2.0` (was `>=1.0.3`) and uncap `pillow>=10.0` (was `>=12.3.0`). Pinning moviepy<2.0 keeps pillow 12.x installed (no CVEs); the Vidistiller app does not use moviepy directly.
+
+## [Unreleased] — 2026-08-07 (v1.13.2 follow-up)
+
+### Changed
+- ops(compose): pass `LLM_TIMEOUT` through to the `api` and `celery_worker` containers (`${LLM_TIMEOUT:-120}`). The backend already reads it via `ServiceTimeouts.llm_timeout`, but compose never forwarded the env var, so long-transcript summarization (68K chars observed) hit the 120s default and entered a retry loop even though vLLM is healthy. Set `LLM_TIMEOUT=600` in the prod `.env` for long-form videos.
