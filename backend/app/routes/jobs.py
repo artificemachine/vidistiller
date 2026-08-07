@@ -819,6 +819,20 @@ def summarize_transcript(
     if not job.transcripts:
         raise ValidationException("No transcript available for this job")
 
+    # Avoid duplicate tasks: if a summarization is already running and the
+    # caller did not force, do not dispatch a second task (two concurrent
+    # tasks on the same job race on the document row and one can mark the
+    # job failed even though the other saved a valid summary).
+    if job.summarize_status == "processing":
+        if not force:
+            return JSONResponse(
+                status_code=status.HTTP_202_ACCEPTED,
+                content={"message": "Summarization already in progress", "job_id": job_id},
+            )
+        # force: kill the running task so only one generation proceeds
+        if job.celery_task_id:
+            celery_app.control.revoke(job.celery_task_id, terminate=True, signal="SIGTERM")
+
     # Dispatch background summarization task (task sets celery_task_id itself)
     summarize_transcript_task.delay(job.id, force)
     job.summarize_status = "processing"

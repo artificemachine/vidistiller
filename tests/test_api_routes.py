@@ -216,6 +216,51 @@ class TestSummarizeTranscript:
         resp = client.post("/api/jobs/nonexistent/summarize", headers=auth_headers)
         assert resp.status_code == 404
 
+    def test_processing_does_not_dispatch_second_task(
+        self, client: TestClient, test_db: Session, seeded_job, auth_headers: dict, monkeypatch
+    ):
+        """While a summarize is processing, a non-force POST must NOT dispatch a duplicate task."""
+        from unittest.mock import MagicMock
+        mock_delay = MagicMock()
+        monkeypatch.setattr("app.routes.jobs.summarize_transcript_task.delay", mock_delay)
+        # Remove cached summary so the request reaches the dispatch path
+        test_db.query(Document).filter(
+            Document.job_id == seeded_job.id, Document.format == "summary"
+        ).delete()
+        seeded_job.summarize_status = "processing"
+        seeded_job.celery_task_id = "existing-task-123"
+        test_db.commit()
+
+        resp = client.post(f"/api/jobs/{seeded_job.job_id}/summarize", headers=auth_headers)
+
+        assert resp.status_code == 202
+        assert "already in progress" in resp.json()["message"]
+        mock_delay.assert_not_called()
+
+    def test_processing_force_revokes_and_dispatches(
+        self, client: TestClient, test_db: Session, seeded_job, auth_headers: dict, monkeypatch
+    ):
+        """force=true while processing must revoke the running task, then dispatch fresh."""
+        from unittest.mock import MagicMock
+        mock_delay = MagicMock()
+        monkeypatch.setattr("app.routes.jobs.summarize_transcript_task.delay", mock_delay)
+        mock_revoke = MagicMock()
+        monkeypatch.setattr("app.routes.jobs.celery_app.control.revoke", mock_revoke)
+        test_db.query(Document).filter(
+            Document.job_id == seeded_job.id, Document.format == "summary"
+        ).delete()
+        seeded_job.summarize_status = "processing"
+        seeded_job.celery_task_id = "existing-task-123"
+        test_db.commit()
+
+        resp = client.post(
+            f"/api/jobs/{seeded_job.job_id}/summarize?force=true", headers=auth_headers
+        )
+
+        assert resp.status_code == 202
+        mock_revoke.assert_called_once_with("existing-task-123", terminate=True, signal="SIGTERM")
+        mock_delay.assert_called_once()
+
 
 # ===========================================================================
 # Cancel Job — POST /api/jobs/{job_id}/cancel
