@@ -63,5 +63,11 @@ def test_summarize_task_does_not_mark_failed_when_document_exists() -> None:
         "The exception handler must check for an existing summary document "
         "before marking the job failed."
     )
+    # Staleness guard at task start: another delivery's request id claims the job.
+    assert "job.celery_task_id != self.request.id" in source, (
+        "The task must skip when another delivery already claimed the job "
+        "(different celery_task_id) — otherwise force-revoked or redelivered "
+        "tasks race on the same job row."
+    )
 
 
