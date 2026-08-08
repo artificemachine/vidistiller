@@ -16,7 +16,9 @@ FROM python:3.14-slim AS runtime
 
 WORKDIR /app
 
-# Runtime deps: curl for healthcheck, libGL/libxcb for opencv (cv2)
+# Runtime deps: curl for healthcheck, libGL/libxcb for opencv (cv2),
+# tesseract-ocr for slide OCR (presentation mode) — pytesseract in
+# requirements.txt needs the system binary + English language data.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libxcb1 \
@@ -26,6 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsm6 \
     libxext6 \
     libxrender1 \
+    tesseract-ocr \
+    tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder
