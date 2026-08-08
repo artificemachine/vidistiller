@@ -610,3 +610,6 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.13.7` to `1.13.8` (fix: CoT last-output-marker cut).
+
+### Changed
+- fix(routes): force=true now clears the stale `celery_task_id` after revoking, and the task staleness guard bypasses the claim check when force is set — a dead task id from a lost/redelivered delivery (e.g. worker restart) otherwise blocked legitimate force re-runs with "already processing under task X".

@@ -506,13 +506,16 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         # force=true revokes + re-dispatches. If another delivery already
         # claimed this job (different request id) or finished it, this
         # delivery must not start a second generation or clobber the status.
-        if job.celery_task_id and job.celery_task_id != self.request.id:
+        # force=true bypasses the claim check: the route revoked the previous
+        # task and cleared celery_task_id, so this delivery is the authorized
+        # one even if a stale id lingers in the row.
+        if not force and job.celery_task_id and job.celery_task_id != self.request.id:
             logger.info(
                 "Summarize: job %s already processing under task %s, skipping duplicate delivery %s",
                 job_id, job.celery_task_id, self.request.id,
             )
             return {"status": "skipped", "reason": "another delivery is active"}
-        if job.summarize_status == "completed":
+        if job.summarize_status == "completed" and not force:
             logger.info("Summarize: job %s already completed, skipping", job_id)
             return {"status": "skipped", "reason": "already completed"}
 
