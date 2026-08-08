@@ -36,7 +36,7 @@ def _service():
 
 class TestOcrPreprocessing:
     def test_frame_is_upscaled_before_ocr(self):
-        """The frame passed to tesseract must be at least 2x the original."""
+        """The frame passed to tesseract must be 3x the original."""
         svc = _service()
         frame = np.zeros((100, 200, 3), dtype=np.uint8)
         fake_pt = MagicMock()
@@ -48,8 +48,8 @@ class TestOcrPreprocessing:
 
         assert result == "clean text"
         pil_img = mock_img_cls.fromarray.call_args[0][0]
-        assert pil_img.shape[0] == 200  # 2x height
-        assert pil_img.shape[1] == 400  # 2x width
+        assert pil_img.shape[0] == 300  # 3x height
+        assert pil_img.shape[1] == 600  # 3x width
 
     def test_tesseract_config_uses_psm6(self):
         """Slides are uniform text blocks; PSM 6 is the right segmentation mode."""

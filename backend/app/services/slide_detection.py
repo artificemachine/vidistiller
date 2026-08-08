@@ -647,10 +647,13 @@ class SlideDetectionService:
     def _extract_ocr_text(self, frame: np.ndarray) -> Optional[str]:
         """Run OCR on a single frame with preprocessing for small text.
 
-        Slides in pip_speaker layouts are small within the frame, so raw
-        tesseract output is noisy. Preprocess: upscale 2x (INTER_CUBIC),
-        convert to grayscale, apply adaptive thresholding for contrast, then
-        run tesseract with PSM 6 (uniform block — appropriate for slides).
+        Slides in pip_speaker layouts are small within the frame (frames can
+        be 640x360), so raw tesseract output is noisy. Empirically (tested on
+        real 640x360 slide frames, 2026-08-08): a 3x INTER_CUBIC upscale of
+        the plain grayscale frame beats both adaptive thresholding and
+        binarization — compressed-video noise turns any thresholding into
+        salt-and-pepper garble, while tesseract handles the upscaled
+        grayscale directly. PSM 6 (uniform block) suits slide layouts.
         """
         try:
             if frame.ndim == 3:
@@ -658,14 +661,10 @@ class SlideDetectionService:
             else:
                 gray = frame
 
-            # Upscale 2x so small slide text becomes readable
+            # Upscale 3x so small slide text becomes readable (no threshold:
+            # binarizing compressed video destroys code text)
             h, w = gray.shape[:2]
-            gray = cv2.resize(gray, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
-
-            # Adaptive threshold for contrast on low-contrast code slides
-            gray = cv2.adaptiveThreshold(
-                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 11
-            )
+            gray = cv2.resize(gray, (w * 3, h * 3), interpolation=cv2.INTER_CUBIC)
 
             pil_img = Image.fromarray(gray)
             text = pytesseract.image_to_string(pil_img, config="--psm 6 --oem 3")
