@@ -607,3 +607,6 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - fix(llm): cut CoT at the LAST output-style marker instead of the first — Qwen3 writes `[Output Generation]` early, then more self-correction, then `[Output]`/`[Final Text Generation]` before the real answer (observed live in doc 46). Recognizes the full marker family (`[text to output]`, `[output generation]`, `[final text generation]`, `[output]`, `final answer:`, `### answer`, `**answer**`) and uses the last occurrence so post-marker reasoning is not kept.
+
+### Changed
+- chore(release): bump `pyproject.toml` `version` from `1.13.7` to `1.13.8` (fix: CoT last-output-marker cut).
