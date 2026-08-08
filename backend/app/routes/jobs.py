@@ -829,9 +829,13 @@ def summarize_transcript(
                 status_code=status.HTTP_202_ACCEPTED,
                 content={"message": "Summarization already in progress", "job_id": job_id},
             )
-        # force: kill the running task so only one generation proceeds
+        # force: kill the running task so only one generation proceeds.
+        # Also clear the stale celery_task_id so the newly dispatched task
+        # does not skip itself via the staleness guard (a dead task id from a
+        # lost/redelivered delivery would otherwise block force re-runs).
         if job.celery_task_id:
             celery_app.control.revoke(job.celery_task_id, terminate=True, signal="SIGTERM")
+        job.celery_task_id = None
 
     # Dispatch background summarization task (task sets celery_task_id itself)
     summarize_transcript_task.delay(job.id, force)

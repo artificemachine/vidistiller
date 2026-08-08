@@ -69,5 +69,11 @@ def test_summarize_task_does_not_mark_failed_when_document_exists() -> None:
         "(different celery_task_id) — otherwise force-revoked or redelivered "
         "tasks race on the same job row."
     )
+    # force=true bypasses the claim check (the route revoked + cleared the id).
+    assert "not force and job.celery_task_id" in source, (
+        "A force-dispatched task must bypass the staleness claim check — "
+        "the route revokes the previous task and clears celery_task_id, so "
+        "a stale id must not block a legitimate force re-run."
+    )
 
 
