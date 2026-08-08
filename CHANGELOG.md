@@ -643,3 +643,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - test(navbar): use RFC 5737 documentation IP (`192.0.2.1`) in the LlmNavStatus fixture — the real fleet IP tripped the gitleaks `ipv4-address` rule in CI.
+
+### Changed
+- chore(release): bump `pyproject.toml` `version` from `1.13.12` to `1.13.13` (feat: navbar model status).
