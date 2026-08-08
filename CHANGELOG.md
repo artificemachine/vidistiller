@@ -637,3 +637,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(settings): the vllm-models probe no longer blocks the Settings page form — it was awaited inside `fetchSettings` before `setLoading(false)`, so a slow/unreachable sidecar kept the whole form hidden (e2e "element(s) not found" flakes on anthropic/openai radio tests under fleet load). The probe now fires after the form renders; +1 frontend test.
+
+### Added
+- feat(navbar): model connection status pill in the top navbar — green/amber/red dot + active provider/model (from `GET /diagnostics/llm`), refresh on click + every 60s, hidden when unauthenticated. Reuses the PR #167 endpoint; new `LlmNavStatus` component. +5 frontend tests (255 total).
+
+### Fixed
+- test(navbar): use RFC 5737 documentation IP (`192.0.2.1`) in the LlmNavStatus fixture — the real fleet IP tripped the gitleaks `ipv4-address` rule in CI.
