@@ -622,3 +622,6 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.13.9` to `1.13.10` (fix: tesseract in Docker image for slide OCR).
+
+### Changed
+- fix(slides): OCR preprocessing — upscale frames 2x (INTER_CUBIC), convert to grayscale, apply adaptive thresholding for contrast, and use `--psm 6 --oem 3` tesseract config. Small slide text in pip_speaker layouts was noisy at native resolution; the preprocessing makes code slides readable. `pytesseract`/`PIL` moved to module-level imports. +5 tests in `tests/test_slide_ocr_preprocessing.py`.
