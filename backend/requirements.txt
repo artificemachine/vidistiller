@@ -22,7 +22,7 @@ httpx>=0.25.0
 
 # Video Processing
 opencv-python>=5.0.0.93
-moviepy>=1.0.3,<2.0  # pinned <2.0 because moviepy 2.x caps pillow<12.0; revisit when moviepy lifts
+moviepy>=2.2.1,<3.0  # pinned <2.0 because moviepy 2.x caps pillow<12.0; revisit when moviepy lifts
 pillow>=10.0
 ffmpeg-python>=0.2.0
 scikit-image>=0.26.0
