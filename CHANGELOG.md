@@ -619,3 +619,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(docker): install `tesseract-ocr` + `tesseract-ocr-eng` in the backend image. Presentation mode (slide_aware) detected slides, extracted frames, and segmented transcripts correctly but OCR silently produced NULL `ocr_text` on every slide because the tesseract system binary was missing from the image (pytesseract is a Python wrapper; it needs the binary). Validated live on prod v1.13.9: 7 slides, all ocr_text NULL with log `OCR failed: tesseract is not installed`. After this fix the same job produces OCR text per slide.
+
+### Changed
+- chore(release): bump `pyproject.toml` `version` from `1.13.9` to `1.13.10` (fix: tesseract in Docker image for slide OCR).
