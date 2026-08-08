@@ -634,3 +634,6 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.13.11` to `1.13.12` (fix: OCR 3x grayscale).
+
+### Fixed
+- fix(settings): the vllm-models probe no longer blocks the Settings page form — it was awaited inside `fetchSettings` before `setLoading(false)`, so a slow/unreachable sidecar kept the whole form hidden (e2e "element(s) not found" flakes on anthropic/openai radio tests under fleet load). The probe now fires after the form renders; +1 frontend test.
