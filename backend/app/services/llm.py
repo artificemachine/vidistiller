@@ -937,10 +937,32 @@ Documentation:"""
         tail = text[marker_pos:]
         lowered_tail = tail.lower()
 
-        for boundary in ("[text to output]", "final answer:", "### answer", "**answer**"):
+        # The model's real answer comes AFTER the last output-style marker in
+        # the reasoning block. Search for the LAST occurrence of any of these
+        # (Qwen3 variants), then cut after it.
+        boundaries = (
+            "[text to output]",
+            "[output generation]",
+            "[final text generation]",
+            "[output]",
+            "final answer:",
+            "### answer",
+            "**answer**",
+        )
+        best_pos = -1
+        best_len = 0
+        for boundary in boundaries:
             pos = lowered_tail.find(boundary)
-            if pos != -1:
-                return tail[pos + len(boundary):].strip()
+            if pos == -1:
+                continue
+            # Prefer the LAST matching marker (the one closest to the answer).
+            # Loop from the end to find the last occurrence.
+            last_pos = lowered_tail.rfind(boundary)
+            if last_pos > best_pos:
+                best_pos = last_pos
+                best_len = len(boundary)
+        if best_pos != -1:
+            return tail[best_pos + best_len:].strip()
 
         # No explicit boundary — the response is reasoning with the answer
         # drafts buried inside it. Returning an empty summary makes the
