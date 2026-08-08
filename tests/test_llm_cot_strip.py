@@ -135,6 +135,33 @@ class TestStripCotLeakage:
         assert "Let me plan the steps" not in result
         assert "The real summary text after the think block." in result
 
+    def test_cuts_at_last_output_marker(self):
+        """The answer comes after the LAST output-style marker, not the first.
+
+        Observed live (doc 46): the model wrote reasoning with
+        '[Output Generation] (proceeds)' early, then more self-correction,
+        then '[Output] -> *Proceeds*', then the real summary. Cutting at the
+        first marker would keep the later reasoning; cutting at the last one
+        yields the answer.
+        """
+        svc = _service()
+        leaked = (
+            "Here's a thinking process:\n"
+            "1. Draft step\n"
+            "   [Output Generation] (proceeds)\n"
+            "   *(Self-Correction)*: let me re-check the bullets.\n"
+            "   [Final Check of the Prompt]: all constraints met.\n"
+            "   [Output] -> *Proceeds*\n"
+            "   *(Final Text Generation)*\n"
+            "Compiling and executing the updated source code confirms the program works.\n"
+            "- Thread instantiation relies on constructor signatures.\n"
+        )
+        result = svc._strip_cot_leakage(leaked)
+        assert "Self-Correction" not in result
+        assert "Final Check" not in result
+        assert "Compiling and executing the updated source code" in result
+        assert "Thread instantiation relies on constructor signatures" in result
+
     def test_strips_think_tags_without_marker(self):
         """<think>...</think> is stripped even when no 'thinking process' marker is present."""
         svc = _service()
