@@ -628,3 +628,6 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.13.10` to `1.13.11` (fix: OCR preprocessing).
+
+### Changed
+- fix(slides): OCR preprocessing v2 — replace 2x+adaptive-threshold with 3x INTER_CUBIC upscale of plain grayscale (no threshold). Empirically validated on real 640x360 slide frames: adaptive thresholding on compressed video produces salt-and-pepper garble, while 3x grayscale reads code cleanly (`#include <thread>`, `auto lambda=[](int x){`, `std::thread myThread(lambda, 199);`).
