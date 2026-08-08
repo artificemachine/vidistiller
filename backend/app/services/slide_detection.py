@@ -14,6 +14,8 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
+import pytesseract
+from PIL import Image
 from skimage.metrics import structural_similarity
 
 from app.core.config import get_settings
@@ -643,14 +645,30 @@ class SlideDetectionService:
         return float(score)
 
     def _extract_ocr_text(self, frame: np.ndarray) -> Optional[str]:
-        """Run OCR on a single frame."""
-        try:
-            import pytesseract
-            from PIL import Image
+        """Run OCR on a single frame with preprocessing for small text.
 
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            pil_img = Image.fromarray(rgb)
-            text = pytesseract.image_to_string(pil_img)
+        Slides in pip_speaker layouts are small within the frame, so raw
+        tesseract output is noisy. Preprocess: upscale 2x (INTER_CUBIC),
+        convert to grayscale, apply adaptive thresholding for contrast, then
+        run tesseract with PSM 6 (uniform block — appropriate for slides).
+        """
+        try:
+            if frame.ndim == 3:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = frame
+
+            # Upscale 2x so small slide text becomes readable
+            h, w = gray.shape[:2]
+            gray = cv2.resize(gray, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
+
+            # Adaptive threshold for contrast on low-contrast code slides
+            gray = cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 11
+            )
+
+            pil_img = Image.fromarray(gray)
+            text = pytesseract.image_to_string(pil_img, config="--psm 6 --oem 3")
             return text.strip() if text.strip() else None
         except ImportError:
             logger.warning("pytesseract not installed, skipping OCR")
