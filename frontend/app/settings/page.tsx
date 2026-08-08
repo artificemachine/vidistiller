@@ -171,16 +171,16 @@ export default function SettingsPage() {
           setError('Failed to load settings');
         }
 
+        // The vllm-models probe is optional (populates the model picker). It
+        // must NOT block the page's loading state — a slow/unreachable
+        // sidecar would otherwise keep the whole form hidden. Fire it after
+        // the form is rendered instead.
         if (provider === 'vllm' && savedUrl) {
           setVllmModelFetching(true);
-          try {
-            const res = await apiClient.get('/settings/vllm/models', { params: { base_url: savedUrl } });
-            setVllmAvailableModels(res.data.models ?? []);
-          } catch {
-            // sidecar unreachable — text input still shows saved model name
-          } finally {
-            setVllmModelFetching(false);
-          }
+          apiClient.get('/settings/vllm/models', { params: { base_url: savedUrl } })
+            .then((res) => setVllmAvailableModels(res.data.models ?? []))
+            .catch(() => { /* sidecar unreachable — text input still shows saved model name */ })
+            .finally(() => setVllmModelFetching(false));
         }
       } catch (err: any) {
         console.error('Failed to load settings:', err);

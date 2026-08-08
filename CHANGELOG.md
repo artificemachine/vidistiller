@@ -631,3 +631,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - fix(slides): OCR preprocessing v2 — replace 2x+adaptive-threshold with 3x INTER_CUBIC upscale of plain grayscale (no threshold). Empirically validated on real 640x360 slide frames: adaptive thresholding on compressed video produces salt-and-pepper garble, while 3x grayscale reads code cleanly (`#include <thread>`, `auto lambda=[](int x){`, `std::thread myThread(lambda, 199);`).
+
+### Changed
+- chore(release): bump `pyproject.toml` `version` from `1.13.11` to `1.13.12` (fix: OCR 3x grayscale).
+
+### Fixed
+- fix(settings): the vllm-models probe no longer blocks the Settings page form — it was awaited inside `fetchSettings` before `setLoading(false)`, so a slow/unreachable sidecar kept the whole form hidden (e2e "element(s) not found" flakes on anthropic/openai radio tests under fleet load). The probe now fires after the form renders; +1 frontend test.
