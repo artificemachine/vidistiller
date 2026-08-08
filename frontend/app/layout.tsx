@@ -7,6 +7,7 @@ import ThemePicker from '@/components/ThemePicker';
 import JobStatusProvider from '@/components/JobStatusProvider';
 import AuthProvider from '@/components/AuthProvider';
 import NavAuthButton from '@/components/NavAuthButton';
+import LlmNavStatus from '@/components/LlmNavStatus';
 import pkg from '@/package.json';
 
 export const metadata: Metadata = {
@@ -59,6 +60,7 @@ export default function RootLayout({
                     <Link href="/" className="text-text-dark/70 hover:text-text-dark dark:text-text-light/70 dark:hover:text-text-light">
                       home
                     </Link>
+                    <LlmNavStatus />
                     <ThemePicker />
                     <ThemeToggle />
                   </div>
