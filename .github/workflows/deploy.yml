@@ -146,6 +146,40 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/contents/docker-compose.prod.yml?ref=${{ github.sha }}" \
             -o docker-compose.prod.yml
 
+      # This job restarts containers on whatever VIDISTILLER_IMAGE_TAG is
+      # already pinned in the VM's .env — it does NOT roll out new code by
+      # itself. The real release flow is: merge -> tag vX.Y.Z -> docker-publish
+      # builds the versioned image -> a human bumps VIDISTILLER_IMAGE_TAG on
+      # the VM -> pull/up. Without this check, a merge to main runs this job,
+      # it reports "success", and that reads as "the new code is live" when
+      # it usually just restarted the same old image on a stale pin (see
+      # incident_log.md 2026-08-10, caught during PR #196 deploy). Fail loud
+      # here instead of silently no-op-ing.
+      - name: Verify pinned image tag matches this commit's version
+        run: |
+          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
+          EXPECTED_VERSION=$(curl -fsSL \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/${{ github.repository }}/contents/pyproject.toml?ref=${{ github.sha }}" \
+            | grep -m1 '^version = ' | sed -E 's/version = "(.*)"/\1/')
+          CURRENT_TAG=$(grep '^VIDISTILLER_IMAGE_TAG=' .env | cut -d= -f2)
+
+          if [ -z "$EXPECTED_VERSION" ]; then
+            echo "::error::Could not read version from pyproject.toml at ${{ github.sha }} (API call failed or field missing) — cannot verify the deploy, failing closed."
+            exit 1
+          fi
+
+          echo "Commit's pyproject.toml version: $EXPECTED_VERSION"
+          echo "VM's pinned VIDISTILLER_IMAGE_TAG: $CURRENT_TAG"
+
+          if [ "$EXPECTED_VERSION" != "$CURRENT_TAG" ]; then
+            echo "::error::VIDISTILLER_IMAGE_TAG ($CURRENT_TAG) does not match this commit's version ($EXPECTED_VERSION). This job only restarts containers on the currently pinned image — it will NOT roll out $EXPECTED_VERSION by itself. Tag v$EXPECTED_VERSION, wait for docker-publish.yml to build newblacc/vidistiller-{backend,frontend}:$EXPECTED_VERSION, then bump VIDISTILLER_IMAGE_TAG=$EXPECTED_VERSION in the VM's .env before re-running this job."
+            exit 1
+          fi
+
+          echo "Pinned tag matches this commit's version — proceeding with restart."
+
       - name: Enable Sentry if DSN is configured
         if: env.SENTRY_DSN != ''
         env:
