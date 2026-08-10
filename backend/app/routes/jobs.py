@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Body, Depends, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc
+from sqlalchemy import desc, or_, text
 from typing import List, Any, Dict
 
 import os
@@ -99,6 +99,34 @@ def _find_duplicate_job(
         elif candidate.video_url == video_url:
             return candidate
     return None
+
+
+def _search_filter(db: Session, q: str):
+    """
+    Build a WHERE clause matching a job's video title, URL, or transcript text.
+
+    Transcripts can run 60K+ chars, so a plain ILIKE table-scan on full_text
+    doesn't hold up on Postgres — use the generated tsvector column + GIN
+    index instead (see migrations/versions/0002_transcript_fulltext_search.py).
+    SQLite (used by the test suite) has no tsvector equivalent, so it falls
+    back to ILIKE on full_text directly.
+    """
+    like = f"%{q}%"
+    title_match = db.query(Video.id).filter(
+        Video.job_id == ProcessingJob.id, Video.title.ilike(like)
+    ).exists()
+
+    if db.bind.dialect.name == "postgresql":
+        transcript_match = db.query(Transcript.id).filter(
+            Transcript.job_id == ProcessingJob.id,
+            text("full_text_tsv @@ websearch_to_tsquery('english', :q)").bindparams(q=q),
+        ).exists()
+    else:
+        transcript_match = db.query(Transcript.id).filter(
+            Transcript.job_id == ProcessingJob.id, Transcript.full_text.ilike(like)
+        ).exists()
+
+    return or_(ProcessingJob.video_url.ilike(like), title_match, transcript_match)
 
 
 # ==============================================================================
@@ -192,16 +220,18 @@ def list_jobs(
     skip: int = Query(0, ge=0, description="Number of jobs to skip"),
     limit: int = Query(10, ge=1, le=100, description="Maximum jobs to return"),
     status_filter: str | None = Query(None, description="Filter by status (pending, processing, completed, failed, cancelled)"),
+    q: str | None = Query(None, min_length=1, max_length=200, description="Search video title, URL, or transcript text"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> List[JobStatusResponse]:
     """
-    List all processing jobs with optional filtering and pagination.
+    List all processing jobs with optional filtering, search, and pagination.
 
     **Query parameters:**
     - `skip`: Number of jobs to skip (default: 0)
     - `limit`: Maximum jobs to return (default: 10, max: 100)
     - `status_filter`: Filter by status (optional)
+    - `q`: Search video title, URL, or transcript text (optional)
 
     **Response:** List of job status objects
 
@@ -224,6 +254,9 @@ def list_jobs(
                 f"Invalid status filter: {status_filter}. "
                 f"Valid options: {', '.join([s.value for s in ProcessingStatus])}"
             )
+
+    if q:
+        query = query.filter(_search_filter(db, q))
 
     # Apply pagination
     jobs = query.offset(skip).limit(limit).all()

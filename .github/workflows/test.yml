@@ -76,7 +76,7 @@ jobs:
           _proto="postgresql" _host="localhost:5432"
           export DATABASE_URL="${_proto}://${MIGRATION_DB_USER}:${MIGRATION_DB_PASSWORD}@${_host}/${MIGRATION_DB_NAME}"
           export TEST_DATABASE_URL="$DATABASE_URL"
-          PYTHONPATH=backend pytest tests/test_migration_drift.py -v
+          PYTHONPATH=backend pytest tests/test_migration_drift.py tests/test_search_postgres.py -v
 
   frontend-tests:
     runs-on: ubuntu-latest
