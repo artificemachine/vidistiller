@@ -652,3 +652,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.13.13` to `1.14.0` (feat: duplicate-video check).
+
+### Fixed
+- fix(ci): `deploy-production` restarts containers on whatever `VIDISTILLER_IMAGE_TAG` is already pinned in the VM's `.env` — it does not roll out new code by itself (the real release flow is merge → tag → `docker-publish` builds the versioned image → a human bumps the pin → pull/up). Caught during the v1.14.0 ship: the job reported `success` and passed its health check while still running `1.13.13`. Added a step that compares the pinned tag against the merged commit's `pyproject.toml` version and fails loud on mismatch instead of silently no-op-ing. Logged in the vault incident log (2026-08-10).
+
+### Changed
+- chore(release): bump `pyproject.toml` `version` from `1.14.0` to `1.14.1` (fix: deploy pipeline fail-loud on stale image pin).
