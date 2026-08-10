@@ -55,6 +55,25 @@ def _url_hash(url: str) -> str:
 
 class VideoSourceResolver:
     @classmethod
+    def match_known(cls, url: str) -> Tuple[SourceType, str] | None:
+        """
+        Offline-only platform ID extraction: known regex patterns plus direct
+        file extensions. Never hits the network. Returns None when the URL
+        matches no known platform (caller should fall back to comparing the
+        raw URL string in that case).
+        """
+        for source_type, patterns in _PATTERNS:
+            for pattern in patterns:
+                match = re.search(pattern, url)
+                if match:
+                    return source_type, match.group(1)
+
+        if _DIRECT_EXTENSIONS.search(url):
+            return SourceType.DIRECT, _url_hash(url)
+
+        return None
+
+    @classmethod
     def resolve(cls, url: str) -> Tuple[SourceType, str]:
         """
         Detect platform and extract a platform-native ID from a URL.
@@ -65,14 +84,9 @@ class VideoSourceResolver:
         3. yt-dlp extractor metadata (network call, covers long-tail platforms)
         4. Unknown fallback with URL hash as ID
         """
-        for source_type, patterns in _PATTERNS:
-            for pattern in patterns:
-                match = re.search(pattern, url)
-                if match:
-                    return source_type, match.group(1)
-
-        if _DIRECT_EXTENSIONS.search(url):
-            return SourceType.DIRECT, _url_hash(url)
+        known = cls.match_known(url)
+        if known is not None:
+            return known
 
         # Ask yt-dlp — covers Dailymotion, Streamable, Odysee, etc.
         try:

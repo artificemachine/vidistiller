@@ -381,6 +381,10 @@ class JobCreate(BaseModel):
         pattern=r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$",
         description="Preferred caption language (ISO 639-1, e.g. 'en', 'fr', 'ar'). None = English/auto.",
     )
+    force: bool = Field(
+        default=False,
+        description="Bypass the duplicate-video check and create the job anyway",
+    )
 
     @field_validator("video_url")
     @classmethod

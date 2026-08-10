@@ -88,3 +88,11 @@ class SlideDetectionException(APIException):
 
     def __init__(self, message: str):
         super().__init__(message, code="SLIDE_DETECTION_ERROR")
+
+
+class DuplicateResourceException(APIException):
+    """Raised when a create request matches an existing resource (409)."""
+
+    def __init__(self, message: str, existing: dict):
+        self.existing = existing
+        super().__init__(message, code="DUPLICATE_RESOURCE")

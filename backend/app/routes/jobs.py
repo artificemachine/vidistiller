@@ -42,7 +42,7 @@ from app.schemas import (
     SlideResponse,
     SlideDetectionMetadataResponse,
 )
-from app.exceptions import ResourceNotFoundException, ValidationException
+from app.exceptions import DuplicateResourceException, ResourceNotFoundException, ValidationException
 from app.tasks import (
     celery_app,
     import_job_payload_file_task,
@@ -68,6 +68,37 @@ def _get_job_for_user(
     if job.user_id != current_user.id:
         raise ResourceNotFoundException("Job", job_id)
     return job
+
+
+def _find_duplicate_job(
+    db: Session, user_id: int, video_url: str, source_type, video_id: str
+) -> ProcessingJob | None:
+    """
+    Look for an existing (non-cancelled) job of the same user pointing at the
+    same video, matched by normalized platform video_id where the URL matches
+    a known platform pattern (so youtu.be/X and youtube.com/watch?v=X&t=30
+    dedupe as the same video), falling back to an exact URL match for
+    platforms with no known pattern (direct files, long-tail sources).
+    """
+    from app.services.source_resolver import VideoSourceResolver
+
+    candidates = (
+        db.query(ProcessingJob)
+        .filter(
+            ProcessingJob.user_id == user_id,
+            ProcessingJob.source_type == source_type.value,
+            ProcessingJob.status != ProcessingStatus.CANCELLED,
+        )
+        .all()
+    )
+    for candidate in candidates:
+        known = VideoSourceResolver.match_known(candidate.video_url or "")
+        if known is not None:
+            if known[1] == video_id:
+                return candidate
+        elif candidate.video_url == video_url:
+            return candidate
+    return None
 
 
 # ==============================================================================
@@ -103,7 +134,22 @@ def create_job(
     """
     try:
         from app.services.source_resolver import VideoSourceResolver
-        source_type, _ = VideoSourceResolver.resolve(job_data.video_url)
+        source_type, video_id = VideoSourceResolver.resolve(job_data.video_url)
+
+        if not job_data.force:
+            duplicate = _find_duplicate_job(
+                db, current_user.id, job_data.video_url, source_type, video_id
+            )
+            if duplicate is not None:
+                raise DuplicateResourceException(
+                    "A job for this video already exists",
+                    existing={
+                        "job_id": duplicate.job_id,
+                        "status": duplicate.status.value,
+                        "created_at": duplicate.created_at.isoformat(),
+                        "video_title": duplicate.videos[0].title if duplicate.videos else None,
+                    },
+                )
 
         processing_mode = ProcessingMode.SLIDE_AWARE.value if job_data.is_slide_mode else ProcessingMode.STANDARD.value
         new_job = ProcessingJob(
@@ -125,6 +171,8 @@ def create_job(
 
         return JobResponse.model_validate(new_job)
 
+    except DuplicateResourceException:
+        raise
     except Exception as e:
         db.rollback()
         raise ValidationException("Failed to create job: " + str(e))
