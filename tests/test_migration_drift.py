@@ -82,6 +82,30 @@ def migrated_engine():
     engine.dispose()
 
 
+
+# transcripts.full_text_tsv (+ its GIN index) is a Postgres-only generated
+# column added in 0002_transcript_fulltext_search.py, deliberately NOT
+# declared on the Transcript model: SQLAlchemy would emit the same DDL for
+# the SQLite test engine (Base.metadata.create_all), and SQLite has no
+# to_tsvector() -- declaring it there would break every test in the suite.
+# It's queried via a raw text() clause (app/routes/jobs.py's _search_filter)
+# instead of an ORM column. Expected drift, not a missed migration.
+_EXPECTED_DRIFT_TABLES_COLUMNS = {("transcripts", "full_text_tsv")}
+
+
+def _is_expected_drift(item) -> bool:
+    kind = item[0]
+    if kind == "remove_column":
+        _, table, column = item[0], item[2], item[3]
+        return (table, column.name) in _EXPECTED_DRIFT_TABLES_COLUMNS
+    if kind == "remove_index":
+        index = item[1]
+        table = index.table.name
+        # An index's columns are on the Column objects it indexes.
+        return any((table, c.name) in _EXPECTED_DRIFT_TABLES_COLUMNS for c in index.columns)
+    return False
+
+
 def test_alembic_head_matches_models(migrated_engine):
     """The migrated schema must exactly match what the models declare.
 
@@ -99,8 +123,10 @@ def test_alembic_head_matches_models(migrated_engine):
         context = MigrationContext.configure(conn)
         diff = compare_metadata(context, m.Base.metadata)
 
-    assert diff == [], (
+    unexpected = [item for item in diff if not _is_expected_drift(item)]
+
+    assert unexpected == [], (
         f"alembic upgrade head produced a schema that differs from models.py "
-        f"({len(diff)} item(s)): {diff}\n"
+        f"({len(unexpected)} unexpected item(s)): {unexpected}\n"
         f"Run `alembic revision --autogenerate` and commit the result."
     )

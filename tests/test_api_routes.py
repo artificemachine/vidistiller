@@ -234,6 +234,55 @@ class TestListJobs:
         resp = client.get("/api/jobs")
         assert resp.status_code == 401
 
+    def test_search_by_title(self, client: TestClient, test_db: Session, seeded_job, auth_headers: dict):
+        resp = client.get("/api/jobs?q=Tutorial", headers=auth_headers)
+        assert resp.status_code == 200
+        job_ids = [j["job_id"] for j in resp.json()]
+        assert seeded_job.job_id in job_ids
+
+    def test_search_by_url(self, client: TestClient, test_db: Session, seeded_job, auth_headers: dict):
+        resp = client.get("/api/jobs?q=test12345", headers=auth_headers)
+        assert resp.status_code == 200
+        job_ids = [j["job_id"] for j in resp.json()]
+        assert seeded_job.job_id in job_ids
+
+    def test_search_by_transcript_keyword(self, client: TestClient, test_db: Session, seeded_job, auth_headers: dict):
+        resp = client.get("/api/jobs?q=Hello+world", headers=auth_headers)
+        assert resp.status_code == 200
+        job_ids = [j["job_id"] for j in resp.json()]
+        assert seeded_job.job_id in job_ids
+
+    def test_search_excludes_non_matching_jobs(self, client: TestClient, test_db: Session, seeded_job, seeded_slide_job, auth_headers: dict):
+        """seeded_slide_job's title/URL/transcript share no keyword with 'Hello world'."""
+        resp = client.get("/api/jobs?q=Hello+world", headers=auth_headers)
+        assert resp.status_code == 200
+        job_ids = [j["job_id"] for j in resp.json()]
+        assert seeded_job.job_id in job_ids
+        assert seeded_slide_job.job_id not in job_ids
+
+    def test_search_no_match_returns_empty(self, client: TestClient, test_db: Session, seeded_job, auth_headers: dict):
+        resp = client.get("/api/jobs?q=zzz_no_such_keyword_zzz", headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_search_scoped_to_user(self, client: TestClient, test_db: Session, test_user: User, seeded_job, auth_headers: dict):
+        from app.services.auth import AuthService
+        other = User(
+            username="searchother",
+            email="searchother@example.com",
+            password_hash=AuthService.hash_password("TestPass123"),
+            is_active=True,
+        )
+        test_db.add(other)
+        test_db.commit()
+
+        login = client.post("/api/auth/login", json={"username": "searchother", "password": "TestPass123"})
+        other_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        resp = client.get("/api/jobs?q=Tutorial", headers=other_headers)
+        assert resp.status_code == 200
+        assert resp.json() == []
+
 
 # ===========================================================================
 # Delete Job — DELETE /api/jobs/{job_id}

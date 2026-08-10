@@ -658,3 +658,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.14.0` to `1.14.1` (fix: deploy pipeline fail-loud on stale image pin).
+
+### Added
+- feat(jobs): search recent conversions by video title, URL, or transcript keyword — `GET /jobs?q=...`, scoped per-user. Title/URL matching is ILIKE; transcript matching uses a generated `tsvector` column + GIN index on Postgres (`migrations/versions/0002_transcript_fulltext_search.py`) so a 60K+ char transcript search hits an index instead of a table scan, with an ILIKE fallback on SQLite (test suite). New `NavSearch` navbar component: debounced (300ms) dropdown, click a result to open the job. +6 backend tests on SQLite (605 total), +3 Postgres-gated tests proving the tsvector path for real (`tests/test_search_postgres.py`, wired into CI's migration-drift job alongside `test_migration_drift.py`), +5 frontend tests (264 total). `test_migration_drift.py`'s schema-parity guard updated to allow this one documented exception (the generated column is deliberately absent from the SQLAlchemy model since SQLite's test engine can't create it).
+
+### Changed
+- chore(release): bump `pyproject.toml` `version` from `1.14.1` to `1.15.0` (feat: search recent conversions).
