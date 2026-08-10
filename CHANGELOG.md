@@ -664,3 +664,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.14.1` to `1.15.0` (feat: search recent conversions).
+
+### Fixed
+- fix(ci): `deploy-production` now syncs `alembic.ini` and every file under `migrations/versions/` from the repo at the deployed commit, not just `docker-compose.prod.yml`. Both are bind-mounted from the VM host into the containers (shadowing what's baked into the image), so they'd silently drift — caught mid-deploy of v1.15.0 (PR #198): `alembic upgrade head` reported success while doing nothing, because the VM's `migrations/` was still the 2026-07-22 baseline squash. Fixed manually for that deploy via a one-off `scp`; this closes the gap for every future one. Logged in the vault incident log (2026-08-10).
+
+### Changed
+- chore(release): bump `pyproject.toml` `version` from `1.15.0` to `1.15.1` (fix: deploy pipeline syncs migrations/alembic.ini).

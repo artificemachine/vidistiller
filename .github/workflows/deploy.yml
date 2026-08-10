@@ -146,6 +146,52 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/contents/docker-compose.prod.yml?ref=${{ github.sha }}" \
             -o docker-compose.prod.yml
 
+      # docker-compose.prod.yml bind-mounts ./alembic.ini and ./migrations
+      # from this directory (not baked into the image at runtime — the bind
+      # mount shadows what the Dockerfile COPYs in). The step above only ever
+      # synced docker-compose.prod.yml, so these two silently drifted from
+      # what the deployed image expects: `alembic upgrade head` reported
+      # success while doing nothing, because the VM's migrations/ was still
+      # the 2026-07-22 baseline squash weeks after new revisions had been
+      # added and released (see incident_log.md 2026-08-10, caught mid-deploy
+      # of PR #198). Unlike VIDISTILLER_IMAGE_TAG (deliberately pinned, a
+      # human bumps it for a reason), there's no legitimate case for these to
+      # lag the deployed image — sync them unconditionally every deploy.
+      - name: Sync alembic config and migrations
+        run: |
+          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
+          curl -fsSL \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/${{ github.repository }}/contents/alembic.ini?ref=${{ github.sha }}" \
+            -o alembic.ini
+
+          mkdir -p migrations/versions
+          for f in migrations/env.py migrations/script.py.mako; do
+            curl -fsSL \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.raw" \
+              "https://api.github.com/repos/${{ github.repository }}/contents/${f}?ref=${{ github.sha }}" \
+              -o "$f"
+          done
+
+          # migrations/versions/ has an unknown, growing number of revision
+          # files -- list what exists at this commit, then pull each one.
+          curl -fsSL \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/contents/migrations/versions?ref=${{ github.sha }}" \
+            | jq -r '.[] | select(.type=="file") | .name' \
+            | while read -r fname; do
+                curl -fsSL \
+                  -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                  -H "Accept: application/vnd.github.raw" \
+                  "https://api.github.com/repos/${{ github.repository }}/contents/migrations/versions/${fname}?ref=${{ github.sha }}" \
+                  -o "migrations/versions/${fname}"
+              done
+
+          echo "Synced migrations/versions/:"
+          ls -la migrations/versions/
+
       # This job restarts containers on whatever VIDISTILLER_IMAGE_TAG is
       # already pinned in the VM's .env — it does NOT roll out new code by
       # itself. The real release flow is: merge -> tag vX.Y.Z -> docker-publish
