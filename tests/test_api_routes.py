@@ -80,6 +80,83 @@ class TestCreateJob:
         }, headers=auth_headers)
         assert resp.status_code == 422
 
+    def test_duplicate_url_returns_409(self, client: TestClient, test_db: Session, auth_headers: dict, mock_celery):
+        first = client.post("/api/jobs", json={
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        }, headers=auth_headers)
+        assert first.status_code == 201
+
+        second = client.post("/api/jobs", json={
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        }, headers=auth_headers)
+        assert second.status_code == 409
+        body = second.json()
+        assert body["error"] == "DUPLICATE_RESOURCE"
+        assert body["existing_job"]["job_id"] == first.json()["job_id"]
+
+    def test_duplicate_url_variant_matches(self, client: TestClient, test_db: Session, auth_headers: dict, mock_celery):
+        """youtu.be short link and youtube.com/watch with extra query params dedupe as the same video."""
+        first = client.post("/api/jobs", json={
+            "video_url": "https://youtu.be/dQw4w9WgXcQ",
+        }, headers=auth_headers)
+        assert first.status_code == 201
+
+        second = client.post("/api/jobs", json={
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=30s",
+        }, headers=auth_headers)
+        assert second.status_code == 409
+
+    def test_duplicate_url_force_bypasses_check(self, client: TestClient, test_db: Session, auth_headers: dict, mock_celery):
+        first = client.post("/api/jobs", json={
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        }, headers=auth_headers)
+        assert first.status_code == 201
+
+        second = client.post("/api/jobs", json={
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "force": True,
+        }, headers=auth_headers)
+        assert second.status_code == 201
+        assert second.json()["job_id"] != first.json()["job_id"]
+
+    def test_duplicate_check_scoped_to_user(self, client: TestClient, test_db: Session, test_user: User, auth_headers: dict, mock_celery):
+        """Same URL from a different user is not a duplicate."""
+        from app.services.auth import AuthService
+        other = User(
+            username="otheruser",
+            email="other@example.com",
+            password_hash=AuthService.hash_password("TestPass123"),
+            is_active=True,
+        )
+        test_db.add(other)
+        test_db.commit()
+
+        first = client.post("/api/jobs", json={
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        }, headers=auth_headers)
+        assert first.status_code == 201
+
+        login = client.post("/api/auth/login", json={"username": "otheruser", "password": "TestPass123"})
+        other_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        second = client.post("/api/jobs", json={
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        }, headers=other_headers)
+        assert second.status_code == 201
+
+    def test_duplicate_check_ignores_cancelled_job(self, client: TestClient, test_db: Session, auth_headers: dict, mock_celery):
+        first = client.post("/api/jobs", json={
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        }, headers=auth_headers)
+        job_id = first.json()["job_id"]
+        cancel = client.post(f"/api/jobs/{job_id}/cancel", headers=auth_headers)
+        assert cancel.status_code == 200
+
+        second = client.post("/api/jobs", json={
+            "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        }, headers=auth_headers)
+        assert second.status_code == 201
+
 
 # ===========================================================================
 # Get Job — GET /api/jobs/{job_id}

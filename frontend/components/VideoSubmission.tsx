@@ -7,14 +7,21 @@ interface VideoSubmissionProps {
   onSuccess?: (jobId: string) => void;
 }
 
+interface ExistingJob {
+  job_id: string;
+  status: string;
+  created_at: string;
+  video_title: string | null;
+}
+
 export default function VideoSubmission({ onSuccess }: VideoSubmissionProps) {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [duplicate, setDuplicate] = useState<ExistingJob | null>(null);
   const router = useRouter();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitJob = async (force: boolean) => {
     setError('');
     setLoading(true);
 
@@ -23,8 +30,14 @@ export default function VideoSubmission({ onSuccess }: VideoSubmissionProps) {
       const response = await fetch(`${apiUrl}/jobs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_url: url }),
+        body: JSON.stringify({ video_url: url, force }),
       });
+
+      if (response.status === 409) {
+        const errorData = await response.json().catch(() => ({}));
+        setDuplicate(errorData.existing_job || null);
+        return;
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -33,6 +46,7 @@ export default function VideoSubmission({ onSuccess }: VideoSubmissionProps) {
 
       const data = await response.json();
       const jobId = data.job_id; // Use job_id (UUID) instead of id
+      setDuplicate(null);
 
       if (onSuccess) {
         onSuccess(jobId);
@@ -44,6 +58,12 @@ export default function VideoSubmission({ onSuccess }: VideoSubmissionProps) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDuplicate(null);
+    await submitJob(false);
   };
 
   return (
@@ -61,6 +81,35 @@ export default function VideoSubmission({ onSuccess }: VideoSubmissionProps) {
       </div>
 
       {error && <div className="text-red-500 mb-4">{error}</div>}
+
+      {duplicate && (
+        <div
+          data-testid="duplicate-warning"
+          className="mb-4 p-3 rounded-lg border border-yellow-400 bg-yellow-50 text-sm text-yellow-800"
+        >
+          <p className="mb-2">
+            already converted{duplicate.video_title ? `: ${duplicate.video_title}` : ''} (
+            {new Date(duplicate.created_at).toLocaleDateString()}, {duplicate.status})
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => router.push(`/jobs/${duplicate.job_id}`)}
+              className="px-3 py-1 rounded border border-yellow-600 hover:bg-yellow-100"
+            >
+              view existing
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => submitJob(true)}
+              className="px-3 py-1 rounded border border-yellow-600 hover:bg-yellow-100 disabled:opacity-50"
+            >
+              convert anyway
+            </button>
+          </div>
+        </div>
+      )}
 
       <button
         type="submit"

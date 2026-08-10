@@ -646,3 +646,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.13.12` to `1.13.13` (feat: navbar model status).
+
+### Added
+- feat(jobs): duplicate-video check on job creation — normalizes the URL to a platform + video_id (`VideoSourceResolver.match_known`, offline pattern match, so `youtu.be/X` and `youtube.com/watch?v=X&t=30` are recognized as the same video), scoped per-user, ignoring cancelled jobs. Matching submission returns `409 DUPLICATE_RESOURCE` with the existing job's id/status/title/created_at; `JobCreate.force=true` bypasses it. Frontend `VideoSubmission` shows a "already converted — view existing / convert anyway" banner on 409. +5 backend tests (599 total), +4 frontend tests (259 total).
+
+### Changed
+- chore(release): bump `pyproject.toml` `version` from `1.13.13` to `1.14.0` (feat: duplicate-video check).

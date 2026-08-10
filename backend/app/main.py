@@ -28,6 +28,7 @@ from app.middleware import RequestLoggingMiddleware
 from app.exceptions import (
     APIException,
     AuthenticationException,
+    DuplicateResourceException,
     ResourceNotFoundException,
     ValidationException,
 )
@@ -174,6 +175,20 @@ async def resource_not_found_handler(request: Request, exc: ResourceNotFoundExce
             "error": "NOT_FOUND",
             "message": str(exc),
             "path": str(request.url.path),
+        },
+    )
+
+
+@app.exception_handler(DuplicateResourceException)
+async def duplicate_resource_handler(request: Request, exc: DuplicateResourceException):
+    """Handle 409 Conflict errors (e.g. duplicate video URL)."""
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={
+            "error": "DUPLICATE_RESOURCE",
+            "message": str(exc),
+            "path": str(request.url.path),
+            "existing_job": exc.existing,
         },
     )
 
