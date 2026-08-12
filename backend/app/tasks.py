@@ -277,6 +277,22 @@ def process_transcript(self, job_id: int):
             )
             return {"job_id": job_id, "status": job.status.value, "skipped": True}
 
+        # Staleness guard against redelivered executions while a delivery is
+        # still actively running: video download + Whisper fallback
+        # transcription can legitimately run past Redis' default broker
+        # visibility timeout on slow hardware, so a still-running delivery
+        # can get redelivered and picked up by another worker before it
+        # finishes. Without this, every redelivery unconditionally
+        # overwrites celery_task_id and restarts the whole pipeline from
+        # scratch -- the exact bug found live in process_slides on
+        # 2026-08-12 (see incident_log.md), which had no such guard either.
+        if job.celery_task_id and job.celery_task_id != self.request.id:
+            logger.info(
+                "Job %s already processing under task %s, skipping duplicate delivery %s",
+                job_id, job.celery_task_id, self.request.id,
+            )
+            return {"job_id": job_id, "status": "skipped", "reason": "another delivery is active"}
+
         video_url = job.video_url
         if not video_url:
             _add_log(db, job_id, "No video URL provided", "error", "init")

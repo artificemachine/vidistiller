@@ -676,3 +676,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.15.1` to `1.15.2` (fix: process_slides staleness guard).
+
+### Fixed
+- fix(jobs): `process_transcript` skips redelivered executions while another delivery is still actively processing the same job. Follow-up audit after the `process_slides` fix (v1.15.2) found the same exposure here: video download + Whisper fallback transcription can legitimately run past Redis' broker visibility timeout on slow hardware, and the existing terminal-state check (COMPLETED/CANCELLED) didn't cover a still-`PROCESSING` job under a different delivery's `celery_task_id`. `summarize_transcript` already had this guard (PR #179/181/185); `import_job_payload_file` has a narrower, differently-shaped exposure (duplicate import if redelivered mid-run — not fixed here, lower value, not what caused the live incident) and is left as a follow-up. +3 tests.
+
+### Changed
+- chore(release): bump `pyproject.toml` `version` from `1.15.2` to `1.15.3` (fix: process_transcript staleness guard).
