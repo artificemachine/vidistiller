@@ -696,6 +696,25 @@ def process_slides(self, job_id: int):
             logger.error(f"Slide task: Job {job_id} not found")
             return {"error": f"Job {job_id} not found"}
 
+        # Staleness guard against redelivered executions: slide detection
+        # legitimately runs 30-45+ min (SSIM scan + LLM classification),
+        # longer than Redis' default broker visibility timeout, so a still-
+        # running delivery gets redelivered and a fresh worker picks it up
+        # before the first one finishes. Without this guard that repeats
+        # every ~60 min forever, each cycle restarting the whole pipeline
+        # from scratch (see incident_log.md 2026-08-12: a job looped 7
+        # cycles over 7 hours and starved the worker queue for every other
+        # job). Mirrors summarize_transcript_task's guard.
+        if job.celery_task_id and job.celery_task_id != self.request.id:
+            logger.info(
+                "Slide task: job %s already processing under task %s, skipping duplicate delivery %s",
+                job_id, job.celery_task_id, self.request.id,
+            )
+            return {"status": "skipped", "reason": "another delivery is active"}
+        if job.status == ProcessingStatus.COMPLETED:
+            logger.info(f"Slide task: job {job_id} already completed, skipping")
+            return {"status": "skipped", "reason": "already completed"}
+
         if job.processing_mode != ProcessingMode.SLIDE_AWARE.value:
             logger.warning(f"Slide task: Job {job_id} is not in slide_aware mode")
             return {"error": "Not in slide_aware mode"}

@@ -670,3 +670,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.15.0` to `1.15.1` (fix: deploy pipeline syncs migrations/alembic.ini).
+
+### Fixed
+- fix(jobs): `process_slides` no longer restarts from scratch on every Celery redelivery. Slide detection legitimately runs 30-45+ min, longer than Redis' default broker visibility timeout, so a still-running delivery got redelivered and re-executed before the first one finished — with no staleness guard, this repeated forever (found live: job 268 looped every ~60min for 7 hours, monopolizing the worker and starving every other queued job, including a user's job that sat "pending" 15+ min with no error and no fleet issue). Added the same staleness guard `summarize_transcript_task` already had (PR #179/181/185): skip if `celery_task_id` is already claimed by a different delivery, or the job is already `COMPLETED`. +4 tests. Root-caused and fixed live via `tests/test_process_slides_task.py`; incident + Redis broker cleanup steps logged in the vault (2026-08-12).
+
+### Changed
+- chore(release): bump `pyproject.toml` `version` from `1.15.1` to `1.15.2` (fix: process_slides staleness guard).
