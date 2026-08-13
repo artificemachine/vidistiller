@@ -1,0 +1,10 @@
+[Unit]
+Description=Vidistiller isolated verified restore drill
+Wants=network-online.target
+After=network-online.target docker.service vidistiller-backup.service
+
+[Service]
+Type=oneshot
+User=sysadmin
+EnvironmentFile=/etc/vidistiller/restore-drill.conf
+ExecStart=/usr/local/sbin/vidistiller-restore-drill-scheduled
