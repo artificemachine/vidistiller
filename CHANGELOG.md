@@ -685,3 +685,6 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - feat(fleet): capability-based routing discovers loaded models and selects healthy text, vision, and long-context candidates from an external manifest.
+
+### Added
+- feat(jobs): persist per-step progress and enable idempotent retries that resume blocked snapshot or slide processing.

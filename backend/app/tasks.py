@@ -8,11 +8,24 @@ YouTube video transcripts.
 import logging
 import os
 import re
+from math import ceil
 
 from celery import Celery
 from app.core.config import TRANSCRIPT_CONFIDENCE_CAPTIONS, TRANSCRIPT_CONFIDENCE_WHISPER, get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def _has_persisted_steps(job) -> bool:
+    """Avoid treating test doubles and legacy jobs as the new step workflow."""
+    return isinstance(getattr(job, "steps", None), list) and bool(job.steps)
+
+
+def required_context_tokens_for_transcript(
+    transcript_text: str, output_reserve_tokens: int = 4_000
+) -> int:
+    """Estimate the input context deterministically before task routing."""
+    return ceil(len(transcript_text) / 4) + output_reserve_tokens
 
 
 def _add_log(db, job_id: int, message: str, level: str = "info", step: str | None = None) -> None:
@@ -244,6 +257,64 @@ def _save_transcript_and_segments(
 # TRANSCRIPT TASK
 # ==============================================================================
 
+@celery_app.task(bind=True, name="process_video_download", max_retries=2)
+def process_video_download(self, job_id: int):
+    """Retry only the durable video-download stage without re-transcribing."""
+    from pathlib import Path
+
+    from app.db.models import ProcessingJob, ProcessingMode, ProcessingStatus
+    from app.db.session import SessionLocal
+    from app.services.job_steps import claim_step, complete_step, fail_step
+    from app.services.video import VideoService
+
+    db = SessionLocal()
+    try:
+        job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+        if job is None or not job.video_url:
+            return {"job_id": job_id, "status": "skipped"}
+        claimed = claim_step(db, job.id, "download", self.request.id)
+        if claimed is None:
+            return {"job_id": job_id, "status": "skipped"}
+        data_dir = get_settings().storage.data_dir or str(
+            Path(__file__).resolve().parent.parent / "data"
+        )
+        output_path = str(Path(data_dir) / "videos" / job.job_id)
+        try:
+            video_path, _ = VideoService().download_video(
+                job.video_url, output_path=output_path, quality="720p"
+            )
+        except Exception as exc:
+            fail_step(db, job.id, "download", self.request.id, str(exc))
+            db.commit()
+            raise self.retry(exc=exc, countdown=30)
+        job.video_file_path = video_path
+        complete_step(db, job.id, "download", self.request.id, {"path": Path(video_path).name})
+        dependent_step = (
+            "slides"
+            if job.processing_mode == ProcessingMode.SLIDE_AWARE.value
+            else "snapshots"
+        )
+        pending_dependent_step = next(
+            (step for step in job.steps if step.name == dependent_step and step.status.value == "pending"),
+            None,
+        )
+        if pending_dependent_step is not None:
+            # A download may be retried after the transcript task has already
+            # completed the job. Restore processing state before the dependent
+            # task runs; slide processing rejects completed jobs as stale work.
+            job.status = ProcessingStatus.PROCESSING
+            job.celery_task_id = None
+        db.commit()
+        if pending_dependent_step is not None:
+            if dependent_step == "slides":
+                process_slides.delay(job.id)
+            else:
+                process_snapshots.delay(job.id)
+            return {"job_id": job_id, "status": "dependent_step_queued", "step": dependent_step}
+        return {"job_id": job_id, "status": "completed"}
+    finally:
+        db.close()
+
 @celery_app.task(bind=True, name="process_transcript", max_retries=2)
 def process_transcript(self, job_id: int):
     """
@@ -257,6 +328,7 @@ def process_transcript(self, job_id: int):
     """
     from app.db.session import SessionLocal
     from app.db.models import ProcessingJob, ProcessingMode, ProcessingStatus
+    from app.services.job_steps import claim_step, complete_step, fail_step
     from app.services.video import VideoService
 
     db = SessionLocal()
@@ -309,6 +381,14 @@ def process_transcript(self, job_id: int):
         logger.info(f"Processing transcript for job {job_id}: {video_url}")
 
         video_service = VideoService()
+        steps_enabled = bool(job.steps)
+        transcribe_claim = (
+            claim_step(db, job.id, "transcribe", self.request.id)
+            if steps_enabled
+            else None
+        )
+        if steps_enabled and transcribe_claim is None:
+            return {"job_id": job_id, "status": "skipped", "reason": "transcribe step is not retryable"}
 
         # 3. Try platform-native captions first, then yt-dlp subtitles
         transcript_text = None
@@ -335,6 +415,8 @@ def process_transcript(self, job_id: int):
             _add_log(db, job_id, "No transcript could be generated", "error", "save_transcript")
             job.status = ProcessingStatus.FAILED
             job.error_message = "No transcript could be generated"
+            if transcribe_claim:
+                fail_step(db, job.id, "transcribe", self.request.id, "No transcript could be generated")
             db.commit()
             return {"error": "Empty transcript"}
 
@@ -355,21 +437,39 @@ def process_transcript(self, job_id: int):
 
         # 6. Save transcript to DB and segment it
         _save_transcript_and_segments(db, job_id, job, transcript_text, source, detected_language)
+        if transcribe_claim:
+            complete_step(
+                db,
+                job.id,
+                "transcribe",
+                self.request.id,
+                {"source": source, "language": detected_language, "characters": len(transcript_text)},
+            )
 
         # 7. Download video for snapshot capture (non-fatal)
-        _add_log(db, job_id, "Downloading video for snapshots...", "info", "video_download")
-        try:
-            from pathlib import Path as _Path
-            _data_dir = get_settings().storage.data_dir or str(_Path(__file__).resolve().parent.parent / "data")
-            videos_dir = str(_Path(_data_dir) / "videos" / job.job_id)
-            video_path, _ = video_service.download_video(
-                video_url, output_path=videos_dir, quality="720p",
-            )
-            job.video_file_path = video_path
-            logger.info(f"Video downloaded for job {job_id}: {video_path}")
-        except Exception as e:
-            _add_log(db, job_id, f"Video download failed (non-fatal): {e}", "warning", "video_download")
-            logger.warning(f"Video download failed (non-fatal): {e}")
+        download_claim = (
+            claim_step(db, job.id, "download", self.request.id)
+            if steps_enabled
+            else None
+        )
+        if not steps_enabled or download_claim:
+            _add_log(db, job_id, "Downloading video for snapshots...", "info", "video_download")
+            try:
+                from pathlib import Path as _Path
+                _data_dir = get_settings().storage.data_dir or str(_Path(__file__).resolve().parent.parent / "data")
+                videos_dir = str(_Path(_data_dir) / "videos" / job.job_id)
+                video_path, _ = video_service.download_video(
+                    video_url, output_path=videos_dir, quality="720p",
+                )
+                job.video_file_path = video_path
+                if download_claim:
+                    complete_step(db, job.id, "download", self.request.id, {"path": _Path(video_path).name})
+                logger.info(f"Video downloaded for job {job_id}: {video_path}")
+            except Exception as e:
+                if download_claim:
+                    fail_step(db, job.id, "download", self.request.id, str(e))
+                _add_log(db, job_id, f"Video download failed (non-fatal): {e}", "warning", "video_download")
+                logger.warning(f"Video download failed (non-fatal): {e}")
 
         # 9. If slide_aware mode and video downloaded, dispatch slide processing
         if job.processing_mode == ProcessingMode.SLIDE_AWARE.value and job.video_file_path:
@@ -379,6 +479,15 @@ def process_transcript(self, job_id: int):
             process_slides.delay(job_id)
             logger.info(f"Job {job_id}: transcript done, slide detection dispatched")
             return {"status": "slide_processing", "source": source, "length": len(transcript_text)}
+
+        if steps_enabled and job.video_file_path:
+            snapshot_step = next(step for step in job.steps if step.name == "snapshots")
+            if snapshot_step.status.value == "pending":
+                _add_log(db, job_id, "Dispatching snapshot extraction...", "info", "snapshot_dispatch")
+                job.celery_task_id = None
+                db.commit()
+                process_snapshots.delay(job_id)
+                return {"status": "snapshot_processing", "source": source, "length": len(transcript_text)}
 
         # 10. Mark job as completed, clear Celery task ID
         job.status = ProcessingStatus.COMPLETED
@@ -456,7 +565,16 @@ def _resolve_fleet_url(model_name: str) -> str | None:
     return url
 
 
-def _resolve_job_llm(db, job):
+def _resolve_job_llm_config(db, job, task, required_context_tokens: int = 0):
+    """Resolve one job owner's model against a task-specific contract."""
+    from app.db.models import User
+    from app.services.llm_resolution import resolve_task_llm
+
+    owner = db.query(User).filter(User.id == job.user_id).first() if job.user_id else None
+    return resolve_task_llm(owner, task, required_context_tokens)
+
+
+def _resolve_job_llm(db, job, task=None, required_context_tokens: int = 0):
     """
     Resolve the LLM provider + model for a job's owner (fleet-aware).
 
@@ -468,12 +586,15 @@ def _resolve_job_llm(db, job):
         (provider, model_name) — provider is an LLMProvider, or (None, None) if
         a provider could not be built.
     """
-    from app.db.models import User
     from app.services.llm_providers import build_provider
-    from app.services.llm_resolution import resolve_user_llm
+    from app.services.llm_fleet import LLMTask
 
-    owner = db.query(User).filter(User.id == job.user_id).first() if job.user_id else None
-    resolved = resolve_user_llm(owner)
+    resolved = _resolve_job_llm_config(
+        db,
+        job,
+        task or LLMTask.SLIDE_CLASSIFICATION,
+        required_context_tokens,
+    )
 
     try:
         provider = build_provider(
@@ -507,6 +628,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
     from app.services.llm import LLMService, CancelledException
 
     db = SessionLocal()
+    summarize_claimed = False
     try:
         from app.db.models import User
         from app.core.crypto import decrypt_field
@@ -515,6 +637,15 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         if not job:
             logger.error(f"Summarize: Job {job_id} not found")
             return {"error": f"Job {job_id} not found"}
+
+        if _has_persisted_steps(job):
+            from app.services.job_steps import claim_step
+
+            summarize_claimed = claim_step(
+                db, job.id, "summarize", self.request.id
+            ) is not None
+            if not summarize_claimed and not force:
+                return {"status": "skipped", "reason": "summarize step is not retryable"}
 
         # Staleness guard against concurrent deliveries: Celery can hold two
         # executions of the same task (or a fresh task and a redelivered one)
@@ -541,29 +672,17 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         db.commit()
         _add_log(db, job_id, "Starting LLM summarization...", "info", "summarize")
 
-        # Resolve user's LLM provider preferences via the shared helper so
-        # the celery path matches the diagnostics endpoint and the
-        # `_resolve_job_llm` path used by other tasks. Adoption (when the
-        # user has no model configured) lives in resolve_user_llm and
-        # reduces to DEFAULT_MODELS[vllm] only when the fleet is empty.
+        # Read the owner preference only for language selection. The concrete
+        # endpoint is resolved after the transcript length is known so context
+        # is a hard routing filter.
         owner = db.query(User).filter(User.id == job.user_id).first() if job.user_id else None
-        from app.services.llm_resolution import resolve_user_llm
-
-        resolved = resolve_user_llm(owner)
-        provider_name = resolved.provider_name
-        _resolved_model = resolved.model
-        ollama_url = resolved.base_url
-        api_key = resolved.api_key
-        if resolved.fleet_node:
-            _add_log(
-                db, job_id,
-                f"fleet: adopted {resolved.model!r} from {resolved.fleet_node} ({resolved.base_url})",
-                "info", "summarize",
-            )
 
         if not job.transcripts:
             job.summarize_status = "failed"
             job.celery_task_id = None
+            if summarize_claimed:
+                from app.services.job_steps import fail_step
+                fail_step(db, job.id, "summarize", self.request.id, "No transcript available")
             db.commit()
             _add_log(db, job_id, "No transcript available for summarization", "error", "summarize")
             return {"error": "No transcript"}
@@ -573,6 +692,20 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         # Use user's preferred summary output language, fall back to transcript language
         language = (owner.summary_language if owner and owner.summary_language else None) or detected_lang
         title = job.videos[0].title if job.videos else "Video Summary"
+
+        from app.services.llm_fleet import LLMTask
+        from app.services.llm_providers import build_provider
+
+        resolved = _resolve_job_llm_config(
+            db,
+            job,
+            LLMTask.LONG_ANALYSIS,
+            required_context_tokens_for_transcript(transcript_text),
+        )
+        provider_name = resolved.provider_name
+        _resolved_model = resolved.model
+        ollama_url = resolved.base_url
+        api_key = resolved.api_key
 
         # Build snapshot image URLs
         _data_dir = get_settings().storage.data_dir or str(Path(__file__).resolve().parent.parent / "data")
@@ -616,12 +749,37 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
             ).delete()
             db.commit()
 
-        # Generate summary via LLM with user's provider settings and cancellation check
+        vision_provider = None
+        vision_model = None
+        if snapshot_dicts:
+            try:
+                vision_resolved = _resolve_job_llm_config(
+                    db, job, LLMTask.SNAPSHOT_DESCRIPTION
+                )
+                vision_provider = build_provider(
+                    vision_resolved.provider_name,
+                    api_key=vision_resolved.api_key,
+                    ollama_base_url=vision_resolved.base_url or "http://localhost:11434",
+                )
+                vision_model = vision_resolved.model
+            except Exception as exc:
+                _add_log(
+                    db,
+                    job_id,
+                    f"No compatible vision model; snapshot descriptions skipped: {exc}",
+                    "warning",
+                    "summarize",
+                )
+
+        # Generate summary via LLM with explicit text and vision routes.
         llm = LLMService(
             provider_name=provider_name,
             model_name=_resolved_model,
             api_key=api_key,
             ollama_base_url=ollama_url,
+            vision_provider=vision_provider,
+            vision_model=vision_model,
+            use_default_vision_provider=not bool(snapshot_dicts),
         )
         summary_content = llm.summarize_transcript_sections(
             transcript_text, snapshot_dicts, language=language,
@@ -636,6 +794,12 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         # Mark summarization as completed
         job.summarize_status = "completed"
         job.celery_task_id = None
+        if summarize_claimed:
+            from app.services.job_steps import complete_step
+            complete_step(
+                db, job.id, "summarize", self.request.id,
+                {"document_id": doc.id, "characters": len(summary_content)},
+            )
         db.commit()
         _add_log(db, job_id, "Summarization completed", "info", "summarize")
 
@@ -649,6 +813,9 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
             if job:
                 job.summarize_status = "failed"
                 job.celery_task_id = None
+                if summarize_claimed:
+                    from app.services.job_steps import fail_step
+                    fail_step(db, job.id, "summarize", self.request.id, "Cancelled")
                 db.commit()
         except Exception:
             pass
@@ -676,6 +843,9 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
                 if not already_done:
                     job.summarize_status = "failed"
                     job.celery_task_id = None
+                    if summarize_claimed:
+                        from app.services.job_steps import fail_step
+                        fail_step(db, job.id, "summarize", self.request.id, str(e))
                     db.commit()
         except Exception:
             pass
@@ -688,6 +858,62 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
 # ==============================================================================
 # SLIDE DETECTION TASK
 # ==============================================================================
+
+@celery_app.task(bind=True, name="process_snapshots", max_retries=1)
+def process_snapshots(self, job_id: int):
+    """Extract snapshots under the snapshots step's independent claim token."""
+    from pathlib import Path
+
+    from app.db.models import ProcessingJob
+    from app.db.session import SessionLocal
+    from app.services.job_steps import claim_step, complete_step, fail_step
+    from app.services.snapshot import SnapshotService
+
+    db = SessionLocal()
+    try:
+        job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+        if job is None:
+            return {"error": f"Job {job_id} not found"}
+        claimed = claim_step(db, job.id, "snapshots", self.request.id)
+        if claimed is None:
+            return {"status": "skipped", "reason": "step is not retryable"}
+        if not job.video_file_path or not Path(job.video_file_path).is_file():
+            fail_step(db, job.id, "snapshots", self.request.id, "No downloaded video is available")
+            db.commit()
+            return {"error": "No downloaded video is available"}
+
+        _data_dir = get_settings().storage.data_dir or str(
+            Path(__file__).resolve().parent.parent / "data"
+        )
+        frames = SnapshotService().extract_frames(
+            job.video_file_path,
+            output_dir=str(Path(_data_dir) / "snapshots" / job.job_id),
+        )
+        snapshots = SnapshotService().save_snapshots(db, job.id, frames)
+        complete_step(
+            db,
+            job.id,
+            "snapshots",
+            self.request.id,
+            {"count": len(snapshots), "frames_analyzed": len(frames)},
+        )
+        db.commit()
+        from app.db.models import ProcessingMode, ProcessingStatus
+        if job.processing_mode != ProcessingMode.SLIDE_AWARE.value:
+            job.status = ProcessingStatus.COMPLETED
+            db.commit()
+        return {"status": "completed", "count": len(snapshots)}
+    except Exception as exc:
+        db.rollback()
+        try:
+            fail_step(db, job_id, "snapshots", self.request.id, str(exc))
+            db.commit()
+        except Exception:
+            db.rollback()
+        logger.exception("Snapshot task failed for job %s", job_id)
+        return {"error": str(exc)}
+    finally:
+        db.close()
 
 @celery_app.task(bind=True, name="process_slides", max_retries=1)
 def process_slides(self, job_id: int):
@@ -706,11 +932,19 @@ def process_slides(self, job_id: int):
     from app.services.llm import CancelledException
 
     db = SessionLocal()
+    slide_claimed = False
     try:
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if not job:
             logger.error(f"Slide task: Job {job_id} not found")
             return {"error": f"Job {job_id} not found"}
+
+        if _has_persisted_steps(job):
+            from app.services.job_steps import claim_step
+
+            slide_claimed = claim_step(db, job.id, "slides", self.request.id) is not None
+            if not slide_claimed:
+                return {"status": "skipped", "reason": "slides step is not retryable"}
 
         # Staleness guard against redelivered executions: slide detection
         # legitimately runs 30-45+ min (SSIM scan + LLM classification),
@@ -740,6 +974,9 @@ def process_slides(self, job_id: int):
             _add_log(db, job_id, "No video file for slide detection", "error", "slide_detect")
             job.status = ProcessingStatus.COMPLETED
             job.slide_status = "skipped"
+            if slide_claimed:
+                from app.services.job_steps import fail_step
+                fail_step(db, job.id, "slides", self.request.id, "No video file")
             db.commit()
             return {"error": "No video file"}
 
@@ -763,6 +1000,12 @@ def process_slides(self, job_id: int):
                 j.status = ProcessingStatus.COMPLETED
                 j.slide_status = slide_status
                 j.celery_task_id = None
+                if slide_claimed:
+                    from app.services.job_steps import complete_step, fail_step
+                    if slide_status == "completed":
+                        complete_step(db, j.id, "slides", self.request.id)
+                    else:
+                        fail_step(db, j.id, "slides", self.request.id, slide_status)
                 db.commit()
 
         service = SlideDetectionService()
