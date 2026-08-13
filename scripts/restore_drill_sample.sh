@@ -98,6 +98,10 @@ db_name="restore_drill"
 # Ephemeral database credential for the isolated container; it is generated only at
 # runtime and never written to the bundle, report, or application logs.
 drill_db_auth="$(openssl rand -hex 24)"
+printf 'POSTGRES_USER=%s\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=%s\n' \
+    "$db_user" "$drill_db_auth" "$db_name" > "$work/postgres.env"
+printf '*:*:*:%s:%s\n' "$db_user" "$drill_db_auth" > "$work/.pgpass"
+chmod 600 "$work/postgres.env" "$work/.pgpass"
 
 cleanup() {
     docker rm -f "$database" >/dev/null 2>&1 || true
@@ -114,13 +118,13 @@ tar -C "$work/app-data" -xf "$BACKUP_BUNDLE/app-data.tar"
 
 docker network create --internal "$network" >/dev/null
 docker run -d --name "$database" --network "$network" \
-    -e "POSTGRES_USER=$db_user" \
-    -e "POSTGRES_PASSWORD=$drill_db_auth" \
-    -e "POSTGRES_DB=$db_name" \
+    --env-file "$work/postgres.env" \
     "$POSTGRES_IMAGE" >/dev/null
+docker cp "$work/.pgpass" "$database:/tmp/.pgpass"
+docker exec "$database" chmod 600 /tmp/.pgpass
 
 for attempt in $(seq 1 30); do
-    if docker exec -e "PGPASSWORD=$drill_db_auth" "$database" \
+    if docker exec "$database" sh -c 'PGPASSFILE=/tmp/.pgpass exec "$@"' -- \
         psql -U "$db_user" -d "$db_name" -c 'SELECT 1' >/dev/null 2>&1; then
         break
     fi
@@ -131,20 +135,22 @@ for attempt in $(seq 1 30); do
     sleep 1
 done
 
-docker exec -i -e "PGPASSWORD=$drill_db_auth" "$database" \
+docker exec -i "$database" sh -c 'PGPASSFILE=/tmp/.pgpass exec "$@"' -- \
     pg_restore -U "$db_user" -d "$db_name" --exit-on-error --no-owner --no-privileges \
     < "$DATABASE_DUMP"
 
 database_scheme="postgresql"
 database_url="${database_scheme}://${db_user}:${drill_db_auth}@${database}:5432/${db_name}"
+printf 'DATABASE_URL=%s\n' "$database_url" > "$work/migration.env"
+chmod 600 "$work/migration.env"
 docker run --rm --network "$network" \
-    -e "DATABASE_URL=$database_url" \
+    --env-file "$work/migration.env" \
     -v "$APP_ROOT/migrations:/app/migrations:ro" \
     -v "$APP_ROOT/alembic.ini:/app/alembic.ini:ro" \
     "$BACKEND_IMAGE" sh -c 'cd /app && alembic upgrade head'
 
 psql() {
-    docker exec -e "PGPASSWORD=$drill_db_auth" "$database" \
+    docker exec "$database" sh -c 'PGPASSFILE=/tmp/.pgpass exec "$@"' -- \
         psql -U "$db_user" -d "$db_name" -At "$@"
 }
 

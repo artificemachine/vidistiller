@@ -715,3 +715,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(backups): use Cosign's current signed bundle format for backup checksum attestations and verify that bundle during restore, preserving fail-closed integrity checks with Cosign v3.
+
+### Security
+- security(backups): keep the restore drill's generated database credential in temporary local env/password files instead of Docker command arguments, preventing local process listings from exposing it during the isolated restore.
