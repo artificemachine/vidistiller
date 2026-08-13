@@ -1,9 +1,12 @@
 ---
 vidistiller_dir: /opt/vidistiller
 
-# Docker Hub images — update tag for new releases
-backend_image: "newblacc/vidistiller-backend:0.2.0"
-frontend_image: "newblacc/vidistiller-frontend:0.2.2"
+# Immutable image references and identity policy are operator-supplied per
+# environment. The role refuses mutable tags before it pulls or starts them.
+backend_image_ref: ""
+frontend_image_ref: ""
+cosign_certificate_identity_regexp: ""
+cosign_oidc_issuer: "https://token.actions.githubusercontent.com"
 
 # Postgres
 db_name: tutorial_db
@@ -21,7 +24,7 @@ frontend_port: 3000
 pgadmin_port: 5050
 
 # Ollama — direct IP routable from the prod VM (carried over from the old LXC config)
-ollama_url: "http://10.0.150.10:11434"
+ollama_url: "http://192.0.2.10:11434"
 ollama_model: "qwen3:8b"
 
 # Celery worker resource limits

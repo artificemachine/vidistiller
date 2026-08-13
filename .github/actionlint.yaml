@@ -1,4 +1,4 @@
 self-hosted-runner:
   labels:
-    - vidistiller-prod
+    - vidistiller-host
     - vidistiller-staging

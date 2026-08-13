@@ -5,10 +5,44 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_FILE="${COMPOSE_FILE:-${SCRIPT_DIR}/../docker-compose.prod.yml}"
 DRY_RUN=false
 
+: "${VIDISTILLER_BACKEND_IMAGE_REF:?Set VIDISTILLER_BACKEND_IMAGE_REF to a signed immutable backend digest}"
+: "${VIDISTILLER_FRONTEND_IMAGE_REF:?Set VIDISTILLER_FRONTEND_IMAGE_REF to a signed immutable frontend digest}"
+: "${COSIGN_CERTIFICATE_IDENTITY_REGEXP:?Set COSIGN_CERTIFICATE_IDENTITY_REGEXP to the trusted CI workflow identity}"
+COSIGN_OIDC_ISSUER="${COSIGN_OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
+
 usage() {
   echo "Usage: $(basename "$0") [--dry-run]" >&2
   echo "  --dry-run  Print what would happen without making any changes" >&2
   exit 1
+}
+
+require_digest_reference() {
+  case "$1" in
+    *@sha256:*) ;;
+    *)
+      echo "[deploy] image reference must be immutable: $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+verify_release_images() {
+  require_digest_reference "$VIDISTILLER_BACKEND_IMAGE_REF"
+  require_digest_reference "$VIDISTILLER_FRONTEND_IMAGE_REF"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "[DRY-RUN] cosign verify backend and frontend image digests"
+    return
+  fi
+  command -v cosign >/dev/null 2>&1 || {
+    echo "[deploy] cosign is required to verify release images" >&2
+    exit 1
+  }
+  for image in "$VIDISTILLER_BACKEND_IMAGE_REF" "$VIDISTILLER_FRONTEND_IMAGE_REF"; do
+    cosign verify \
+      --certificate-identity-regexp "$COSIGN_CERTIFICATE_IDENTITY_REGEXP" \
+      --certificate-oidc-issuer "$COSIGN_OIDC_ISSUER" \
+      "$image" >/dev/null
+  done
 }
 
 while [[ $# -gt 0 ]]; do
@@ -49,6 +83,9 @@ compose_up() {
     docker compose -f "$COMPOSE_FILE" up -d
   fi
 }
+
+echo "[deploy] Verifying signed immutable release images"
+verify_release_images
 
 echo "[deploy] Step 1: force-remove project containers by name (any status)"
 force_remove_project_containers

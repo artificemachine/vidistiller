@@ -19,6 +19,9 @@ coverage
 *.key
 *.pem
 *.p12
+tests/
+.vscode/
+.idea/
 e2e-report*
 e2e-results
 backend/data/imports

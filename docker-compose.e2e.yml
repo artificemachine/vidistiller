@@ -12,7 +12,7 @@ services:
       POSTGRES_PASSWORD: ${E2E_DB_PASSWORD:-test_pw}
       POSTGRES_DB: ${E2E_DB_NAME:-test_db}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${E2E_DB_USER:-test_user}"]
       interval: 5s
@@ -25,7 +25,7 @@ services:
     image: redis:7-alpine
     container_name: e2e_redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -55,7 +55,7 @@ services:
       # passing on the rejection branch.
       ALLOWED_LLM_HOSTS: "localhost,127.0.0.1,::1,ollama,vllm,host.docker.internal,192.0.2.1,192.0.2.2,192.0.2.3,192.0.2.4"
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,8 +83,16 @@ services:
       LOG_LEVEL: WARNING
       DATA_DIR: /data
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -m celery -A app.tasks inspect ping --timeout 5 -d celery@$$HOSTNAME 2>&1 | grep -q pong || exit 1"]
+      interval: 30s
+      timeout: 15s
+      start_period: 40s
+      retries: 3
     networks:
       - e2e_network
 
@@ -98,7 +106,13 @@ services:
     environment:
       NODE_ENV: production
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     depends_on:
       api:
         condition: service_healthy

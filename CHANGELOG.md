@@ -691,3 +691,6 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - feat(backups): create signed NAS backup bundles and verify recovery with isolated restore drills and measured RPO/RTO evidence.
+
+### Security
+- security(release): require Cosign-verified immutable image digests in CI, Ansible, and the direct deployment helper.

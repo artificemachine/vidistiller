@@ -1,0 +1,10 @@
+.env
+.env.*
+node_modules
+.next
+coverage
+__tests__
+.vscode/
+.idea/
+*.log
+.DS_Store

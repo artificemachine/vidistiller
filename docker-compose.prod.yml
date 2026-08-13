@@ -48,7 +48,11 @@ services:
     mem_limit: 256m
     cpus: '0.5'
     container_name: tutorial_redis
-    command: redis-server --requirepass ${REDIS_PASSWORD}
+    # Keep the password out of the healthcheck command. Docker emits executed
+    # healthcheck commands in events, so `redis-cli -a <password>` leaks it.
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\""]
     logging:
       driver: json-file
       options:
@@ -59,7 +63,7 @@ services:
     volumes:
       - ./redis-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -67,7 +71,7 @@ services:
       - tutorial_network
 
   api:
-    image: newblacc/vidistiller-backend:${VIDISTILLER_IMAGE_TAG:-latest}
+    image: ${VIDISTILLER_BACKEND_IMAGE_REF:?Set VIDISTILLER_BACKEND_IMAGE_REF to a signed immutable digest}
     command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     container_name: tutorial_api
     restart: unless-stopped
@@ -98,10 +102,12 @@ services:
       SENTRY_ENVIRONMENT: ${ENVIRONMENT:-production}
       DATA_DIR: /data
       FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY}
-      VLLM_VM913_URL: ${VLLM_VM913_URL:-}
-      VLLM_VM903_URL: ${VLLM_VM903_URL:-}
-      VLLM_VM901_URL: ${VLLM_VM901_URL:-}
-      VLLM_VM2900_URL: ${VLLM_VM2900_URL:-}
+      VLLM_PRIMARY_URL: ${VLLM_PRIMARY_URL:-}
+      VLLM_SECONDARY_URL: ${VLLM_SECONDARY_URL:-}
+      VLLM_VISION_URL: ${VLLM_VISION_URL:-}
+      VLLM_AUXILIARY_URL: ${VLLM_AUXILIARY_URL:-}
+      LLM_MODEL_PROFILES_PATH: ${LLM_MODEL_PROFILES_PATH:-}
+      LLM_ALLOW_CLOUD_FALLBACK: ${LLM_ALLOW_CLOUD_FALLBACK:-false}
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
@@ -111,8 +117,10 @@ services:
         condition: service_healthy
     volumes:
       - ./app-data:/data
-      - ./alembic.ini:/app/alembic.ini
-      - ./migrations:/app/migrations
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./migrations:/app/migrations:ro
+      # Operator-owned, non-secret model profiles stay outside the repository.
+      - ${LLM_MODEL_PROFILES_HOST_DIR:-./config}:/etc/vidistiller:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -124,7 +132,7 @@ services:
       - tutorial_network
 
   celery_worker:
-    image: newblacc/vidistiller-backend:${VIDISTILLER_IMAGE_TAG:-latest}
+    image: ${VIDISTILLER_BACKEND_IMAGE_REF:?Set VIDISTILLER_BACKEND_IMAGE_REF to a signed immutable digest}
     command: python3 -m celery -A app.tasks worker --loglevel=${LOG_LEVEL:-info}
     container_name: tutorial_celery_worker
     restart: unless-stopped
@@ -149,21 +157,26 @@ services:
       SENTRY_ENVIRONMENT: ${ENVIRONMENT:-production}
       DATA_DIR: /data
       FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY}
-      VLLM_VM913_URL: ${VLLM_VM913_URL:-}
-      VLLM_VM903_URL: ${VLLM_VM903_URL:-}
-      VLLM_VM901_URL: ${VLLM_VM901_URL:-}
-      VLLM_VM2900_URL: ${VLLM_VM2900_URL:-}
+      VLLM_PRIMARY_URL: ${VLLM_PRIMARY_URL:-}
+      VLLM_SECONDARY_URL: ${VLLM_SECONDARY_URL:-}
+      VLLM_VISION_URL: ${VLLM_VISION_URL:-}
+      VLLM_AUXILIARY_URL: ${VLLM_AUXILIARY_URL:-}
+      LLM_MODEL_PROFILES_PATH: ${LLM_MODEL_PROFILES_PATH:-}
+      LLM_ALLOW_CLOUD_FALLBACK: ${LLM_ALLOW_CLOUD_FALLBACK:-false}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     mem_limit: 4g
     cpus: '2.0'
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - ./app-data:/data
-      - ./alembic.ini:/app/alembic.ini
-      - ./migrations:/app/migrations
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./migrations:/app/migrations:ro
+      - ${LLM_MODEL_PROFILES_HOST_DIR:-./config}:/etc/vidistiller:ro
     healthcheck:
       test: ["CMD-SHELL", "python3 -m celery -A app.tasks inspect ping --timeout 5 -d celery@$$HOSTNAME 2>&1 | grep -q pong || exit 1"]
       interval: 30s
@@ -174,7 +187,7 @@ services:
       - tutorial_network
 
   web:
-    image: newblacc/vidistiller-frontend:${VIDISTILLER_IMAGE_TAG:-latest}
+    image: ${VIDISTILLER_FRONTEND_IMAGE_REF:?Set VIDISTILLER_FRONTEND_IMAGE_REF to a signed immutable digest}
     container_name: tutorial_web
     restart: unless-stopped
     mem_limit: 512m
@@ -215,6 +228,12 @@ services:
       - "127.0.0.1:${PGADMIN_PORT:-5050}:80"
     depends_on:
       - postgres
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:80/misc/ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - tutorial_network
 

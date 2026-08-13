@@ -160,8 +160,8 @@ services:
         # api starts with no installed packages (uvicorn not found) on fresh clones.
         - /app/deps
         - app_data:/data              # Persistent storage for snapshots and videos
-        - ./alembic.ini:/app/alembic.ini  # Alembic config (in WORKDIR so alembic finds it)
-        - ./migrations:/app/migrations    # Alembic migration scripts
+        - ./alembic.ini:/app/alembic.ini:ro  # Alembic config is runtime read-only
+        - ./migrations:/app/migrations:ro    # Migration scripts are runtime read-only
 
       # Allow containers to reach host services (e.g. Ollama) via host.docker.internal
       extra_hosts:
@@ -242,8 +242,8 @@ services:
         # See api service: keep image-baked /app/deps visible under the bind mount.
         - /app/deps
         - app_data:/data              # Shared persistent storage for snapshots and videos
-        - ./alembic.ini:/app/alembic.ini  # Alembic config (in WORKDIR so alembic finds it)
-        - ./migrations:/app/migrations    # Alembic migration scripts
+        - ./alembic.ini:/app/alembic.ini:ro  # Alembic config is runtime read-only
+        - ./migrations:/app/migrations:ro    # Migration scripts are runtime read-only
 
       networks:
         - tutorial_network
@@ -311,6 +311,13 @@ services:
 
       depends_on:
         - postgres
+
+      healthcheck:
+        test: ["CMD-SHELL", "wget -q --spider http://localhost:80/misc/ping || exit 1"]
+        interval: 30s
+        timeout: 10s
+        retries: 3
+        start_period: 30s
 
       networks:
         - tutorial_network

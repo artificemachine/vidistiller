@@ -1,5 +1,30 @@
-# Deploy Vidistiller stack via Docker Compose on vidistiller-prod
+# Deploy Vidistiller stack via Docker Compose on vidistiller-host
 ---
+- name: Require signed immutable image references
+  ansible.builtin.assert:
+    that:
+      - backend_image_ref is match('^.+@sha256:[0-9a-f]{64}$')
+      - frontend_image_ref is match('^.+@sha256:[0-9a-f]{64}$')
+      - cosign_certificate_identity_regexp | length > 0
+    fail_msg: >-
+      backend_image_ref and frontend_image_ref must be immutable digests and
+      cosign_certificate_identity_regexp must identify the trusted CI workflow.
+
+- name: Verify image signatures before pull or start
+  ansible.builtin.command:
+    argv:
+      - cosign
+      - verify
+      - --certificate-identity-regexp
+      - "{{ cosign_certificate_identity_regexp }}"
+      - --certificate-oidc-issuer
+      - "{{ cosign_oidc_issuer }}"
+      - "{{ item }}"
+  loop:
+    - "{{ backend_image_ref }}"
+    - "{{ frontend_image_ref }}"
+  changed_when: false
+
 - name: Create vidistiller working directory
   file:
     path: "{{ vidistiller_dir }}"
