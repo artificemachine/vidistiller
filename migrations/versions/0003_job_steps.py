@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 
 revision: str = "0003_job_steps"
@@ -17,9 +18,10 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-job_step_status = sa.Enum(
+job_step_status = postgresql.ENUM(
     "pending", "running", "completed", "failed", "skipped", "cancelled",
     name="jobstepstatus",
+    create_type=False,
 )
 
 

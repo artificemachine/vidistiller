@@ -694,3 +694,6 @@ All notable changes to this project will be documented in this file.
 
 ### Security
 - security(release): require Cosign-verified immutable image digests in CI, Ansible, and the direct deployment helper.
+
+### Fixed
+- fix(migrations): create the PostgreSQL job-step enum only once during Alembic upgrade.
