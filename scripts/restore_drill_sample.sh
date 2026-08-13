@@ -75,6 +75,10 @@ verify_image "$BACKEND_IMAGE" "$COSIGN_BACKEND_IDENTITY"
     echo "Missing PostgreSQL dump" >&2
     exit 1
 }
+[[ -f "$BACKUP_BUNDLE/app-data.tar" ]] || {
+    echo "Missing application artifact archive" >&2
+    exit 1
+}
 
 mkdir -p "$DRILL_ROOT" "$REPORT_DIR"
 work_fstype="$(findmnt -no FSTYPE -T "$DRILL_ROOT")"
@@ -105,6 +109,8 @@ trap cleanup EXIT
 cosign verify-blob --key "$BACKUP_SIGNING_PUBLIC_KEY" \
     --signature "$BACKUP_BUNDLE/SHA256SUMS.sig" "$BACKUP_BUNDLE/SHA256SUMS" >/dev/null
 (cd "$BACKUP_BUNDLE" && sha256sum -c SHA256SUMS --quiet)
+mkdir -p "$work/app-data"
+tar -C "$work/app-data" -xf "$BACKUP_BUNDLE/app-data.tar"
 
 docker network create --internal "$network" >/dev/null
 docker run -d --name "$database" --network "$network" \
@@ -164,15 +170,12 @@ case "$snapshot_path" in
         ;;
 esac
 
-source_snapshot="$BACKUP_BUNDLE/app-data/$backup_snapshot_path"
 restored_snapshot="$work/app-data/$backup_snapshot_path"
-[[ -f "$source_snapshot" ]] || {
+[[ -f "$restored_snapshot" ]] || {
     echo "Snapshot referenced by restored database is absent from bundle" >&2
     exit 1
 }
-mkdir -p "$(dirname "$restored_snapshot")" "$work/exports"
-cp "$source_snapshot" "$restored_snapshot"
-cmp -s "$source_snapshot" "$restored_snapshot"
+mkdir -p "$work/exports"
 
 export_path="$work/exports/${job_id}.json"
 psql -c "SELECT json_build_object('job_id', j.job_id, 'transcript', (SELECT t.full_text FROM transcripts t WHERE t.job_id = j.id ORDER BY t.id LIMIT 1), 'snapshot_count', (SELECT count(*) FROM snapshots s WHERE s.job_id = j.id), 'document_count', (SELECT count(*) FROM documents d WHERE d.job_id = j.id)) FROM processing_jobs j WHERE j.id = ${job_pk}" > "$export_path"

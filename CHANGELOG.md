@@ -709,3 +709,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(backups): resolve the mirrored PostgreSQL manifest digest through Buildx's manifest field before signing it, so the restore image workflow signs the exact pushed reference.
+
+### Changed
+- perf(backups): archive application media as a single `app-data.tar` before copying to the NAS, then extract it only inside the local isolated restore drill. This preserves the signed bundle contract while avoiding NFS metadata bottlenecks from thousands of small artifacts.
