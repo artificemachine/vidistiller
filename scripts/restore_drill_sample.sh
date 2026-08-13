@@ -67,8 +67,8 @@ verify_image "$BACKEND_IMAGE" "$COSIGN_BACKEND_IDENTITY"
     echo "Missing checksum manifest: $BACKUP_BUNDLE/SHA256SUMS" >&2
     exit 1
 }
-[[ -f "$BACKUP_BUNDLE/SHA256SUMS.sig" ]] || {
-    echo "Missing signed checksum manifest: $BACKUP_BUNDLE/SHA256SUMS.sig" >&2
+[[ -f "$BACKUP_BUNDLE/SHA256SUMS.bundle" ]] || {
+    echo "Missing signed checksum bundle: $BACKUP_BUNDLE/SHA256SUMS.bundle" >&2
     exit 1
 }
 [[ -f "$DATABASE_DUMP" ]] || {
@@ -107,7 +107,7 @@ cleanup() {
 trap cleanup EXIT
 
 cosign verify-blob --key "$BACKUP_SIGNING_PUBLIC_KEY" \
-    --signature "$BACKUP_BUNDLE/SHA256SUMS.sig" "$BACKUP_BUNDLE/SHA256SUMS" >/dev/null
+    --bundle "$BACKUP_BUNDLE/SHA256SUMS.bundle" "$BACKUP_BUNDLE/SHA256SUMS" >/dev/null
 (cd "$BACKUP_BUNDLE" && sha256sum -c SHA256SUMS --quiet)
 mkdir -p "$work/app-data"
 tar -C "$work/app-data" -xf "$BACKUP_BUNDLE/app-data.tar"

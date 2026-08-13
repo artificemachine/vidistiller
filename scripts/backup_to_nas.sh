@@ -81,7 +81,7 @@ cp -a migrations "${staging}/config/migrations"
 )
 COSIGN_PASSWORD="$(<"${BACKUP_SIGNING_PASSWORD_FILE}")" \
   cosign sign-blob --yes --key "$BACKUP_SIGNING_KEY" \
-  --output-signature "${staging}/SHA256SUMS.sig" "${staging}/SHA256SUMS"
+  --bundle "${staging}/SHA256SUMS.bundle" "${staging}/SHA256SUMS"
 touch "${staging}/.verified"
 
 mv -- "${staging}" "${final_bundle}"

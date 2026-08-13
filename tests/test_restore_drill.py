@@ -80,9 +80,10 @@ def test_scheduled_backup_and_restore_use_a_signed_common_bundle_contract():
     restore = (root / "scripts" / "restore_drill_sample.sh").read_text(encoding="utf-8")
 
     assert 'cosign sign-blob --yes --key "$BACKUP_SIGNING_KEY"' in backup
+    assert '--bundle "${staging}/SHA256SUMS.bundle"' in backup
     assert 'touch "${staging}/.verified"' in backup
     assert 'cosign verify-blob --key "$BACKUP_SIGNING_PUBLIC_KEY"' in restore
-    assert '"$BACKUP_BUNDLE/SHA256SUMS.sig"' in restore
+    assert '"$BACKUP_BUNDLE/SHA256SUMS.bundle"' in restore
     assert "VERIFY_CHECKSUMS" not in restore
     assert 'require_digest_reference "$POSTGRES_IMAGE"' in restore
     assert 'require_digest_reference "$BACKEND_IMAGE"' in restore
