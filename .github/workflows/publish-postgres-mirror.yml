@@ -39,7 +39,7 @@ jobs:
           docker pull "$source"
           docker tag "$source" "$target"
           docker push "$target"
-          digest="$(docker buildx imagetools inspect "$target" --format '{{.Digest}}')"
+          digest="$(docker buildx imagetools inspect "$target" --format '{{.Manifest.Digest}}')"
           case "$digest" in
             sha256:*) ;;
             *) echo "Unable to resolve immutable mirror digest" >&2; exit 1 ;;
