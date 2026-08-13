@@ -700,3 +700,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - test(e2e): select visually hidden LLM provider radios deterministically, eliminating a flaky Settings-page assertion in CI.
+
+### Fixed
+- test(e2e): activate the visible provider-card label, rather than its screen-reader-only radio input, and assert the selected state before checking conditional fields.

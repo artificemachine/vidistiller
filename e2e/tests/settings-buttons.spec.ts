@@ -1,10 +1,16 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 /**
  * Settings page control tests — verifies interactive elements on the settings page.
  * The UI uses radio-card-style provider selection (not a <select>).
  * Uses authenticated state from global setup.
  */
+
+async function selectProvider(page: Page, provider: string) {
+  const radio = page.locator(`input[type='radio'][name='llm_provider'][value='${provider}']`);
+  await radio.locator('xpath=..').click();
+  await expect(radio).toBeChecked();
+}
 
 test.describe("Settings page controls", () => {
   test.beforeEach(async ({ page }) => {
@@ -30,19 +36,19 @@ test.describe("Settings page controls", () => {
   });
 
   test("switching to openai reveals api key input", async ({ page }) => {
-    await page.locator("input[type='radio'][name='llm_provider'][value='openai']").check({ force: true });
+    await selectProvider(page, 'openai');
     await expect(page.locator("input[type='password']")).toBeVisible();
     await expect(page.locator("input[type='url']")).not.toBeVisible();
   });
 
   test("switching to anthropic reveals api key input", async ({ page }) => {
-    await page.locator("input[type='radio'][name='llm_provider'][value='anthropic']").check({ force: true });
+    await selectProvider(page, 'anthropic');
     await expect(page.locator("input[type='password']")).toBeVisible();
     await expect(page.locator("input[type='url']")).not.toBeVisible();
   });
 
   test("model name input accepts text after switching to openai", async ({ page }) => {
-    await page.locator("input[type='radio'][name='llm_provider'][value='openai']").check({ force: true });
+    await selectProvider(page, 'openai');
     const modelInput = page.locator("input[type='text']").first();
     await modelInput.clear();
     await modelInput.fill("gpt-4-turbo");
@@ -62,7 +68,7 @@ test.describe("Settings page controls", () => {
   });
 
   test("api key input has password placeholder for openai", async ({ page }) => {
-    await page.locator("input[type='radio'][name='llm_provider'][value='openai']").check({ force: true });
+    await selectProvider(page, 'openai');
     const apiKeyInput = page.locator("input[type='password']");
     await expect(apiKeyInput).toBeVisible();
     await expect(apiKeyInput).toHaveAttribute("placeholder", /sk-/i);
