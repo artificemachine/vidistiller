@@ -30,19 +30,19 @@ test.describe("Settings page controls", () => {
   });
 
   test("switching to openai reveals api key input", async ({ page }) => {
-    await page.locator("input[type='radio'][name='llm_provider'][value='openai']").click({ force: true });
+    await page.locator("input[type='radio'][name='llm_provider'][value='openai']").check({ force: true });
     await expect(page.locator("input[type='password']")).toBeVisible();
     await expect(page.locator("input[type='url']")).not.toBeVisible();
   });
 
   test("switching to anthropic reveals api key input", async ({ page }) => {
-    await page.locator("input[type='radio'][name='llm_provider'][value='anthropic']").click({ force: true });
+    await page.locator("input[type='radio'][name='llm_provider'][value='anthropic']").check({ force: true });
     await expect(page.locator("input[type='password']")).toBeVisible();
     await expect(page.locator("input[type='url']")).not.toBeVisible();
   });
 
   test("model name input accepts text after switching to openai", async ({ page }) => {
-    await page.locator("input[type='radio'][name='llm_provider'][value='openai']").click({ force: true });
+    await page.locator("input[type='radio'][name='llm_provider'][value='openai']").check({ force: true });
     const modelInput = page.locator("input[type='text']").first();
     await modelInput.clear();
     await modelInput.fill("gpt-4-turbo");
@@ -62,7 +62,7 @@ test.describe("Settings page controls", () => {
   });
 
   test("api key input has password placeholder for openai", async ({ page }) => {
-    await page.locator("input[type='radio'][name='llm_provider'][value='openai']").click({ force: true });
+    await page.locator("input[type='radio'][name='llm_provider'][value='openai']").check({ force: true });
     const apiKeyInput = page.locator("input[type='password']");
     await expect(apiKeyInput).toBeVisible();
     await expect(apiKeyInput).toHaveAttribute("placeholder", /sk-/i);

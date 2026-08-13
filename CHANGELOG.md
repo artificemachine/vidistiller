@@ -697,3 +697,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(migrations): create the PostgreSQL job-step enum only once during Alembic upgrade.
+
+### Fixed
+- test(e2e): select visually hidden LLM provider radios deterministically, eliminating a flaky Settings-page assertion in CI.
