@@ -682,3 +682,6 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.15.2` to `1.15.3` (fix: process_transcript staleness guard).
+
+### Added
+- feat(fleet): capability-based routing discovers loaded models and selects healthy text, vision, and long-context candidates from an external manifest.

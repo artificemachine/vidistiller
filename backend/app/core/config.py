@@ -401,10 +401,18 @@ class VLLMFleetSettings(BaseSettings):
     URLs are read from env so the fleet can be reconfigured without code changes.
     """
 
-    vm913_url: str = Field(default="", validation_alias="VLLM_VM913_URL")
-    vm903_url: str = Field(default="", validation_alias="VLLM_VM903_URL")
-    vm901_url: str = Field(default="", validation_alias="VLLM_VM901_URL")
-    vm2900_url: str = Field(default="", validation_alias="VLLM_VM2900_URL")
+    primary_url: str = Field(default="", validation_alias="VLLM_PRIMARY_URL")
+    secondary_url: str = Field(default="", validation_alias="VLLM_SECONDARY_URL")
+    vision_url: str = Field(default="", validation_alias="VLLM_VISION_URL")
+    auxiliary_url: str = Field(default="", validation_alias="VLLM_AUXILIARY_URL")
+    model_profiles_path: str = Field(
+        default="",
+        validation_alias="LLM_MODEL_PROFILES_PATH",
+    )
+    allow_cloud_fallback: bool = Field(
+        default=False,
+        validation_alias="LLM_ALLOW_CLOUD_FALLBACK",
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

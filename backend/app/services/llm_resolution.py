@@ -9,35 +9,23 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
 from typing import Optional
 
 import requests
 
-logger = logging.getLogger(__name__)
+from app.services.llm_fleet import (
+    FLEET_VMS,
+    LLMTask,
+    ResolvedLLM,
+    RouteRequest,
+    load_model_profiles,
+    route_llm,
+)
 
-# Fleet VMs: (label, env var holding the vLLM URL). Same order as the
-# resolution used by jobs: first VM that has the model loaded wins.
-FLEET_VMS = [
-    ("vm913", "VLLM_VM913_URL"),
-    ("vm903", "VLLM_VM903_URL"),
-    ("vm901", "VLLM_VM901_URL"),
-    ("vm2900", "VLLM_VM2900_URL"),
-]
+logger = logging.getLogger(__name__)
 
 # Fallback model when neither the user nor the provider default supplies one.
 FALLBACK_MODEL = "gemma4-31b"
-
-
-@dataclass
-class ResolvedLLM:
-    """Effective LLM configuration for a user."""
-
-    provider_name: str
-    model: str
-    base_url: Optional[str]
-    api_key: Optional[str]
-    fleet_node: Optional[str] = None  # label of the fleet VM serving the model
 
 
 def _get_vm_model_ids(url: str) -> list[str]:
@@ -150,7 +138,7 @@ def resolve_user_llm(owner) -> ResolvedLLM:
     default_url = (
         adopted_url
         or fleet_url
-        or os.environ.get("VLLM_VM913_URL")
+        or os.environ.get("VLLM_PRIMARY_URL")
         or os.environ.get("OLLAMA_URL")
     )
     base_url = (owner.llm_ollama_url if owner and owner.llm_ollama_url else None) or default_url
@@ -173,3 +161,25 @@ def resolve_user_llm(owner) -> ResolvedLLM:
         api_key=api_key,
         fleet_node=fleet_node,
     )
+
+
+def resolve_task_llm(
+    owner,
+    task: LLMTask,
+    required_context_tokens: int = 0,
+) -> ResolvedLLM:
+    """Resolve a task-specific route when the fleet has declared profiles.
+
+    An empty checked-in manifest intentionally preserves the legacy resolver
+    until an operator has certified at least one local profile. Once profiles
+    exist, route selection is strict: no candidate means no task dispatch,
+    rather than silently using the first reachable VM.
+    """
+    profiles = load_model_profiles()
+    has_local_profiles = any(profile.tier == "local" for profile in profiles.values())
+    if has_local_profiles:
+        return route_llm(
+            owner,
+            RouteRequest.for_task(task, required_context_tokens),
+        )
+    return resolve_user_llm(owner)

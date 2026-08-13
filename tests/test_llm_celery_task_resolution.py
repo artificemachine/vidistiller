@@ -13,8 +13,8 @@ silently.
 import inspect
 
 
-def test_summarize_transcript_task_uses_shared_resolver() -> None:
-    """The celery task body must call resolve_user_llm.
+def test_summarize_transcript_task_uses_task_aware_resolver() -> None:
+    """The celery task body must call the task-aware resolver.
 
     Static check rather than a full Celery run — exercises the task source
     enough to catch the regression without dragging in DB/job fixtures.
@@ -22,10 +22,11 @@ def test_summarize_transcript_task_uses_shared_resolver() -> None:
     from app.tasks import summarize_transcript_task
 
     source = inspect.getsource(summarize_transcript_task)
-    assert "resolve_user_llm" in source, (
-        "summarize_transcript_task no longer calls resolve_user_llm — fleet "
-        "adoption is bypassed."
+    assert "_resolve_job_llm_config" in source, (
+        "summarize_transcript_task no longer uses task-aware resolution — "
+        "fleet capability routing is bypassed."
     )
+    assert "LLMTask.LONG_ANALYSIS" in source
     assert "DEFAULT_MODELS.get(\"vllm\", \"qwen3-32b-awq\")" not in source, (
         "summarize_transcript_task still carries the pre-fix inline fallback "
         "to qwen3-32b-awq."
@@ -75,5 +76,4 @@ def test_summarize_task_does_not_mark_failed_when_document_exists() -> None:
         "the route revokes the previous task and clears celery_task_id, so "
         "a stale id must not block a legitimate force re-run."
     )
-
 

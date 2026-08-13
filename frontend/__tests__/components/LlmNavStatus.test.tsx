@@ -24,7 +24,7 @@ const healthy = {
   models_available: ['qwen3.6-27b-awq'],
   latency_ms: 42,
   error: null,
-  fleet_node: 'vm903',
+  fleet_node: 'secondary',
 };
 
 describe('LlmNavStatus', () => {

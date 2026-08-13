@@ -13,14 +13,14 @@ import LlmStatusCard from '@/components/LlmStatusCard';
 const healthy = {
   provider: 'vllm',
   model: 'gemma4-31b',
-  base_url: 'http://vm913:8000',
+  base_url: 'http://primary:8000',
   reachable: true,
   auth_ok: null,
   model_found: true,
   models_available: ['gemma4-31b'],
   latency_ms: 42,
   error: null,
-  fleet_node: 'vm913',
+  fleet_node: 'primary',
 };
 
 describe('LlmStatusCard', () => {
@@ -44,8 +44,8 @@ describe('LlmStatusCard', () => {
     expect(screen.getByText('— ready')).toBeInTheDocument();
     expect(screen.getByTestId('llm-status-dot').className).toContain('bg-green-500');
     expect(screen.getByText('42ms')).toBeInTheDocument();
-    expect(screen.getByText('fleet node: vm913')).toBeInTheDocument();
-    expect(screen.getByTestId('llm-status-url')).toHaveTextContent('http://vm913:8000');
+    expect(screen.getByText('fleet node: primary')).toBeInTheDocument();
+    expect(screen.getByTestId('llm-status-url')).toHaveTextContent('http://primary:8000');
   });
 
   it('shows red state when endpoint is unreachable', async () => {

@@ -239,34 +239,34 @@ class TestApiKeySettings:
 
 
 # ===========================================================================
-# VLLM Fleet Settings — reads VLLM_VM{913,903,901,2900}_URL from env
+# vLLM Fleet Settings — reads role-based endpoint variables from env
 # ===========================================================================
 
 class TestVLLMFleetSettings:
     def test_defaults_empty(self, monkeypatch):
-        for var in ("VLLM_VM913_URL", "VLLM_VM903_URL", "VLLM_VM901_URL", "VLLM_VM2900_URL"):
+        for var in ("VLLM_PRIMARY_URL", "VLLM_SECONDARY_URL", "VLLM_VISION_URL", "VLLM_AUXILIARY_URL"):
             monkeypatch.delenv(var, raising=False)
         from app.core.config import VLLMFleetSettings
         s = VLLMFleetSettings()
-        assert s.vm913_url == ""
-        assert s.vm903_url == ""
-        assert s.vm901_url == ""
-        assert s.vm2900_url == ""
+        assert s.primary_url == ""
+        assert s.secondary_url == ""
+        assert s.vision_url == ""
+        assert s.auxiliary_url == ""
 
     def test_reads_from_env(self, monkeypatch):
-        monkeypatch.setenv("VLLM_VM913_URL", "http://10.0.150.36:8100")
-        monkeypatch.setenv("VLLM_VM903_URL", "http://10.0.150.16:8100")
-        monkeypatch.setenv("VLLM_VM901_URL", "http://10.0.150.10:8100")
-        monkeypatch.setenv("VLLM_VM2900_URL", "http://10.0.150.20:8100")
+        monkeypatch.setenv("VLLM_PRIMARY_URL", "http://192.0.2.10:8100")
+        monkeypatch.setenv("VLLM_SECONDARY_URL", "http://192.0.2.10:8100")
+        monkeypatch.setenv("VLLM_VISION_URL", "http://192.0.2.10:8100")
+        monkeypatch.setenv("VLLM_AUXILIARY_URL", "http://192.0.2.10:8100")
         from app.core.config import VLLMFleetSettings
         s = VLLMFleetSettings()
-        assert s.vm913_url == "http://10.0.150.36:8100"
-        assert s.vm903_url == "http://10.0.150.16:8100"
-        assert s.vm901_url == "http://10.0.150.10:8100"
-        assert s.vm2900_url == "http://10.0.150.20:8100"
+        assert s.primary_url == "http://192.0.2.10:8100"
+        assert s.secondary_url == "http://192.0.2.10:8100"
+        assert s.vision_url == "http://192.0.2.10:8100"
+        assert s.auxiliary_url == "http://192.0.2.10:8100"
 
     def test_settings_exposes_vllm_fleet(self):
         from app.core.config import Settings
         s = Settings()
         assert hasattr(s, "vllm_fleet")
-        assert hasattr(s.vllm_fleet, "vm913_url")
+        assert hasattr(s.vllm_fleet, "primary_url")

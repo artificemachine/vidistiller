@@ -17,7 +17,7 @@ vi.mock('@/lib/authStore', () => ({
     user: {
       llm_provider: 'vllm',
       llm_model: 'qwen3.6-27b-awq',
-      llm_ollama_url: 'http://10.0.0.1:8000',
+      llm_ollama_url: 'http://192.0.2.10:8000',
       has_api_key: false,
     },
     isAuthenticated: true,
@@ -45,7 +45,7 @@ describe('SettingsPage — vllm models probe must not block the form', () => {
           data: {
             llm_provider: 'vllm',
             llm_model: 'qwen3.6-27b-awq',
-            llm_ollama_url: 'http://10.0.0.1:8000',
+            llm_ollama_url: 'http://192.0.2.10:8000',
             has_api_key: false,
           },
         });
