@@ -74,6 +74,17 @@ def test_sample_runner_verifies_images_before_running_them():
     assert 'cosign verify --certificate-identity-regexp "$identity"' in script
 
 
+def test_sample_runner_never_places_its_ephemeral_database_secret_in_process_args():
+    """Local process listings must not reveal the isolated database password."""
+    script = (
+        Path(__file__).resolve().parents[1] / "scripts" / "restore_drill_sample.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "PGPASSWORD=" not in script
+    assert 'docker cp "$work/.pgpass" "$database:/tmp/.pgpass"' in script
+    assert '--env-file "$work/migration.env"' in script
+
+
 def test_scheduled_backup_and_restore_use_a_signed_common_bundle_contract():
     root = Path(__file__).resolve().parents[1]
     backup = (root / "scripts" / "backup_to_nas.sh").read_text(encoding="utf-8")
