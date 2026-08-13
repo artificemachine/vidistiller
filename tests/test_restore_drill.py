@@ -86,6 +86,9 @@ def test_scheduled_backup_and_restore_use_a_signed_common_bundle_contract():
     assert "VERIFY_CHECKSUMS" not in restore
     assert 'require_digest_reference "$POSTGRES_IMAGE"' in restore
     assert 'require_digest_reference "$BACKEND_IMAGE"' in restore
+    assert 'tar -C app-data' in backup
+    assert '"${staging}/app-data.tar"' in backup
+    assert 'tar -C "$work/app-data" -xf "$BACKUP_BUNDLE/app-data.tar"' in restore
 
 
 def test_postgres_restore_image_mirror_is_immutable_and_oidc_signed():

@@ -53,9 +53,13 @@ cd "${VIDISTILLER_ROOT}"
 docker compose -f docker-compose.prod.yml exec -T postgres sh -c \
   'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' > "${staging}/database.dump"
 
-# App media is copied while the service is live. Hidden files are temporary
-# encodes created by workers and never belong in a recoverable artifact set.
-rsync -a --delete-delay --exclude='.*' app-data/ "${staging}/app-data/"
+# App media consists mainly of small generated artifacts.  A tree copy to NFS
+# is metadata-bound and makes the recovery point take hours to produce.  Keep
+# the same complete payload in one archive so the offsite transfer is a single
+# sequential write; the isolated drill extracts it to local storage.
+# Hidden files are temporary encodes created by workers and never belong in a
+# recoverable artifact set.
+tar -C app-data --exclude='./.*' --exclude='*/.*' -cf "${staging}/app-data.tar" .
 
 mkdir -p "${staging}/config"
 for safe_config in docker-compose.prod.yml alembic.ini .env.example; do
