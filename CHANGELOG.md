@@ -688,3 +688,6 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - feat(jobs): persist per-step progress and enable idempotent retries that resume blocked snapshot or slide processing.
+
+### Added
+- feat(backups): create signed NAS backup bundles and verify recovery with isolated restore drills and measured RPO/RTO evidence.
