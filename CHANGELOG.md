@@ -712,3 +712,6 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - perf(backups): archive application media as a single `app-data.tar` before copying to the NAS, then extract it only inside the local isolated restore drill. This preserves the signed bundle contract while avoiding NFS metadata bottlenecks from thousands of small artifacts.
+
+### Fixed
+- fix(backups): use Cosign's current signed bundle format for backup checksum attestations and verify that bundle during restore, preserving fail-closed integrity checks with Cosign v3.
