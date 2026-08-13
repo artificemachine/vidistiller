@@ -703,3 +703,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - test(e2e): activate the visible provider-card label, rather than its screen-reader-only radio input, and assert the selected state before checking conditional fields.
+
+### Added
+- security(backups): publish an immutable PostgreSQL restore-image mirror signed by this repository's GitHub Actions OIDC identity; the restore drill can now verify its database image provenance without trusting an unsigned upstream tag.

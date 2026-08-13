@@ -86,3 +86,19 @@ def test_scheduled_backup_and_restore_use_a_signed_common_bundle_contract():
     assert "VERIFY_CHECKSUMS" not in restore
     assert 'require_digest_reference "$POSTGRES_IMAGE"' in restore
     assert 'require_digest_reference "$BACKEND_IMAGE"' in restore
+
+
+def test_postgres_restore_image_mirror_is_immutable_and_oidc_signed():
+    """The restore image must have CI provenance, not an operator-created tag."""
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "workflows"
+        / "publish-postgres-mirror.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "postgres@sha256:" in workflow
+    assert "${{ vars.DOCKER_IMAGE_NAMESPACE }}/vidistiller-postgres" in workflow
+    assert "id-token: write" in workflow
+    assert 'cosign sign --yes "${target}@${digest}"' in workflow
+    assert 'cosign verify --certificate-identity-regexp' in workflow
