@@ -134,6 +134,7 @@ e2e/node_modules/
 
 # codex-pii-guard:start
 .env
+.env.*
 .env.local
 .env.*.local
 *.log

@@ -9,7 +9,7 @@
 | 4 | Fresh clone + deps | **PASS** | quickstart verified OK from a fresh clone of github main (was FAILED 2×). npm prod: 0 vulnerabilities (form-data HIGH fixed). Residual LOW: ecdsa 0.19.2 PYSEC-2026-1325 (no fix published) |
 | 5 | Hardening | PASS [condensed] | CI on merge commit: backend 411, frontend 224, e2e — all green. ShipGuard 0 CRIT/HIGH (11 MED tracked) |
 | 6 | Architecture | PASS [condensed] | unchanged — full /arch-audit still recommended |
-| 7 | CI governance | **PASS*** | branch protection ON (4 required checks, no force-push/delete), npm ci, toolchain aligned 3.12, gitleaks rule scoped + PR scans green. *Residual MED: gitleaks CI still scans only the latest commit — a full-history scan would now flag CHANGELOG.md's historical 10.255.x entries |
+| 7 | CI governance | **PASS*** | branch protection ON (4 required checks, no force-push/delete), npm ci, toolchain aligned 3.12, gitleaks rule scoped + PR scans green. *Residual MED: gitleaks CI still scans only the latest commit — a full-history scan would now flag CHANGELOG.md's historical [redacted internal range] entries |
 | 8 | Claims vs reality | **PASS** | quickstart claim now TRUE (reproduced), terraform/Python/version claims corrected. Residual: 7-platform support list not live-tested in this audit |
 
 ## Verdict: NEEDS POLISH

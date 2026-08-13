@@ -1,7 +1,7 @@
 # Vidistiller — UI/UX Design Audit Report
 
 **Date:** February 26, 2026
-**Prepared for:** Maxime Roy
+**Prepared for:** repository maintainer
 **Based on:** Current design trends from Mobbin, Dribbble, Aura, and 2026 SaaS best practices
 
 ---

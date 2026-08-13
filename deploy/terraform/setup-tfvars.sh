@@ -47,9 +47,9 @@ vm_disk_size = 80
 vm_storage   = "local-lvm"
 vm_bridge    = "vmbr0"
 
-vm_ip     = "10.0.181.20"
+vm_ip     = "192.0.2.10"
 vm_prefix = 16
-gateway   = "10.0.10.1"
+gateway   = "192.0.2.10"
 
 ssh_public_key = "$SSH_KEY"
 DYNAMIC

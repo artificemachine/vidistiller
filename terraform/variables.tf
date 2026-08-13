@@ -35,7 +35,7 @@ variable "proxmox_tls_insecure" {
 variable "proxmox_node" {
   description = "Proxmox node name to create container on"
   type        = string
-  default     = "node01"
+  default     = "relay-host"
 }
 
 # -----------------------------------------------------------------------------

@@ -17,7 +17,7 @@ Resume state only. `continue` resumes at the first stage with no entry below.
 ## Stage 2 — Git History & Release Hygiene: PASS (cleanup plan attached) (2026-07-22 quick re-run)
 - verdict: PASS, squash-merge policy active, Conventional Commits throughout last 20 commits, no wip/asdf/typo litter, 62 tags spanning v0.4.0..v1.12.21, all v1.12.21 substantive work visible (sharp CVE pin, dead services removed, real Alembic, PR #160 squash-merge). 4 LOW+INFO findings (pyproject version lag by one tag; v1.12.21 has tag but no gh release; obsolete fix/golive-followups branch not auto-deleted; 100% self-merge neutral note)
 - blockers: 0
-- evidence: pyproject.toml:3 (1.12.20 vs tag v1.12.21), gh release list shows v1.12.20 as Latest, git ls-remote --heads origin shows fix/golive-followups orphan, gh pr list --state merged --limit 6 all self-merged by newblacc, git log --merges -10 confirms pre-2026 era only
+- evidence: pyproject.toml:3 (1.12.20 vs tag v1.12.21), gh release list shows v1.12.20 as Latest, git ls-remote --heads origin shows fix/golive-followups orphan, gh pr list --state merged --limit 6 all self-merged by example-org, git log --merges -10 confirms pre-2026 era only
 - cleanup plan: 4 SAFE ops proposed (delete branch; gh release create v1.12.21; rename/bump CHANGELOG+pyproject via ALLOW_NO_CHANGELOG=1 one-shot; land Dependabot batch). 0 rewrite ops needed.
 
 ## Stage 1 — Recruiter First-Impression Gate: PASS (2026-07-22 quick re-run)

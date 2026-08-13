@@ -3,7 +3,7 @@
 # DO NOT commit terraform.tfvars — it is gitignored
 # =============================================================================
 
-# /etc/hosts must have: 10.0.100.33  proxmox-node.example.com
+# /etc/hosts must have: 192.0.2.10  proxmox-node.example.com
 proxmox_api_url      = "https://proxmox-node.example.com:8006"
 proxmox_token_id     = "root@pam!terraform"
 proxmox_token_secret = ""   # Proxmox API token secret
@@ -21,9 +21,9 @@ vm_storage   = "nvme00-proxmox"
 #   pvesh get /nodes/your-proxmox-node/network
 vm_bridge = "vmbr0"
 
-vm_ip     = "10.0.181.20"
+vm_ip     = "192.0.2.10"
 vm_prefix = 16
-gateway   = "10.0.10.1"
+gateway   = "192.0.2.10"
 
 # Paste output of: cat $HOME/.ssh/id_ed25519.pub
 ssh_public_key = ""

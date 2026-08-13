@@ -6,7 +6,7 @@ set -euo pipefail
 # SSH target. Defaults to the `vidistiller` host alias — define it in ~/.ssh/config
 # so deployment topology stays out of the repo. Override with VIDISTILLER_SSH.
 VM="${VIDISTILLER_SSH:-vidistiller}"
-IMAGE="${VIDISTILLER_BACKEND_IMAGE:-newblacc/vidistiller-backend:latest}"
+IMAGE="${VIDISTILLER_BACKEND_IMAGE:-example-org/vidistiller-backend:latest}"
 CONTAINER="${VIDISTILLER_API_CONTAINER:-tutorial_api}"
 
 echo "==> Committing $CONTAINER → $IMAGE on VM..."

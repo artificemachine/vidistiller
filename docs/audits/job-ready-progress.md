@@ -5,7 +5,7 @@ Mode history: 2026-07-20 = earlier runs (see git history). 2026-07-21 = full pip
 ## Stage 1 — Recruiter First-Impression: PASS (2026-07-21)
 - verdict: strong metadata + clean tracked tree; no visual demo above fold
 - blockers: 0 (no live secret; scanner hits all category-b fixture/history)
-- evidence: gh repo view; gitleaks 85 hits (84 ipv4 10.255.x, 1 historical Fernet at e680e2a4); README.md:1-40
+- evidence: gh repo view; gitleaks 85 hits (84 ipv4 [redacted internal range], 1 historical Fernet at e680e2a4); README.md:1-40
 
 ## Stage 2 — Git History & Release Hygiene: PASS (2026-07-21)
 - verdict: recent history exemplary; 27 stale merged branches to delete

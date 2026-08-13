@@ -26,7 +26,7 @@
 |----------|---------|----------|
 | MED (carried) | No CI / test status badge in `README.md`, despite `.github/workflows/test.yml` + `.github/workflows/security.yml` running 6/6 green after the v1.12.21 merge | `README.md` lines 1–40 (no `shields.io` or `[!...]` badge block). Same finding in the 2026-07-22 prior run — `docs/audits/2026-07-22-golive.md:13`. Not fixed by the v1.12.21 PR (the PR is docs/tests/refactor; the README badge is a separate docs-only edit) |
 | LOW | `LICENSE` line 3: `Copyright (c) 2026 celstnblacc` — attribution is a GitHub *handle*, not a legal name, but that IS the legal name on the GitHub commit identity (`git log --pretty=format:'%an' | head -5` is consistent). No fix warranted unless the user wants to broaden pseudonymity | `LICENSE:3` |
-| LOW | 1 personal-email reference in `CHANGELOG.md` line 53 (Docker Hub org rename `celestinmax → newblacc`) — partial handle in a historical rename note, already-accepted residual per the prior audit | `CHANGELOG.md:53`; prior audit acceptance: `docs/audits/2026-07-22-golive.md:29` |
+| LOW | 1 personal-email reference in `CHANGELOG.md` line 53 (Docker Hub org rename `previous registry namespace → current registry namespace`) — partial handle in a historical rename note, already-accepted residual per the prior audit | `CHANGELOG.md:53`; prior audit acceptance: `docs/audits/2026-07-22-golive.md:29` |
 
 ### Verified PASS items
 
@@ -53,7 +53,7 @@
 | LOW | `pyproject.toml` version `1.12.20` is one tag behind the latest released `v1.12.21`. CHANGELOG's `[Unreleased]` block (the v1.12.21 entries) was never renamed under the `[1.12.21]` header (the rename was blocked by the repo's CHANGELOG append-only pre-commit hook; the merge proceeded with `[Unreleased]` intact). Cosmetic doc drift, not a build/CI hazard — `pyproject.toml` is the build version, separate from the tag | `pyproject.toml:3` (1.12.20), `CHANGELOG.md` last header `[1.12.20]` at line 463 vs. tag `v1.12.21` at `d2cd1f1` |
 | LOW | Tag `v1.12.21` exists on `origin/main` but has NO `gh release create` entry. Prior tags v1.12.17–v1.12.20 do have releases; v1.12.21 broke that pattern. A senior reviewer reading the Releases tab sees v1.12.20 as Latest | `gh release list --limit 5` shows v1.12.20 as Latest; `git ls-remote --tags origin v1.12.21` returns `28b9a66...` confirming tag exists but `gh release view v1.12.21` returns "release not found" |
 | LOW | Obsolete remote branch `fix/golive-followups` from PR #160 (merged 2026-07-22 20:17 UTC via `--squash`, branch not auto-deleted because repo has `deleteBranchOnMerge: false`) | `git ls-remote --heads origin` shows both `refs/heads/main` and `refs/heads/fix/golive-followups`; `gh api` confirms `deleteBranchOnMerge: false` |
-| INFO (carry) | 100% self-merge: every merged PR in `gh pr list --state merged --limit 6` was authored AND merged by `newblacc` (Maxime Roy). `CONTRIBUTING.md` describes "Fork the repo and create a branch" (external-contributor framing), but no external PR has been merged in the visible window. Not a finding for solo-maintained repos per the prior Stage 2 read — flagged here only for continuity of the SDLC-signal scan, with a neutral "solo-maintained, self-merged" framing | `gh pr list --state merged --limit 6 --json author`; `CONTRIBUTING.md:14–25` |
+| INFO (carry) | 100% self-merge: every merged PR in `gh pr list --state merged --limit 6` was authored AND merged by `example-org` (repository maintainer). `CONTRIBUTING.md` describes "Fork the repo and create a branch" (external-contributor framing), but no external PR has been merged in the visible window. Not a finding for solo-maintained repos per the prior Stage 2 read — flagged here only for continuity of the SDLC-signal scan, with a neutral "solo-maintained, self-merged" framing | `gh pr list --state merged --limit 6 --json author`; `CONTRIBUTING.md:14–25` |
 
 ### Verified PASS items
 
@@ -115,7 +115,7 @@ None. Recent history is clean.
 - Canonical sections (synonyms accepted): `Prerequisites` ✓ (line 295), `Getting Started` ✓ (line 304, synonyms for Quickstart), `Design System` ✓. `Troubleshoot` not a section heading but available via `[ops-runbook](docs/ops-runbook.md)` cross-reference (line 334).
 - 30-second comprehension: lines 1–18 answer "what is this" in one sentence ("Turn any video into structured documentation"), name the target user (developers/solo users who paste a URL from any platform), and link to 3 screenshots within the first fold.
 - Quickstart executability: line 345 has a `bash` block (`cd frontend && npm install && npm run dev`) classified as Install-like, not executed per skill guardrails. References `frontend/` directory (present at `frontend/package.json`).
-- Link rot / hardcoded paths: no `[BROKEN_LINK]` references found in `rg -in '`(/`.*)` README.md`. No `/Users/...` or `/home/<name>/` patterns.
+- Link rot / hardcoded paths: no `[BROKEN_LINK]` references found in `rg -in '`(/`.*)` README.md`. No absolute user-home paths found.
 - Verdict per `/readme-audit`: **READY** (no blockers, 0 risks). The NO_BADGES finding is captured separately in Stage 1's carried finding.
 
 #### `/docs-organize` (skill, ran in `--report-only` mode here)
@@ -129,7 +129,7 @@ None. Recent history is clean.
 - **Planning docs as current state**: `docs/README.md` lines 15–22 explicitly tag these as historical, with the maintenance rule at line 27–28 about updating docs as code changes. Working as intended.
 - **Internal cross-references**: README line 334 references `docs/ops-runbook.md` (present, 69 lines) and `docs/VM_DEPLOYMENT.md` (present, 1,016 lines). Both resolve.
 - **Personal/internal artifacts**: `docs/README.my.notes.md` carries the HIGH finding above. No other raw session logs surfaced.
-- **Personal names in prose**: no new "By:", "Author:", "Prepared for:" attribution lines surfaced in the visible docs/. The partial-handle reference in `CHANGELOG.md:53` (Docker Hub org rename note `celestinmax → newblacc`) is an already-accepted residual.
+- **Personal names in prose**: no new "By:", "Author:", "Prepared for:" attribution lines surfaced in the visible docs/. The partial-handle reference in `CHANGELOG.md:53` (Docker Hub org rename note `previous registry namespace → current registry namespace`) is an already-accepted residual.
 
 
 
@@ -144,7 +144,7 @@ None. Recent history is clean.
 | 5 | Gauntlet (`/security-pipeline`, `/threat-model`, `/senior-reviewer`, `/production-ready`, `/user-reviewer`, `/simplify`, `/docker-audit`) | **NOT RUN** (`--quick`) | ? | ? | **omitted** |
 | 6 | Architecture (`/arch-audit`) | **NOT RUN** (`--quick`) | ? | ? | **omitted** |
 | 7 | CI/CD governance (`/ci-gate`) | **NOT RUN** (`--quick`) | ? | ? | **omitted** |
-| 7b | Deployment (`/infra-probe`) | **NOT RUN** (`--quick`) | ? | ? | **omitted** (live prod at `vidistiller` 10.255.181.20 was probed in the prior 2026-07-22 run, not re-verified today) |
+| 7b | Deployment (`/infra-probe`) | **NOT RUN** (`--quick`) | ? | ? | **omitted** (live prod at `vidistiller` 192.0.2.10 was probed in the prior 2026-07-22 run, not re-verified today) |
 | 8 | Claims vs reality (`/bulletproof`) | **NOT RUN** (`--quick`) | ? | ? | **omitted** |
 
 ### Certification scope, honestly stated
@@ -181,5 +181,4 @@ These are ordered by the level-of-confidence I have in each as an open, action-t
 ## What this repo says about you (honest read)
 
 The strongest signals are at the top: 524 backend tests + 241 frontend tests passing clean, a v1.12.21 tag on `main`, 6/6 CI checks green, a self-contained Docker quickstart, and an architecture diagram in the README fold before scroll. The 62 release tags spanning v0.4.0 (2026-05-09) to v1.12.21 (2026-07-22) read as disciplined versioning on a project that grew quickly enough to need it. Threat-model posture from prior full runs (timing-safe comparisons, fail-closed rate limiting, 404-not-403 anti-enumeration, no wildcard CORS, loopback-only internal services) is solid. A second-pass reviewer looking for the gaps will find them in the docs layer: one raw AI-coding-session transcript in the tracked tree, two stale ROADMAP [ ] checkboxes, no CI status badges in README, and a release/tag bookkeeping lag (tag v1.12.21 exists without a matching `gh release`, `pyproject.toml` version field one behind, CHANGELOG header not yet relabeled). These are all small, mechanical fixes — the kind of "swept the workspace before the interview" hygiene that distinguishes a project-grown-under-eyes from a project-shown-to-strangers. None of them contradict the strong parts; the four top-5 fixes above would close every one of them.
-
 
