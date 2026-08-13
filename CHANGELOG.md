@@ -706,3 +706,6 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - security(backups): publish an immutable PostgreSQL restore-image mirror signed by this repository's GitHub Actions OIDC identity; the restore drill can now verify its database image provenance without trusting an unsigned upstream tag.
+
+### Fixed
+- fix(backups): resolve the mirrored PostgreSQL manifest digest through Buildx's manifest field before signing it, so the restore image workflow signs the exact pushed reference.
