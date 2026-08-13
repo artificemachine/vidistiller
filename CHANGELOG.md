@@ -718,3 +718,6 @@ All notable changes to this project will be documented in this file.
 
 ### Security
 - security(backups): keep the restore drill's generated database credential in temporary local env/password files instead of Docker command arguments, preventing local process listings from exposing it during the isolated restore.
+
+### Added
+- ops(backups): schedule a weekly isolated NAS restore drill that selects the newest signed verified bundle and revalidates immutable, Cosign-verified restore images.

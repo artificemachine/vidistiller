@@ -117,3 +117,23 @@ def test_postgres_restore_image_mirror_is_immutable_and_oidc_signed():
     assert "id-token: write" in workflow
     assert 'cosign sign --yes "${target}@${digest}"' in workflow
     assert 'cosign verify --certificate-identity-regexp' in workflow
+
+
+def test_scheduled_restore_drill_uses_latest_verified_backup_and_weekly_timer():
+    root = Path(__file__).resolve().parents[1]
+    runner = (root / "scripts" / "run_restore_drill.sh").read_text(encoding="utf-8")
+    service = (
+        root / "scripts" / "systemd" / "vidistiller-restore-drill.service"
+    ).read_text(encoding="utf-8")
+    timer = (
+        root / "scripts" / "systemd" / "vidistiller-restore-drill.timer"
+    ).read_text(encoding="utf-8")
+
+    assert "-name 'backup-*'" in runner
+    assert '"$BACKUP_BUNDLE/.verified"' in runner
+    assert 'VIDISTILLER_BACKEND_IMAGE_REF' in runner
+    assert "exec env " in runner
+    assert "/usr/local/sbin/vidistiller-restore-drill" in runner
+    assert "ExecStart=/usr/local/sbin/vidistiller-restore-drill-scheduled" in service
+    assert "OnCalendar=Sun *-*-* 04:00:00 UTC" in timer
+    assert "Persistent=true" in timer

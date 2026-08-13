@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Vidistiller isolated restore drill weekly
+
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00 UTC
+Persistent=true
+Unit=vidistiller-restore-drill.service
+
+[Install]
+WantedBy=timers.target
