@@ -48,13 +48,13 @@ Five independently shippable iterations clearing the engineering backlog after v
 **Commit message:** `ci: bump actions to Node 24-compatible versions ahead of 2026-06-16 cutover`
 
 **TDD cycle:**
-- RED: `actionlint` over workflows (0 errors); `tests/ci/test_no_node20_actions.sh` asserts no Node-20-only SHAs remain
+- RED: `actionlint` over workflows (0 errors); `tests/ci/test_no_relay-host0_actions.sh` asserts no Node-20-only SHAs remain
 - GREEN: bump each action to current major (checkout v5, setup-* current, docker/* current), repin SHAs
 - REFACTOR: none (config-only)
 
 **Test pyramid:**
 - Smoke: `actionlint .github/workflows/*.yml` exits 0
-- Unit: `test_no_node20_actions.sh` SHA allowlist (1)
+- Unit: `test_no_relay-host0_actions.sh` SHA allowlist (1)
 - Integration: N/A
 - State machine: N/A
 - Contract: workflows parse; required jobs (backend-tests, frontend-tests, security) present (1)

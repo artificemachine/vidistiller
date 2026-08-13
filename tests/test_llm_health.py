@@ -89,10 +89,10 @@ class TestProbeVLLM:
     def test_appends_v1_and_finds_model(self, mock_get):
         mock_get.return_value = _resp(200, {"data": [{"id": "gemma4-31b"}]})
 
-        result = probe_llm("vllm", "gemma4-31b", base_url="http://10.0.150.36:8000")
+        result = probe_llm("vllm", "gemma4-31b", base_url="http://192.0.2.10:8000")
 
         called_url = mock_get.call_args[0][0]
-        assert called_url == "http://10.0.150.36:8000/v1/models"
+        assert called_url == "http://192.0.2.10:8000/v1/models"
         assert result["reachable"] is True
         assert result["model_found"] is True
         assert result["auth_ok"] is None  # no auth on self-hosted without key

@@ -19,7 +19,7 @@ from app.services.llm_resolution import (
 
 
 _FLEET_ENV_VARS = (
-    "VLLM_VM913_URL", "VLLM_VM903_URL", "VLLM_VM901_URL", "VLLM_VM2900_URL",
+    "VLLM_PRIMARY_URL", "VLLM_SECONDARY_URL", "VLLM_VISION_URL", "VLLM_AUXILIARY_URL",
 )
 
 
@@ -54,7 +54,7 @@ def _fleet_resp(status_code=200, model_ids=None):
 class TestResolveUserLLM:
     @patch("app.services.llm_resolution.resolve_fleet_url", return_value=(None, None))
     def test_defaults_to_vllm_when_owner_unset(self, _fleet, monkeypatch):
-        monkeypatch.delenv("VLLM_VM913_URL", raising=False)
+        monkeypatch.delenv("VLLM_PRIMARY_URL", raising=False)
         monkeypatch.delenv("OLLAMA_URL", raising=False)
 
         result = resolve_user_llm(None)
@@ -77,17 +77,17 @@ class TestResolveUserLLM:
 
     @patch("app.services.llm_resolution.resolve_fleet_url")
     def test_vllm_uses_fleet_vm_with_model(self, mock_fleet):
-        mock_fleet.return_value = ("http://vm903:8000", "vm903")
+        mock_fleet.return_value = ("http://secondary:8000", "secondary")
 
         result = resolve_user_llm(_owner(provider="vllm", model="gemma4-31b"))
 
         mock_fleet.assert_called_once_with("gemma4-31b")
-        assert result.base_url == "http://vm903:8000"
-        assert result.fleet_node == "vm903"
+        assert result.base_url == "http://secondary:8000"
+        assert result.fleet_node == "secondary"
 
     @patch("app.services.llm_resolution.resolve_fleet_url")
     def test_pinned_url_beats_fleet(self, mock_fleet):
-        mock_fleet.return_value = ("http://vm903:8000", "vm903")
+        mock_fleet.return_value = ("http://secondary:8000", "secondary")
         owner = _owner(provider="vllm", model="gemma4-31b", url="http://pinned:8000")
 
         result = resolve_user_llm(owner)
@@ -95,12 +95,12 @@ class TestResolveUserLLM:
         assert result.base_url == "http://pinned:8000"
 
     @patch("app.services.llm_resolution.resolve_fleet_url", return_value=(None, None))
-    def test_falls_back_to_vm913_env(self, _fleet, monkeypatch):
-        monkeypatch.setenv("VLLM_VM913_URL", "http://vm913:8000")
+    def test_falls_back_to_primary_env(self, _fleet, monkeypatch):
+        monkeypatch.setenv("VLLM_PRIMARY_URL", "http://primary:8000")
 
         result = resolve_user_llm(_owner(provider="vllm", model="gemma4-31b"))
 
-        assert result.base_url == "http://vm913:8000"
+        assert result.base_url == "http://primary:8000"
 
     @patch("app.services.llm_resolution.resolve_fleet_url", return_value=(None, None))
     def test_model_falls_back_when_provider_has_no_default(self, _fleet):
@@ -131,18 +131,18 @@ class TestResolveUserLLM:
 class TestResolveFleetUrl:
     @patch("app.services.llm_resolution.requests.get")
     def test_first_vm_with_model_wins(self, mock_get, monkeypatch):
-        monkeypatch.setenv("VLLM_VM913_URL", "http://vm913:8000")
-        monkeypatch.setenv("VLLM_VM903_URL", "http://vm903:8000")
+        monkeypatch.setenv("VLLM_PRIMARY_URL", "http://primary:8000")
+        monkeypatch.setenv("VLLM_SECONDARY_URL", "http://secondary:8000")
         mock_get.return_value = _fleet_resp(200, ["gemma4-31b"])
 
         url, label = resolve_fleet_url("gemma4-31b")
 
-        assert (url, label) == ("http://vm913:8000", "vm913")
+        assert (url, label) == ("http://primary:8000", "primary")
 
     @patch("app.services.llm_resolution.requests.get")
     def test_skips_vm_without_model(self, mock_get, monkeypatch):
-        monkeypatch.setenv("VLLM_VM913_URL", "http://vm913:8000")
-        monkeypatch.setenv("VLLM_VM903_URL", "http://vm903:8000")
+        monkeypatch.setenv("VLLM_PRIMARY_URL", "http://primary:8000")
+        monkeypatch.setenv("VLLM_SECONDARY_URL", "http://secondary:8000")
         mock_get.side_effect = [
             _fleet_resp(200, ["other-model"]),
             _fleet_resp(200, ["gemma4-31b"]),
@@ -150,12 +150,12 @@ class TestResolveFleetUrl:
 
         url, label = resolve_fleet_url("gemma4-31b")
 
-        assert (url, label) == ("http://vm903:8000", "vm903")
+        assert (url, label) == ("http://secondary:8000", "secondary")
 
     @patch("app.services.llm_resolution.requests.get")
     def test_unreachable_vm_is_skipped(self, mock_get, monkeypatch):
-        monkeypatch.setenv("VLLM_VM913_URL", "http://vm913:8000")
-        monkeypatch.setenv("VLLM_VM903_URL", "http://vm903:8000")
+        monkeypatch.setenv("VLLM_PRIMARY_URL", "http://primary:8000")
+        monkeypatch.setenv("VLLM_SECONDARY_URL", "http://secondary:8000")
         mock_get.side_effect = [
             requests.exceptions.ConnectionError(),
             _fleet_resp(200, ["gemma4-31b"]),
@@ -163,10 +163,10 @@ class TestResolveFleetUrl:
 
         url, label = resolve_fleet_url("gemma4-31b")
 
-        assert (url, label) == ("http://vm903:8000", "vm903")
+        assert (url, label) == ("http://secondary:8000", "secondary")
 
     def test_no_env_vars_returns_none(self, monkeypatch):
-        for var in ("VLLM_VM913_URL", "VLLM_VM903_URL", "VLLM_VM901_URL", "VLLM_VM2900_URL"):
+        for var in ("VLLM_PRIMARY_URL", "VLLM_SECONDARY_URL", "VLLM_VISION_URL", "VLLM_AUXILIARY_URL"):
             monkeypatch.delenv(var, raising=False)
 
         assert resolve_fleet_url("gemma4-31b") == (None, None)
@@ -189,15 +189,15 @@ class TestDynamicFleetAdoption:
     def test_vllm_no_user_model_adopts_first_loaded_model(
         self, mock_get, _fleet, monkeypatch
     ):
-        monkeypatch.setenv("VLLM_VM913_URL", "http://vm913:8000")
+        monkeypatch.setenv("VLLM_PRIMARY_URL", "http://primary:8000")
         mock_get.return_value = _fleet_resp(200, ["gemma4-31b-awq", "qwen3.6-27b-awq"])
 
         result = resolve_user_llm(_owner(provider="vllm"))
 
         assert result.provider_name == "vllm"
         assert result.model == "gemma4-31b-awq"
-        assert result.base_url == "http://vm913:8000"
-        assert result.fleet_node == "vm913"
+        assert result.base_url == "http://primary:8000"
+        assert result.fleet_node == "primary"
         _fleet.assert_not_called()  # adoption replaced the fleet-model lookup
 
     @patch("app.services.llm_resolution.resolve_fleet_url", return_value=(None, None))
@@ -205,8 +205,8 @@ class TestDynamicFleetAdoption:
     def test_vllm_no_user_model_skips_dead_vm_adopts_from_next(
         self, mock_get, _fleet, monkeypatch
     ):
-        monkeypatch.setenv("VLLM_VM913_URL", "http://vm913:8000")
-        monkeypatch.setenv("VLLM_VM903_URL", "http://vm903:8000")
+        monkeypatch.setenv("VLLM_PRIMARY_URL", "http://primary:8000")
+        monkeypatch.setenv("VLLM_SECONDARY_URL", "http://secondary:8000")
         mock_get.side_effect = [
             requests.exceptions.ConnectionError(),
             _fleet_resp(200, ["qwen3.6-27b-awq"]),
@@ -215,8 +215,8 @@ class TestDynamicFleetAdoption:
         result = resolve_user_llm(_owner(provider="vllm"))
 
         assert result.model == "qwen3.6-27b-awq"
-        assert result.base_url == "http://vm903:8000"
-        assert result.fleet_node == "vm903"
+        assert result.base_url == "http://secondary:8000"
+        assert result.fleet_node == "secondary"
         _fleet.assert_not_called()
 
     @patch("app.services.llm_resolution.resolve_fleet_url", return_value=(None, None))
@@ -224,7 +224,7 @@ class TestDynamicFleetAdoption:
     def test_vllm_no_user_model_fleet_empty_falls_back_to_default(
         self, _get, _fleet, monkeypatch
     ):
-        monkeypatch.setenv("VLLM_VM913_URL", "http://vm913:8000")
+        monkeypatch.setenv("VLLM_PRIMARY_URL", "http://primary:8000")
 
         result = resolve_user_llm(_owner(provider="vllm"))
 
@@ -233,7 +233,7 @@ class TestDynamicFleetAdoption:
         from app.services.llm_providers import DEFAULT_MODELS
 
         assert result.model == DEFAULT_MODELS["vllm"]
-        assert result.base_url == "http://vm913:8000"
+        assert result.base_url == "http://primary:8000"
         assert result.fleet_node is None
         _fleet.assert_called_once_with(DEFAULT_MODELS["vllm"])
 
@@ -242,8 +242,8 @@ class TestDynamicFleetAdoption:
     def test_vllm_no_user_model_skips_malformed_json(
         self, mock_get, _fleet, monkeypatch
     ):
-        monkeypatch.setenv("VLLM_VM913_URL", "http://vm913:8000")
-        monkeypatch.setenv("VLLM_VM903_URL", "http://vm903:8000")
+        monkeypatch.setenv("VLLM_PRIMARY_URL", "http://primary:8000")
+        monkeypatch.setenv("VLLM_SECONDARY_URL", "http://secondary:8000")
         bad = MagicMock()
         bad.status_code = 200
         bad.json.side_effect = ValueError("not json")
@@ -252,20 +252,20 @@ class TestDynamicFleetAdoption:
         result = resolve_user_llm(_owner(provider="vllm"))
 
         assert result.model == "qwen3.6-27b-awq"
-        assert result.fleet_node == "vm903"
+        assert result.fleet_node == "secondary"
         _fleet.assert_not_called()
 
     @patch("app.services.llm_resolution.resolve_fleet_url")
     def test_vllm_user_pinned_model_behavior_unchanged(self, mock_fleet):
         """Pinned-model path MUST NOT invoke adoption."""
-        mock_fleet.return_value = ("http://vm903:8000", "vm903")
+        mock_fleet.return_value = ("http://secondary:8000", "secondary")
 
         result = resolve_user_llm(_owner(provider="vllm", model="gemma4-31b"))
 
         mock_fleet.assert_called_once_with("gemma4-31b")
         assert result.model == "gemma4-31b"
-        assert result.base_url == "http://vm903:8000"
-        assert result.fleet_node == "vm903"
+        assert result.base_url == "http://secondary:8000"
+        assert result.fleet_node == "secondary"
 
     @patch("app.services.llm_resolution.discover_fleet_model", return_value=None)
     @patch("app.services.llm_resolution.resolve_fleet_url", return_value=(None, None))
@@ -278,9 +278,9 @@ class TestDynamicFleetAdoption:
 
     @patch("app.services.llm_resolution.requests.get")
     def test_discover_fleet_model_unit_returns_first_loaded_model(self, mock_get, monkeypatch):
-        monkeypatch.setenv("VLLM_VM913_URL", "http://vm913:8000")
+        monkeypatch.setenv("VLLM_PRIMARY_URL", "http://primary:8000")
         mock_get.return_value = _fleet_resp(200, ["gemma4-31b-awq", "qwen3.6-27b-awq"])
 
         result = discover_fleet_model()
 
-        assert result == ("gemma4-31b-awq", "http://vm913:8000", "vm913")
+        assert result == ("gemma4-31b-awq", "http://primary:8000", "primary")

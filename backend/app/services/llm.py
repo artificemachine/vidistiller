@@ -175,6 +175,9 @@ class LLMService:
         model_name: Optional[str] = None,
         api_key: Optional[str] = None,
         ollama_base_url: Optional[str] = None,
+        vision_provider: Optional[LLMProvider] = None,
+        vision_model: Optional[str] = None,
+        use_default_vision_provider: bool = True,
     ):
         """
         Initialize LLM service with configurable provider.
@@ -208,6 +211,10 @@ class LLMService:
                 self._model = default
             else:
                 self._model = self.settings.ollama.model_name
+
+        self._vision_provider = vision_provider
+        self._vision_model = vision_model
+        self._use_default_vision_provider = use_default_vision_provider
 
     def generate_documentation(
         self,
@@ -535,7 +542,12 @@ Summary:"""
 
         # Vision pre-pass: describe each snapshot before summarizing
         snapshot_descriptions: dict[float, str] = {}
-        if snapshots and hasattr(self._provider, "describe_image"):
+        vision_provider = self._vision_provider
+        vision_model = self._vision_model
+        if vision_provider is None and self._use_default_vision_provider:
+            vision_provider = self._provider
+            vision_model = self._model
+        if snapshots and vision_provider is not None and hasattr(vision_provider, "describe_image"):
             import base64
             import os
             for snap in snapshots:
@@ -554,9 +566,9 @@ Summary:"""
                 else:
                     target_url = snap["image_url"]
 
-                desc = self._provider.describe_image(
+                desc = vision_provider.describe_image(
                     image_url=target_url,
-                    model=self._model,
+                    model=vision_model or self._model,
                 )
                 if desc:
                     snapshot_descriptions[float(snap["timestamp"])] = desc

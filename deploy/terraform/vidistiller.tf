@@ -1,7 +1,7 @@
-# Provision vidistiller-prod on your-proxmox-node
+# Provision vidistiller-host on your-proxmox-node
 # Provider: bpg/proxmox ~> 0.74 (same as your existing cluster)
 # Clone from Ubuntu 24.04 cloud-init template (VM 9001 on your-proxmox-node)
-# IP: 10.0.181.20 (deprecated LXC at 10.0.181.10 lives on the same subnet)
+# IP: 192.0.2.10 (deprecated LXC at 192.0.2.10 lives on the same subnet)
 
 terraform {
   required_version = ">= 1.5.0"
@@ -19,7 +19,7 @@ terraform {
 provider "proxmox" {
   endpoint  = var.proxmox_api_url
   api_token = format("%s=%s", var.proxmox_token_id, var.proxmox_token_secret)
-  # TLS verified via /etc/hosts: 10.0.100.33 proxmox-node.example.com
+  # TLS verified via /etc/hosts: 192.0.2.10 proxmox-node.example.com
   insecure = false
 
   ssh {
@@ -60,7 +60,7 @@ variable "template_vm_id" {
 }
 
 variable "vm_id" {
-  description = "VM ID for vidistiller-prod"
+  description = "VM ID for vidistiller-host"
   type        = number
   default     = 900
 }
@@ -98,9 +98,9 @@ variable "vm_bridge" {
 }
 
 variable "vm_ip" {
-  description = "Static IP for vidistiller-prod"
+  description = "Static IP for vidistiller-host"
   type        = string
-  default     = "10.0.181.20"
+  default     = "192.0.2.10"
 }
 
 variable "vm_prefix" {
@@ -110,7 +110,7 @@ variable "vm_prefix" {
 
 variable "gateway" {
   type    = string
-  default = "10.0.10.1"
+  default = "192.0.2.10"
 }
 
 variable "ssh_public_key" {
@@ -123,7 +123,7 @@ variable "ssh_public_key" {
 
 resource "proxmox_virtual_environment_vm" "vidistiller_prod" {
   vm_id     = var.vm_id
-  name      = "vidistiller-prod"
+  name      = "vidistiller-host"
   node_name = var.target_node
 
   clone {

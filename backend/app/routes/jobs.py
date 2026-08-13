@@ -11,12 +11,13 @@ All routes require authentication via JWT Bearer token or X-API-Key header.
 """
 
 import base64
+import json
 import logging
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Body, Depends, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, or_, text
@@ -47,6 +48,9 @@ from app.tasks import (
     celery_app,
     import_job_payload_file_task,
     process_transcript,
+    process_video_download,
+    process_snapshots,
+    process_slides,
     summarize_transcript_task,
 )
 from app.services.llm import LLMService
@@ -191,6 +195,14 @@ def create_job(
         )
 
         db.add(new_job)
+        from app.services.job_steps import seed_job_steps
+
+        seed_job_steps(
+            db,
+            new_job,
+            extract_snapshots=job_data.extract_snapshots,
+            is_slide_mode=job_data.is_slide_mode,
+        )
         db.commit()
         db.refresh(new_job)
 
@@ -757,6 +769,14 @@ def export_job(
     current_user: User = Depends(get_current_user),
 ):
     job = _get_job_for_user(db, job_id, current_user)
+    export_claim_token = f"export:{uuid.uuid4()}"
+    export_claimed = False
+    if isinstance(getattr(job, "steps", None), list) and job.steps:
+        from app.services.job_steps import claim_step
+
+        export_claimed = claim_step(
+            db, job.id, "export", export_claim_token
+        ) is not None
 
     _data_dir_str = get_settings().storage.data_dir or str(Path(__file__).resolve().parent.parent.parent / "data")
     DATA_DIR = Path(_data_dir_str)
@@ -848,6 +868,23 @@ def export_job(
     safe_name = "".join(c if c.isalnum() or c in " -_" else "" for c in video_title)[:60].strip()
     filename = f"{safe_name}.json" if safe_name else f"{job.job_id}.json"
 
+    if export_claimed:
+        from app.services.job_steps import complete_step
+
+        complete_step(
+            db,
+            job.id,
+            "export",
+            export_claim_token,
+            {
+                "bytes": len(json.dumps(export_data)),
+                "transcripts": len(export_data["transcripts"]),
+                "snapshots": len(snapshots_data),
+                "documents": len(export_data["documents"]),
+            },
+        )
+        db.commit()
+
     return JSONResponse(
         content=export_data,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
@@ -927,6 +964,36 @@ def summarize_transcript(
         status_code=status.HTTP_202_ACCEPTED,
         content={"message": "Summarization started", "job_id": job_id},
     )
+
+
+@router.post("/{job_id}/steps/{step_name}/retry", status_code=status.HTTP_202_ACCEPTED)
+def retry_job_step(
+    job_id: str,
+    step_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retry one failed/cancelled stage without resetting completed stages."""
+    job = _get_job_for_user(db, job_id, current_user)
+    from app.services.job_steps import CANONICAL_STEP_NAMES, retry_failed_step
+
+    if step_name not in CANONICAL_STEP_NAMES:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown processing step")
+    if not retry_failed_step(db, job.id, step_name):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Step is not retryable")
+    db.commit()
+
+    dispatchers = {
+        "download": lambda: process_video_download.delay(job.id),
+        "transcribe": lambda: process_transcript.delay(job.id),
+        "snapshots": lambda: process_snapshots.delay(job.id),
+        "slides": lambda: process_slides.delay(job.id),
+        "summarize": lambda: summarize_transcript_task.delay(job.id, True),
+    }
+    if step_name == "export":
+        return {"message": "Export step reset; request the export download again", "job_id": job_id}
+    dispatchers[step_name]()
+    return {"message": f"Retry for {step_name} started", "job_id": job_id}
 
 
 # ==============================================================================

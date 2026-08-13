@@ -13,7 +13,7 @@ class TestValidateFetchTarget:
         [
             "http://127.0.0.1/x.mp4",
             "http://localhost/x.mp4",
-            "http://10.0.181.20:8000/api",
+            "http://192.0.2.10:8000/api",
             "http://192.168.1.1/",
             "http://172.16.0.1/",
             # Cloud instance metadata, the classic SSRF payload.
@@ -47,7 +47,7 @@ class TestValidateFetchTarget:
 
     def test_error_does_not_disclose_resolved_address(self):
         with pytest.raises(ValueError) as exc:
-            validate_fetch_target("http://10.0.181.20/x")
+            validate_fetch_target("http://192.0.2.10/x")
         assert "10.0.181" not in str(exc.value)
 
 
@@ -66,11 +66,11 @@ class TestValidateLlmEndpoint:
 
     def test_non_allowlisted_private_host_rejected(self):
         with pytest.raises(ValueError):
-            validate_llm_endpoint("http://10.0.181.20:8000/", ["localhost"])
+            validate_llm_endpoint("http://192.0.2.10:8000/", ["localhost"])
 
     def test_operator_can_widen_allowlist(self):
         assert validate_llm_endpoint(
-            "http://10.0.150.36:8100", ["localhost", "10.0.150.36"]
+            "http://192.0.2.10:8100", ["localhost", "192.0.2.10"]
         )
 
     def test_empty_allowlist_rejects_everything(self):

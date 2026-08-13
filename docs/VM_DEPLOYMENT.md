@@ -2,11 +2,11 @@
 
 ## Target Environment
 - **Host:** `vidistiller` (SSH alias) — Proxmox VM 900 on `your-proxmox-node`
-- **IP Address:** `10.0.181.20`
+- **IP Address:** `192.0.2.10`
 - **Type:** Proxmox VM (cloud-init Ubuntu 24.04 template)
 - **Application:** Vidistiller — YouTube to Documentation engine
 
-> **History:** prod was previously hosted in an LXC at `10.0.181.10` and was
+> **History:** prod was previously hosted in an LXC at `192.0.2.10` and was
 > migrated to this VM. See `deploy/ansible/migrate-db.yml` for the DB migration
 > playbook used during the cut-over. The `vidistiller-lxc` host alias still
 > resolves but is no longer the deploy target.
@@ -68,7 +68,7 @@ See `deploy/terraform/vidistiller.tf` for variables (`vm_id`, `vm_cores`,
 
 ```bash
 # Clone the Ubuntu 24.04 cloud-init template (replace <TPL_ID> and <VMID>)
-qm clone <TPL_ID> <VMID> --name vidistiller-prod --full
+qm clone <TPL_ID> <VMID> --name vidistiller-host --full
 
 # Resize disk and set resources
 qm resize <VMID> scsi0 +50G
@@ -76,7 +76,7 @@ qm set <VMID> --cores 8 --memory 16384 --net0 virtio,bridge=vmbr0
 
 # Configure cloud-init (user, ssh key, static IP)
 qm set <VMID> --ciuser sysadmin --sshkeys ~/.ssh/authorized_keys
-qm set <VMID> --ipconfig0 ip=10.0.181.20/24,gw=<YOUR_GATEWAY_IP>
+qm set <VMID> --ipconfig0 ip=192.0.2.10/24,gw=<YOUR_GATEWAY_IP>
 
 # Start
 qm start <VMID>
@@ -85,7 +85,7 @@ qm start <VMID>
 ### Initial VM configuration
 
 ```bash
-ssh sysadmin@10.0.181.20
+ssh sysadmin@192.0.2.10
 
 # Update system
 sudo apt update && sudo apt upgrade -y
@@ -94,7 +94,7 @@ sudo apt update && sudo apt upgrade -y
 sudo timedatectl set-timezone America/New_York  # or your timezone
 
 # Set hostname
-sudo hostnamectl set-hostname vidistiller-prod
+sudo hostnamectl set-hostname vidistiller-host
 ```
 
 ---
@@ -1013,4 +1013,4 @@ docker system prune -a
 
 **Deployment Guide Version:** 2.0
 **Last Updated:** 2026-05-09 (renamed from LXC_DEPLOYMENT.md after prod migrated to a VM)
-**Target host:** `vidistiller` (Proxmox VM 900 at 10.0.181.20)
+**Target host:** `vidistiller` (Proxmox VM 900 at 192.0.2.10)

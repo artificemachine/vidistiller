@@ -4,6 +4,12 @@
 
 SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/scripts/deploy.sh"
 
+setup() {
+  export VIDISTILLER_BACKEND_IMAGE_REF="example.invalid/backend@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  export VIDISTILLER_FRONTEND_IMAGE_REF="example.invalid/frontend@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  export COSIGN_CERTIFICATE_IDENTITY_REGEXP="^example$"
+}
+
 # ── smoke ──────────────────────────────────────────────────────────────────────
 
 @test "smoke: --dry-run exits 0" {
@@ -14,6 +20,14 @@ SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/scripts/deploy.sh"
 @test "contract: rejects unknown flag" {
   run bash "$SCRIPT" --unknown-flag
   [ "$status" -ne 0 ]
+}
+
+@test "contract: rejects mutable image references before removing containers" {
+  run env \
+    VIDISTILLER_BACKEND_IMAGE_REF="example.invalid/backend:latest" \
+    bash "$SCRIPT" --dry-run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"image reference must be immutable"* ]]
 }
 
 # ── unit ───────────────────────────────────────────────────────────────────────

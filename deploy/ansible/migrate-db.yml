@@ -5,13 +5,13 @@
 #      ssh <lxc-host> "docker exec vidistiller-postgres \
 #        pg_dump -U tutorial_user tutorial_db" > /tmp/vidistiller.sql
 #
-#   2. vidistiller-prod is running and postgres container is healthy
+#   2. vidistiller-host is running and postgres container is healthy
 #      (run site.yml first)
 #
 # Run: cd deploy/ansible && ansible-playbook migrate-db.yml --vault-password-file .vault-pass
 ---
-- name: Restore database on vidistiller-prod
-  hosts: vidistiller-prod
+- name: Restore database on vidistiller-host
+  hosts: vidistiller-host
   gather_facts: false
 
   vars_files:

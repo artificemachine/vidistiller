@@ -16,7 +16,7 @@ from enum import Enum as PyEnum
 from uuid import uuid4
 from typing import Optional
 
-from sqlalchemy import Column, Integer, String, Text, Float, DateTime, Boolean, Enum, Index, ForeignKey, UniqueConstraint, func
+from sqlalchemy import Column, Integer, String, Text, Float, DateTime, Boolean, Enum, Index, ForeignKey, UniqueConstraint, JSON, func
 from sqlalchemy.orm import relationship
 
 from .session import Base
@@ -39,6 +39,16 @@ class ProcessingMode(PyEnum):
     """Processing mode for a job."""
     STANDARD = "standard"
     SLIDE_AWARE = "slide_aware"
+
+
+class JobStepStatus(PyEnum):
+    """Lifecycle states for a single idempotent processing step."""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    CANCELLED = "cancelled"
 
 
 class LogLevel(PyEnum):
@@ -92,6 +102,7 @@ class ProcessingJob(Base):
     documents = relationship("Document", back_populates="job", cascade="all, delete-orphan")
     logs = relationship("JobLog", back_populates="job", cascade="all, delete-orphan", order_by="JobLog.created_at")
     slides = relationship("Slide", back_populates="job", cascade="all, delete-orphan", order_by="Slide.slide_number")
+    steps = relationship("JobStep", back_populates="job", cascade="all, delete-orphan", order_by="JobStep.id")
     slide_detection_metadata = relationship("SlideDetectionMetadata", back_populates="job", uselist=False, cascade="all, delete-orphan")
 
     # Index on job_id for quick lookup
@@ -117,6 +128,41 @@ class ProcessingJob(Base):
     def is_processing(self) -> bool:
         """Check if job is currently processing."""
         return self.status == ProcessingStatus.PROCESSING
+
+
+class JobStep(Base):
+    """Durable state and claim token for one processing stage of a job."""
+
+    __tablename__ = "job_steps"
+
+    id: int = Column(Integer, primary_key=True)
+    job_id: int = Column(
+        Integer,
+        ForeignKey("processing_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: str = Column(String(32), nullable=False)
+    status: JobStepStatus = Column(
+        Enum(JobStepStatus, values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+        default=JobStepStatus.PENDING,
+    )
+    attempt: int = Column(Integer, nullable=False, default=0)
+    percent: int = Column(Integer, nullable=False, default=0)
+    started_at: Optional[datetime] = Column(DateTime, nullable=True)
+    finished_at: Optional[datetime] = Column(DateTime, nullable=True)
+    error_message: Optional[str] = Column(String(1024), nullable=True)
+    metrics: dict = Column(JSON, nullable=False, default=dict)
+    claim_token: Optional[str] = Column(String(255), nullable=True)
+    created_at: datetime = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at: datetime = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    job = relationship("ProcessingJob", back_populates="steps")
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "name", name="uq_job_steps_job_id_name"),
+        Index("ix_job_steps_job_id_status", "job_id", "status"),
+    )
 
 
 # ==============================================================================

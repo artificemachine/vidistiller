@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import apiClient from '@/lib/api';
 import { useParams } from 'next/navigation';
 import ProcessingStatus from '@/components/ProcessingStatus';
+import JobStepsProgress, { type JobStep } from '@/components/JobStepsProgress';
 import VideoPlayer from '@/components/VideoPlayer';
 import type { VideoPlayerHandle } from '@/components/VideoPlayer';
 import SnapshotsGallery from '@/components/SnapshotsGallery';
@@ -77,6 +78,7 @@ interface JobDetail {
     image_width?: number;
     image_height?: number;
   }>;
+  steps?: JobStep[];
 }
 
 function useIsMobile() {
@@ -170,6 +172,15 @@ export default function JobDetail() {
       console.error('Error polling job status:', err);
     }
   }, [jobId, fetchLogs]);
+
+  const retryStep = useCallback(async (stepName: string) => {
+    try {
+      await apiClient.post(`/jobs/${jobId}/steps/${stepName}/retry`);
+      await pollJob();
+    } catch (err: any) {
+      setError(err?.response?.data?.message || `Unable to retry ${stepName}`);
+    }
+  }, [jobId, pollJob]);
 
   useEffect(() => {
     const fetchJob = async () => {
@@ -633,7 +644,7 @@ export default function JobDetail() {
     <div className="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400">
       <ProcessingStatus
         status={job.status}
-        progress={job.status === 'completed' ? 100 : job.status === 'processing' ? 50 : 0}
+        progress={0}
         message={
           job.error_message
             ? `error: ${job.error_message}`
@@ -644,6 +655,9 @@ export default function JobDetail() {
                 : 'waiting to start processing'
         }
       />
+      <div className="mt-4 w-full max-w-md">
+        <JobStepsProgress steps={job.steps || []} onRetry={retryStep} />
+      </div>
     </div>
   );
 
@@ -689,7 +703,7 @@ export default function JobDetail() {
         <div className="mb-4">
           <ProcessingStatus
             status={job.status}
-            progress={job.status === 'processing' ? 50 : 0}
+            progress={0}
             message={
               job.error_message
                 ? `error: ${job.error_message}`
@@ -698,6 +712,7 @@ export default function JobDetail() {
                   : 'waiting to start processing'
             }
           />
+          <JobStepsProgress steps={job.steps || []} onRetry={retryStep} />
         </div>
       )}
       {isSlideMode ? (
@@ -763,7 +778,7 @@ export default function JobDetail() {
         <div className="mb-6">
           <ProcessingStatus
             status={job.status}
-            progress={job.status === 'completed' ? 100 : job.status === 'processing' ? 50 : 0}
+            progress={0}
             message={
               job.error_message
                 ? `error: ${job.error_message}`
@@ -774,6 +789,7 @@ export default function JobDetail() {
                     : 'waiting to start processing'
             }
           />
+          <JobStepsProgress steps={job.steps || []} onRetry={retryStep} />
         </div>
 
         {showLogs && (

@@ -39,13 +39,13 @@ docker compose -f docker-compose.prod.yml up -d
 
 ### Permanent fix (done — 2026-06-09)
 
-`scripts/deploy.sh` runs `docker rm -f tutorial_*` before every `up -d`. Use `--dry-run` to preview without mutating.
+`scripts/deploy.sh` verifies the configured backend and frontend digest signatures with Cosign before it runs `docker rm -f tutorial_*` or starts the stack. It requires `VIDISTILLER_BACKEND_IMAGE_REF`, `VIDISTILLER_FRONTEND_IMAGE_REF`, and `COSIGN_CERTIFICATE_IDENTITY_REGEXP`; use `--dry-run` to preview without mutating.
 
 ---
 
 ## vLLM Fleet — Port Rules
 
-- **Port 8000** — direct vLLM inference. Use this for `VLLM_VM913_URL`.
+- **Port 8000** — direct vLLM inference. Use this for `VLLM_PRIMARY_URL`.
 - **Port 8100** — vllm-manager. Do NOT use for inference. It intercepts `/v1/chat/completions` as a model-swap trigger and returns 409.
 
 ## Docker Compose — Env Var Changes
@@ -63,7 +63,7 @@ This recreates the container with the updated env.
 `NEXT_PUBLIC_*` vars are baked into the static JS bundle at build time. Always build with the correct URL:
 
 ```bash
-NEXT_PUBLIC_API_URL=http://10.0.181.20:8000/api npm run build
+NEXT_PUBLIC_API_URL=http://192.0.2.10:8000/api npm run build
 ```
 
 Never use the default `.env.local` values for VM deploys.

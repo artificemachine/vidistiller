@@ -76,10 +76,10 @@ class TestDescribeImage:
 class TestVisionPrepass:
     def _make_service(self):
         with patch("app.services.llm.get_settings") as mock_settings:
-            mock_settings.return_value.vllm_fleet.vm913_url = "http://fake:8100"
-            mock_settings.return_value.vllm_fleet.vm903_url = ""
-            mock_settings.return_value.vllm_fleet.vm901_url = ""
-            mock_settings.return_value.vllm_fleet.vm2900_url = ""
+            mock_settings.return_value.vllm_fleet.primary_url = "http://fake:8100"
+            mock_settings.return_value.vllm_fleet.secondary_url = ""
+            mock_settings.return_value.vllm_fleet.vision_url = ""
+            mock_settings.return_value.vllm_fleet.auxiliary_url = ""
             mock_settings.return_value.ollama.base_url = "http://localhost:11434"
             mock_settings.return_value.ollama.model_name = "llama3"
             mock_settings.return_value.service_timeouts.llm_timeout = 120
@@ -155,10 +155,10 @@ class TestVisionPrepass:
         with patch("app.services.llm.get_settings") as mock_settings:
             mock_settings.return_value.ollama.base_url = "http://localhost:11434"
             mock_settings.return_value.ollama.model_name = "llama3"
-            mock_settings.return_value.vllm_fleet.vm913_url = ""
-            mock_settings.return_value.vllm_fleet.vm903_url = ""
-            mock_settings.return_value.vllm_fleet.vm901_url = ""
-            mock_settings.return_value.vllm_fleet.vm2900_url = ""
+            mock_settings.return_value.vllm_fleet.primary_url = ""
+            mock_settings.return_value.vllm_fleet.secondary_url = ""
+            mock_settings.return_value.vllm_fleet.vision_url = ""
+            mock_settings.return_value.vllm_fleet.auxiliary_url = ""
             mock_settings.return_value.service_timeouts.llm_timeout = 120
             svc = LLMService(provider_name="ollama", model_name="llama3")
             svc.settings = mock_settings.return_value

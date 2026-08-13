@@ -204,7 +204,7 @@ def test_vllm_models_rejects_non_allowlisted_host(client, auth_headers):
 def test_vllm_models_rejects_non_allowlisted_private_host(client, auth_headers):
     resp = client.get(
         VLLM_MODELS_URL,
-        params={"base_url": "http://10.0.181.20:8000/"},
+        params={"base_url": "http://192.0.2.10:8000/"},
         headers=auth_headers,
     )
     assert resp.status_code == 400

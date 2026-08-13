@@ -234,7 +234,7 @@ Typed settings classes for database, JWT, CORS, logging, and every other configu
 ### `scripts/` — Utility Scripts
 
 Automation helpers for common tasks:
-- `deploy.sh` — deploy the stack to a configured host
+- `deploy.sh` — deploy only Cosign-verified, immutable image digests to a configured host
 - `push-backend.sh` — build and push the backend image
 - `setup-staging.sh` — bring up a staging environment
 

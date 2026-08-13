@@ -45,6 +45,16 @@ class ProcessingStatusEnum(str, Enum):
     CANCELLED = "cancelled"
 
 
+class JobStepStatusEnum(str, Enum):
+    """Persistent status for a single processing stage."""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    CANCELLED = "cancelled"
+
+
 class DocumentFormatEnum(str, Enum):
     """Supported document output formats."""
     MARKDOWN = "markdown"
@@ -411,6 +421,18 @@ class JobCreate(BaseModel):
     )
 
 
+class JobStepResponse(BaseSchema):
+    """Database-backed progress for one canonical processing step."""
+    name: str = Field(..., description="Canonical step name")
+    status: JobStepStatusEnum = Field(..., description="Step lifecycle status")
+    attempt: int = Field(..., ge=0, description="Number of successful claims")
+    percent: int = Field(..., ge=0, le=100, description="Persisted progress percentage")
+    started_at: Optional[datetime] = Field(None, description="First timestamp of current attempt")
+    finished_at: Optional[datetime] = Field(None, description="Terminal timestamp")
+    error_message: Optional[str] = Field(None, description="Latest failure detail")
+    metrics: dict = Field(default_factory=dict, description="Non-secret step metrics")
+
+
 class JobStatusResponse(BaseSchema):
     """Lightweight job status response for polling."""
     job_id: str = Field(..., description="Unique job identifier (UUID)")
@@ -425,6 +447,7 @@ class JobStatusResponse(BaseSchema):
     user_id: Optional[int] = Field(None, description="Owner user ID")
     created_at: datetime = Field(..., description="Job creation timestamp")
     updated_at: datetime = Field(..., description="Last status update timestamp")
+    steps: List[JobStepResponse] = Field(default_factory=list, description="Persistent processing steps")
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -468,6 +491,7 @@ class JobResponse(BaseSchema):
     snapshots: List[SnapshotResponse] = Field(default_factory=list, description="Extracted snapshots")
     documents: List[DocumentResponse] = Field(default_factory=list, description="Generated documents")
     slides: List[SlideResponse] = Field(default_factory=list, description="Detected slides (slide_aware mode)")
+    steps: List[JobStepResponse] = Field(default_factory=list, description="Persistent processing steps")
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -611,7 +635,7 @@ class UserSettingsUpdate(BaseModel):
     llm_ollama_url: Optional[str] = Field(
         None,
         max_length=512,
-        description="Custom base URL for Ollama or vLLM sidecar (e.g. http://10.0.150.36:8100)"
+        description="Custom base URL for Ollama or vLLM sidecar (e.g. http://192.0.2.10:8100)"
     )
     summary_language: Optional[str] = Field(
         None,

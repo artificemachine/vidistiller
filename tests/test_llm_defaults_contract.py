@@ -15,7 +15,7 @@ from app.services.llm_resolution import FALLBACK_MODEL
 def test_vllm_default_matches_fallback() -> None:
     """Last-resort vllm default is gemma4-31b everywhere.
 
-    The fleet table in ``backend/app/routes/settings.py`` documents VM913's
+    The fleet table in ``backend/app/routes/settings.py`` documents PRIMARY's
     home model as gemma4-31b; the frontend settings map uses the same value.
     Backend ``DEFAULT_MODELS["vllm"]`` must equal the global fallback so
     that fleet-eviction and fleet-down paths converge on the same model.

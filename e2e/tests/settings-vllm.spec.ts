@@ -12,10 +12,10 @@ const MODELS_API = "**/api/settings/vllm/models**";
 const FLEET_API  = "**/api/settings/vllm/fleet**";
 
 const MOCK_FLEET = [
-  { id: "vm913",  label: "VM913",  tier: "opus-class",   desc: "4× RTX 3090 · 96 GB · TP=2", model: "qwopus-27b", url: "http://192.0.2.1:8100" },
-  { id: "vm903",  label: "VM903",  tier: "sonnet-class", desc: "2× RTX 3090 · 48 GB",              model: "",           url: "http://192.0.2.2:8100" },
-  { id: "vm901",  label: "VM901",  tier: "haiku-class",  desc: "2× RTX 3080 · 20 GB",              model: "",           url: "http://192.0.2.3:8100" },
-  { id: "vm2900", label: "VM2900", tier: "small",        desc: "RTX 3060 Ti · 8 GB usable",            model: "",           url: "http://192.0.2.4:8100" },
+  { id: "primary",  label: "PRIMARY",  tier: "opus-class",   desc: "4× RTX 3090 · 96 GB · TP=2", model: "qwopus-27b", url: "http://192.0.2.1:8100" },
+  { id: "secondary",  label: "SECONDARY",  tier: "sonnet-class", desc: "2× RTX 3090 · 48 GB",              model: "",           url: "http://192.0.2.2:8100" },
+  { id: "vision",  label: "VISION",  tier: "haiku-class",  desc: "2× RTX 3080 · 20 GB",              model: "",           url: "http://192.0.2.3:8100" },
+  { id: "auxiliary", label: "AUXILIARY", tier: "small",        desc: "RTX 3060 Ti · 8 GB usable",            model: "",           url: "http://192.0.2.4:8100" },
 ];
 
 function mockFleet(route: Route) {
@@ -76,10 +76,10 @@ test.describe("Settings — vLLM provider", () => {
     await gotoSettingsWithFleet(page);
     await selectVllm(page);
 
-    await expect(page.locator("button", { hasText: "VM913" })).toBeVisible();
-    await expect(page.locator("button", { hasText: "VM903" })).toBeVisible();
-    await expect(page.locator("button", { hasText: "VM901" })).toBeVisible();
-    await expect(page.locator("button", { hasText: "VM2900" })).toBeVisible();
+    await expect(page.locator("button", { hasText: "PRIMARY" })).toBeVisible();
+    await expect(page.locator("button", { hasText: "SECONDARY" })).toBeVisible();
+    await expect(page.locator("button", { hasText: "VISION" })).toBeVisible();
+    await expect(page.locator("button", { hasText: "AUXILIARY" })).toBeVisible();
   });
 
   test("vllm card does not show api key input", async ({ page }) => {
@@ -92,15 +92,15 @@ test.describe("Settings — vLLM provider", () => {
   // Node selection — model auto-fetch
   // -------------------------------------------------------------------------
 
-  test("clicking VM913 node fetches and displays model", async ({ page }) => {
+  test("clicking PRIMARY node fetches and displays model", async ({ page }) => {
     await gotoSettingsWithFleet(page, ["qwopus-27b"]);
     await selectVllm(page);
-    await page.locator("button", { hasText: "VM913" }).click();
+    await page.locator("button", { hasText: "PRIMARY" }).click();
 
     await expect(page.locator("text=qwopus-27b").first()).toBeVisible({ timeout: 5_000 });
   });
 
-  test("clicking VM913 node calls sidecar with correct URL", async ({ page }) => {
+  test("clicking PRIMARY node calls sidecar with correct URL", async ({ page }) => {
     let capturedUrl = "";
     await page.route(FLEET_API, (route: Route) => mockFleet(route));
     await page.route(MODELS_API, (route: Route) => {
@@ -113,18 +113,18 @@ test.describe("Settings — vLLM provider", () => {
     await selectVllm(page);
     await Promise.all([
       page.waitForResponse(MODELS_API),
-      page.locator("button", { hasText: "VM913" }).click(),
+      page.locator("button", { hasText: "PRIMARY" }).click(),
     ]);
-    expect(capturedUrl).toContain("192.0.2.1:8100"); // VM913 from MOCK_FLEET
+    expect(capturedUrl).toContain("192.0.2.1:8100"); // PRIMARY from MOCK_FLEET
   });
 
   test("node button highlights when selected", async ({ page }) => {
     await gotoSettingsWithFleet(page);
     await selectVllm(page);
-    const vm913 = page.locator("button", { hasText: "VM913" });
-    await vm913.click();
+    const primary = page.locator("button", { hasText: "PRIMARY" });
+    await primary.click();
 
-    await expect(vm913).toHaveClass(/border-primary/);
+    await expect(primary).toHaveClass(/border-primary/);
   });
 
   // -------------------------------------------------------------------------
@@ -136,7 +136,7 @@ test.describe("Settings — vLLM provider", () => {
     await page.route(MODELS_API, (route: Route) => mockSidecar(route, ["model-a", "model-b"]));
 
     await selectVllm(page);
-    await page.locator("button", { hasText: "VM903" }).click();
+    await page.locator("button", { hasText: "SECONDARY" }).click();
 
     await expect(page.locator("button", { hasText: "model-a" })).toBeVisible({ timeout: 5_000 });
     await expect(page.locator("button", { hasText: "model-b" })).toBeVisible();
@@ -147,7 +147,7 @@ test.describe("Settings — vLLM provider", () => {
     await page.route(MODELS_API, (route: Route) => mockSidecar(route, ["model-a", "model-b"]));
 
     await selectVllm(page);
-    await page.locator("button", { hasText: "VM903" }).click();
+    await page.locator("button", { hasText: "SECONDARY" }).click();
     await page.locator("button", { hasText: "model-b" }).click();
 
     const modelInput = page.locator("input[placeholder*='type a model name']");
@@ -163,7 +163,7 @@ test.describe("Settings — vLLM provider", () => {
     await selectVllm(page);
     await Promise.all([
       page.waitForResponse(MODELS_API),
-      page.locator("button", { hasText: "VM913" }).click(),
+      page.locator("button", { hasText: "PRIMARY" }).click(),
     ]);
 
     const modelInput = page.locator("input[placeholder*='type a model name']");
@@ -186,7 +186,7 @@ test.describe("Settings — vLLM provider", () => {
     await selectVllm(page);
     await Promise.all([
       page.waitForResponse(MODELS_API),
-      page.locator("button", { hasText: "VM901" }).click(),
+      page.locator("button", { hasText: "VISION" }).click(),
     ]);
 
     const modelInput = page.locator("input[placeholder*='type a model name']");
@@ -202,7 +202,7 @@ test.describe("Settings — vLLM provider", () => {
     await selectVllm(page);
     await Promise.all([
       page.waitForResponse(MODELS_API),
-      page.locator("button", { hasText: "VM913" }).click(),
+      page.locator("button", { hasText: "PRIMARY" }).click(),
     ]);
 
     await page.click("button[type='submit']:has-text('save settings')");

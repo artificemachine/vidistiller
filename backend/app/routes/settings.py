@@ -107,17 +107,17 @@ def get_vllm_fleet(
     """
     fleet_cfg = get_settings().vllm_fleet
     _nodes = [
-        {"id": "vm913",  "label": "VM913",  "tier": "opus-class",   "desc": "4× RTX 3090 · 96 GB · TP=2", "model": "gemma4-31b", "url": fleet_cfg.vm913_url},
-        {"id": "vm903",  "label": "VM903",  "tier": "sonnet-class", "desc": "2× RTX 3090 · 48 GB",              "model": "",           "url": fleet_cfg.vm903_url},
-        {"id": "vm901",  "label": "VM901",  "tier": "haiku-class",  "desc": "2× RTX 3080 · 20 GB",              "model": "",           "url": fleet_cfg.vm901_url},
-        {"id": "vm2900", "label": "VM2900", "tier": "small",        "desc": "RTX 3060 Ti · 8 GB usable",            "model": "",           "url": fleet_cfg.vm2900_url},
+        {"id": "primary", "label": "Primary", "tier": "primary", "desc": "Operator-configured inference endpoint", "model": "", "url": fleet_cfg.primary_url},
+        {"id": "secondary", "label": "Secondary", "tier": "secondary", "desc": "Operator-configured inference endpoint", "model": "", "url": fleet_cfg.secondary_url},
+        {"id": "vision", "label": "Vision", "tier": "vision", "desc": "Operator-configured inference endpoint", "model": "", "url": fleet_cfg.vision_url},
+        {"id": "auxiliary", "label": "Auxiliary", "tier": "auxiliary", "desc": "Operator-configured inference endpoint", "model": "", "url": fleet_cfg.auxiliary_url},
     ]
     return {"nodes": [n for n in _nodes if n["url"]]}
 
 
 @router.get("/vllm/models")
 def get_vllm_models(
-    base_url: str = Query(..., description="vLLM sidecar base URL, e.g. http://10.0.150.36:8100"),
+    base_url: str = Query(..., description="vLLM sidecar base URL, e.g. http://192.0.2.10:8100"),
     current_user: User = Depends(get_current_user_from_token),
 ) -> dict:
     """

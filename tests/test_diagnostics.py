@@ -147,7 +147,7 @@ class TestDiagnosticsEndpoint:
     def test_endpoint_returns_diagnostics(self, MockLLMService, auth_headers):
         """Endpoint should return the dict from diagnose_ollama."""
         mock_diag = {
-            "url": "http://10.0.0.1:11434",
+            "url": "http://192.0.2.10:11434",
             "model": "llama3",
             "reachable": False,
             "response_time_ms": 0,
@@ -171,7 +171,7 @@ class TestDiagnosticsEndpoint:
     def test_endpoint_returns_healthy(self, MockLLMService, auth_headers):
         """Endpoint returns healthy diagnostics when Ollama is up."""
         mock_diag = {
-            "url": "http://10.0.0.1:11434",
+            "url": "http://192.0.2.10:11434",
             "model": "llama3",
             "reachable": True,
             "response_time_ms": 42,
@@ -203,7 +203,7 @@ class TestLLMDiagnosticsEndpoint:
         base = {
             "provider": "vllm",
             "model": "gemma4-31b",
-            "base_url": "http://vm913:8000",
+            "base_url": "http://primary:8000",
             "reachable": True,
             "auth_ok": None,
             "model_found": True,
@@ -223,9 +223,9 @@ class TestLLMDiagnosticsEndpoint:
         mock_resolve.return_value = ResolvedLLM(
             provider_name="vllm",
             model="gemma4-31b",
-            base_url="http://vm913:8000",
+            base_url="http://primary:8000",
             api_key=None,
-            fleet_node="vm913",
+            fleet_node="primary",
         )
         mock_probe.return_value = self._probe_result()
 
@@ -238,11 +238,11 @@ class TestLLMDiagnosticsEndpoint:
         assert data["model"] == "gemma4-31b"
         assert data["reachable"] is True
         assert data["model_found"] is True
-        assert data["fleet_node"] == "vm913"
+        assert data["fleet_node"] == "primary"
         # probe receives exactly the resolved config
         mock_probe.assert_called_once_with(
             "vllm", "gemma4-31b",
-            base_url="http://vm913:8000", api_key=None,
+            base_url="http://primary:8000", api_key=None,
         )
 
     @patch("app.services.llm_health.probe_llm")
@@ -285,17 +285,17 @@ class TestLLMDiagnosticsEndpoint:
         from app.services.llm_resolution import ResolvedLLM
 
         # Simulates: user with no LLM settings, fleet discovery picks
-        # qwen3.6-27b-awq from vm903.
+        # qwen3.6-27b-awq from secondary.
         mock_resolve.return_value = ResolvedLLM(
             provider_name="vllm",
             model="qwen3.6-27b-awq",
-            base_url="http://vm903:8000",
+            base_url="http://secondary:8000",
             api_key=None,
-            fleet_node="vm903",
+            fleet_node="secondary",
         )
         mock_probe.return_value = self._probe_result(
             provider="vllm", model="qwen3.6-27b-awq",
-            base_url="http://vm903:8000", fleet_node="vm903",
+            base_url="http://secondary:8000", fleet_node="secondary",
         )
 
         client = TestClient(app)
@@ -305,6 +305,6 @@ class TestLLMDiagnosticsEndpoint:
         data = resp.json()
         assert data["provider"] == "vllm"
         assert data["model"] == "qwen3.6-27b-awq"
-        assert data["base_url"] == "http://vm903:8000"
-        assert data["fleet_node"] == "vm903"
+        assert data["base_url"] == "http://secondary:8000"
+        assert data["fleet_node"] == "secondary"
         assert data["reachable"] is True

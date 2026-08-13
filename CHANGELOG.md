@@ -44,13 +44,13 @@ All notable changes to this project will be documented in this file.
 - 2026-04-17: update CLAUDE.md header from youtube-model-feeder to Vidistiller (rename cleanup)
 - 2026-04-17: update README.md — multi-source video support, multi-provider LLM, VideoService rename, v1.1.0 version string
 - 2026-04-17: chore: replace Apache 2.0 LICENSE with MIT (copyright celstnblacc)
-- 2026-04-17: feat: add deploy/ — Terraform + Ansible for LXC→VM migration to node-antares (10.255.181.20)
+- 2026-04-17: feat: add deploy/ — Terraform + Ansible for LXC→VM migration to node-antares (192.0.2.10)
 - 2026-04-17: fix: ansible provisioning fixes — python -m commands, alembic.ini template, migrations copy, image tag format, qemu-guest-agent ignore_errors
 - 2026-04-17: feat: update hero copy, add register password validation, fix migrate-db.yml, fix pgadmin email in vault
 - 2026-04-18: fix: add secret-protection entries to deploy/terraform and deploy/ansible .gitignore (shipguard SC-004)
 - 2026-04-18: fix: Next.js rewrites proxy — default NEXT_PUBLIC_API_URL to /api and proxy via BACKEND_URL so browser never needs direct access to port 8000
 - 2026-04-19: fix: pass BACKEND_URL build arg in Dockerfile so Next.js rewrites bake http://backend:8000 not localhost:8000; bump frontend image to 0.2.2
-- 2026-04-19: chore: rename Docker Hub org celestinmax → newblacc across Ansible defaults, CI workflow, and live docker-compose
+- 2026-04-19: chore: rename Docker Hub org example-org → example-org across Ansible defaults, CI workflow, and live docker-compose
 - 2026-04-19: chore: migrate repo to github.com/artificemachine/vidistiller
 - 2026-04-19: security: bind Redis and pgAdmin ports to 127.0.0.1 in dev docker-compose (threat model hardening)
 - 2026-04-19: chore: update README docker-compose commands to Docker Compose v2 syntax; add Prerequisites section; remove embedded npm vulnerability output
@@ -60,7 +60,7 @@ All notable changes to this project will be documented in this file.
 - 2026-04-19: security: upgrade Next.js 14→15.5.15, React 18→19, @sentry/nextjs 8→10.49.0 — resolves 5 HIGH CVEs (GHSA-ggv3-7p47-pfv8, GHSA-9g9p-9gw9-jx7f, GHSA-h25m-26qc-wcjf, GHSA-3x4c-7xq6-9pq8, GHSA-q4gf-8mx6-v5v3) and 1 rollup HIGH (GHSA-mw96-cpmx-2vgc); remove swcMinify (Next.js 15 default); fix React 19 useRef explicit undefined
 - 2026-04-19: chore: bump version 0.2.1 → 0.2.2, frontend 1.1.0 → 1.2.0 (security: Next.js/React/Sentry upgrade)
 - 2026-04-19: chore: replace alert() with in-page flash banner in dashboard; migrate Pydantic V2 class Config → model_config/ConfigDict across config.py, models.py; replace from_orm with model_validate in snapshots.py; migrate FastAPI on_event("startup") → lifespan handler
-- 2026-04-19: fix: deploy workflow — replace git-pull with docker compose pull (server is not a git repo); fix migration command (service: backend, not api); fix health check endpoint to 10.255.181.20:8000; update production image tags to :latest; fix postgres-data uid from 999 → 70 (postgres:15-alpine uses uid=70)
+- 2026-04-19: fix: deploy workflow — replace git-pull with docker compose pull (server is not a git repo); fix migration command (service: backend, not api); fix health check endpoint to 192.0.2.10:8000; update production image tags to :latest; fix postgres-data uid from 999 → 70 (postgres:15-alpine uses uid=70)
 - 2026-04-28: feat: add API key auth for machine-to-machine clients — ApiKeySettings with VIDISTILLER_API_KEY env var, api_key_auth.py dependency (X-API-Key header support with JWT fallback), auto-create semblar service user on first API key call, wire into all /api/jobs routes for Semblar integration
 - 2026-04-29: chore: bump version 0.3.1 → 0.3.2
 - 2026-04-29: fix: docker-compose.prod.yml use bind mounts for postgres and redis to preserve data across deploys
@@ -70,7 +70,7 @@ All notable changes to this project will be documented in this file.
 - 2026-04-29: fix: absorb Docker Hub publish into deploy.yml as prerequisite job; deploy-production now always pulls fresh image before deploying
 - 2026-05-07: fix: pass VIDISTILLER_API_KEY env var into api container in docker-compose.prod.yml
 - 2026-05-09: fix: deploy workflow chowns app-data to 1001:1001 before compose up so non-root container can write videos/snapshots/slides
-- 2026-05-09: feat: wire vLLM fleet config (VLLMFleetSettings); /settings/vllm/fleet now returns VM913/VM903/VM901/VM2900 nodes from VLLM_VM*_URL env vars
+- 2026-05-09: feat: wire vLLM fleet config (VLLMFleetSettings); /settings/vllm/fleet now returns PRIMARY/SECONDARY/VISION/AUXILIARY nodes from VLLM_VM*_URL env vars
 - 2026-05-09: feat(frontend): YouTubePlayer remembers last playback position (localStorage, keyed by videoId, 90-day TTL); resumes within READY handler
 - 2026-05-09: chore(security): disable PY-007 (53 audited FPs from buggy shipguard 0.4.0 rule); add *.p12 + secrets.json to .gitignore; mark md5 url-cache hash usedforsecurity=False; npm audit fix (axios + fast-uri highs)
 - 2026-05-09: docs: rename LXC_DEPLOYMENT.md → VM_DEPLOYMENT.md and update infra references; prod migrated from Proxmox LXC to Proxmox VM 900
@@ -130,11 +130,11 @@ All notable changes to this project will be documented in this file.
 - 2026-06-08: chore(release): bump to v1.7.3 (print transcript matches sidebar/MD export format)
 - 2026-06-08: fix(frontend): pdf export renders all pages; strip preamble from print transcript
 - 2026-06-08: chore(release): bump to v1.7.4 (pdf multi-page + preamble strip)
-- 2026-06-08: fix(backend): default LLM provider to vLLM fleet; fall back to VLLM_VM913_URL env var
+- 2026-06-08: fix(backend): default LLM provider to vLLM fleet; fall back to VLLM_PRIMARY_URL env var
 - 2026-06-08: chore(release): bump to v1.7.5 (default LLM to vLLM fleet)
-- 2026-06-08: fix(config): correct VLLM_VM913_URL port 8100→8000 in .env.example; update VLLMFleetSettings docstring to reflect direct vLLM (no proxy); add docker compose down --remove-orphans before up in CI deploy
-- 2026-06-08: fix(config): change default vLLM model from qwopus-27b (typo/nonexistent) to gemma4-31b (loaded on vm913 GPUs 4-7)
-- 2026-06-08: feat(backend): fleet-aware summarize — queries all VMs /v1/models to find which one has the requested model loaded instead of hardcoding vm913
+- 2026-06-08: fix(config): correct VLLM_PRIMARY_URL port 8100→8000 in .env.example; update VLLMFleetSettings docstring to reflect direct vLLM (no proxy); add docker compose down --remove-orphans before up in CI deploy
+- 2026-06-08: fix(config): change default vLLM model from qwopus-27b (typo/nonexistent) to gemma4-31b (loaded on primary GPUs 4-7)
+- 2026-06-08: feat(backend): fleet-aware summarize — queries all VMs /v1/models to find which one has the requested model loaded instead of hardcoding primary
 - 2026-06-08: fix(test): update vLLM default model assertion to match gemma4-31b
 - 2026-06-08: chore(release): bump to v1.8.0 (fleet-aware summarization + model/default fixes)
 - 2026-06-09: fix(llm): extract JSON array from Pass 1 response before parsing to handle trailing text
@@ -204,7 +204,7 @@ All notable changes to this project will be documented in this file.
 
 - 2026-06-25: chore: remove personal workspace path from tracked files
 
-- 2026-06-30: feat: add summary_language user setting; fix vLLM fleet routing to qwen3-32b-awq on vm903; fix duplicate transcript header; fix frontend NEXT_PUBLIC_API_URL baking
+- 2026-06-30: feat: add summary_language user setting; fix vLLM fleet routing to qwen3-32b-awq on secondary; fix duplicate transcript header; fix frontend NEXT_PUBLIC_API_URL baking
 - 2026-06-30: feat: add DeepSeek, MiniMax, and OpenCode LLM providers; fix vllm model list dedup; fix BACKEND_URL baked at build time
 - 2026-06-30: chore(ci): exclude GHA-002 from shipguard scan (0.4.3 false positive on SHA-pinned actions); add .shipguard.toml
 - 2026-06-30: fix(e2e): scroll vllm radio into view before clicking and scroll to bottom after — fleet section renders below the radio
@@ -221,7 +221,7 @@ All notable changes to this project will be documented in this file.
 - fix: add /app/deps/bin to PATH in backend Dockerfile — pip --target installs console scripts there, so `uvicorn` was not on PATH and the api container could not exec its CMD
 
 ### Security
-- chore: scrub internal homelab topology from tracked files — replaced internal 10.255.x.x addresses with 10.0.x documentation placeholders and real node names with generic ones across .env.example, deploy/ (terraform+ansible), CI deploy workflow, backend docstrings, docs, and tests; production health check now reads vars.PROD_API_BASE_URL; untracked .superharness/ (agent state) and features_to_add/ (working notes incl. personal-named .docx) and gitignored both
+- chore: scrub internal homelab topology from tracked files — replaced internal [redacted internal range] addresses with 10.0.x documentation placeholders and real node names with generic ones across .env.example, deploy/ (terraform+ansible), CI deploy workflow, backend docstrings, docs, and tests; production health check now reads vars.PROD_API_BASE_URL; untracked .superharness/ (agent state) and features_to_add/ (working notes incl. personal-named .docx) and gitignored both
 
 ### Fixed
 - docs: README surface repair — removed broken links (DESIGN_EXPORT_GUIDE.md, DESIGN_README.md, docs/DOCKER.md, docs/DEPLOYMENT.md), corrected terraform description (Proxmox, not AWS), dropped pink-span heading styling, aligned Python prerequisite to 3.12+ (matches Docker image and CI)
@@ -236,7 +236,7 @@ All notable changes to this project will be documented in this file.
 - chore: delete 33 local + 78 remote branches verified as merged via their PR head refs (ancestry check under-counts with squash-merge)
 
 ### Fixed
-- fix: scope gitleaks ipv4-address rule to the real internal range (10.255.x.x) — the generic IPv4 regex flagged documentation placeholders (44 false positives on this PR) and the per-rule `enabled = false` line was silently ignored (gitleaks has no such field); PR-range CI scans now pass
+- fix: scope gitleaks ipv4-address rule to the real internal range ([redacted internal range]) — the generic IPv4 regex flagged documentation placeholders (44 false positives on this PR) and the per-rule `enabled = false` line was silently ignored (gitleaks has no such field); PR-range CI scans now pass
 
 ### Fixed
 - fix: security workflow — pass --severity high to shipguard so the scan step exits non-zero only on high/critical findings; previously any medium finding failed the job before the severity-policy step could run (fail-closed on noise)
@@ -244,7 +244,7 @@ All notable changes to this project will be documented in this file.
 ## v1.10.12
 
 ### Fixed
-- fix(security): make the gitleaks personal-email rule use a non-capturing group — with a capturing group gitleaks reported the captured domain ("gmail") as the Secret instead of the full address, which also prevented allowlist regexes from matching. Backported from fix/gitleaks-pii-regex-backport; the private-range IP allowlist from that same branch was deliberately NOT taken, as `^10\.` fully suppresses the scoped 10.255.x.x rule added in #98.
+- fix(security): make the gitleaks personal-email rule use a non-capturing group — with a capturing group gitleaks reported the captured domain ("gmail") as the Secret instead of the full address, which also prevented allowlist regexes from matching. Backported from fix/gitleaks-pii-regex-backport; the private-range IP allowlist from that same branch was deliberately NOT taken, as `^10\.` fully suppresses the scoped [redacted internal range] rule added in #98.
 - fix(security): replace the real-format Fernet key in .env.example with base64("DEV-ONLY-INSECURE-CHANGE-ME-0000") — still a valid Fernet key so `cp .env.example .env` boots for local dev, but self-evidently not a secret. Verified it never matched the live production key.
 - fix(scripts): remove hardcoded internal IP from scripts/push-backend.sh; SSH target now defaults to the `vidistiller` host alias and is overridable via VIDISTILLER_SSH.
 
@@ -378,7 +378,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(config): docker-compose.yml passes `JWT_SECRET_KEY: ${JWT_SECRET_KEY}` with no default, so leaving it unset in .env (the documented way to get an auto-generated dev key) arrives in the container as an EMPTY STRING, not an absent variable. The v1.10.16 alias fix made the field read that empty string as "set" and reject it outright, which broke `docker compose up -d` on a genuinely fresh clone — the api container never became healthy. A blank/whitespace-only value is now treated the same as unset. Found by an actual fresh-clone `docker compose up -d` verification, not a config test alone.
-- docs(env): .env.example VLLM_VM913_URL and siblings are now commented out, matching the neighboring ALLOWED_LLM_HOSTS example and the "leave blank to hide a VM" comment already above them. Previously uncommented, so a fresh `cp .env.example .env` populated the UI's fleet picker with 4 example VMs by default.
+- docs(env): .env.example VLLM_PRIMARY_URL and siblings are now commented out, matching the neighboring ALLOWED_LLM_HOSTS example and the "leave blank to hide a VM" comment already above them. Previously uncommented, so a fresh `cp .env.example .env` populated the UI's fleet picker with 4 example VMs by default.
 
 ## [1.12.6] - 2026-07-21
 
@@ -537,7 +537,7 @@ All notable changes to this project will be documented in this file.
 ### Security
 - fix(deps): require `cryptography>=50.0.0` to clear the CI pip-audit gate (PYSEC-2026-3552 fixed in 50.0.0). New test `tests/test_dependencies.py::test_cryptography_at_least_50` enforces the floor so future resolves cannot silently fall back to a vulnerable range. Verified locally: `pip-audit` reports 0 critical/high findings; full backend suite 560 passed, 29 skipped with cryptography 50 installed. fastapi-mail metadata caps cryptography <50 in this version — pip emits a warning but installs fine; runtime import + `tests/test_password_reset.py` (9 passed) confirm the gap is non-blocking in Python 3.14.
 
-- fix(llm): dynamic fleet model adoption — when the user has no model configured and the provider is vllm, `resolve_user_llm` now adopts the first model actually loaded on the first reachable fleet VM instead of requesting a hardcoded name. Hardcoded defaults remain only as the final fallback. New `discover_fleet_model()` + shared `_get_vm_model_ids()` helper in `backend/app/services/llm_resolution.py`. +7 unit tests + 1 endpoint integration test; full backend suite 568 passed, 29 skipped. Fixes the prod summarize failure where `qwen3-32b-awq` 404s because the fleet actually serves `qwen3.6-27b-awq` on VM903.
+- fix(llm): dynamic fleet model adoption — when the user has no model configured and the provider is vllm, `resolve_user_llm` now adopts the first model actually loaded on the first reachable fleet VM instead of requesting a hardcoded name. Hardcoded defaults remain only as the final fallback. New `discover_fleet_model()` + shared `_get_vm_model_ids()` helper in `backend/app/services/llm_resolution.py`. +7 unit tests + 1 endpoint integration test; full backend suite 568 passed, 29 skipped. Fixes the prod summarize failure where `qwen3-32b-awq` 404s because the fleet actually serves `qwen3.6-27b-awq` on SECONDARY.
 
 - fix(llm): align last-resort vllm default to `gemma4-31b` (matches frontend settings map + the fleet table) — backend `DEFAULT_MODELS["vllm"]` was `qwen3-32b-awq` while the frontend + fleet table already used `gemma4-31b`. New `tests/test_llm_defaults_contract.py::test_vllm_default_matches_fallback` pins the parity. Updated two regression assertions in `test_llm_resolution.py` and `test_llm_providers_vllm.py` to the new value.
 - chore(release): bump `pyproject.toml` `version` from `1.12.21` to `1.13.0` (new feature: dynamic fleet model adoption + diagnostics surface).
@@ -682,3 +682,18 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump `pyproject.toml` `version` from `1.15.2` to `1.15.3` (fix: process_transcript staleness guard).
+
+### Added
+- feat(fleet): capability-based routing discovers loaded models and selects healthy text, vision, and long-context candidates from an external manifest.
+
+### Added
+- feat(jobs): persist per-step progress and enable idempotent retries that resume blocked snapshot or slide processing.
+
+### Added
+- feat(backups): create signed NAS backup bundles and verify recovery with isolated restore drills and measured RPO/RTO evidence.
+
+### Security
+- security(release): require Cosign-verified immutable image digests in CI, Ansible, and the direct deployment helper.
+
+### Fixed
+- fix(migrations): create the PostgreSQL job-step enum only once during Alembic upgrade.
