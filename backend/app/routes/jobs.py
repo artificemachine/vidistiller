@@ -232,10 +232,17 @@ def create_job(
             # Legacy safety: if nothing was published (no outbox row or Redis
             # unavailable), fall back to the direct .delay() path so a
             # pre-outbox deployment never silently drops jobs. The task
-            # itself remains idempotent via claim_step.
+            # itself remains idempotent via claim_step. A Redis outage here
+            # must not fail the already-committed job creation.
             if not published:
-                from app.tasks import process_transcript
-                process_transcript.delay(new_job.id)
+                try:
+                    from app.tasks import process_transcript
+                    process_transcript.delay(new_job.id)
+                except Exception as _delay_exc:
+                    logger.warning(
+                        "Job %s committed but dispatch failed (Redis down?): %s — outbox sweep will retry",
+                        new_job.job_id, _delay_exc,
+                    )
         else:
             logger.info(
                 "Job %s queued (admission): %s", new_job.job_id, outcome.queue_reason
