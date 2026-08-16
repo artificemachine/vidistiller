@@ -1,0 +1,91 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "title": "API readiness",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "probe_success{job=\"vidistiller\"}",
+          "legendFormat": "ready"
+        }
+      ]
+    },
+    {
+      "title": "SQLAlchemy pool checked-out",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "vidistiller_pool_checked_out",
+          "legendFormat": "checked_out"
+        },
+        {
+          "expr": "vidistiller_pool_wait_now",
+          "legendFormat": "waiting"
+        }
+      ]
+    },
+    {
+      "title": "Pool timeouts (rate)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(vidistiller_pool_timeout_total[5m])",
+          "legendFormat": "timeouts/s"
+        }
+      ]
+    },
+    {
+      "title": "Idle-in-transaction aborts",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(vidistiller_db_idle_in_tx_abort_total[5m])",
+          "legendFormat": "aborts/s"
+        }
+      ]
+    },
+    {
+      "title": "Request latency buckets",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(vidistiller_latency_bucket_lt_1[5m])",
+          "legendFormat": "<1s"
+        },
+        {
+          "expr": "rate(vidistiller_latency_bucket_ge_5[5m])",
+          "legendFormat": ">=5s"
+        }
+      ]
+    },
+    {
+      "title": "Auth failures",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(vidistiller_auth_failures_total[5m])",
+          "legendFormat": "401/s"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["vidistiller"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "title": "Vidistiller operations",
+  "uid": "vidistiller-ops",
+  "version": 1
+}
