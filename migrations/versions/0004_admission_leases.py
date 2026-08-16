@@ -120,6 +120,7 @@ def upgrade() -> None:
         sa.Column("generation", sa.Integer(), nullable=True),
         sa.Column("detail", sa.String(length=512), nullable=True),
         sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.ForeignKeyConstraint(["slot_id"], ["resource_slots.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_lease_events_slot_created", "lease_events", ["slot_id", "created_at"])

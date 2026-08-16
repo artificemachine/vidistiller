@@ -103,8 +103,34 @@ class AdmissionOutcome:
 
 
 def _ensure_counter(db: Session, key: str, limit: int) -> AdmissionCounter:
+    """Return the counter row, creating it race-safely if absent.
+
+    Concurrent admissions can both miss the row and try to insert; the
+    INSERT ... ON CONFLICT DO NOTHING / INSERT OR IGNORE swallows the
+    loser's insert, after which a fresh SELECT returns the winner's row.
+    """
     counter = db.get(AdmissionCounter, key)
-    if counter is None:
+    if counter is not None:
+        return counter
+    if db.bind.dialect.name == "postgresql":
+        db.execute(
+            text(
+                "INSERT INTO admission_counters (key, active, \"limit\", updated_at) "
+                "VALUES (:k, 0, :l, now()) ON CONFLICT (key) DO NOTHING"
+            ),
+            {"k": key, "l": limit},
+        )
+    else:
+        db.execute(
+            text(
+                "INSERT OR IGNORE INTO admission_counters (key, active, \"limit\") "
+                "VALUES (:k, 0, :l)"
+            ),
+            {"k": key, "l": limit},
+        )
+    db.flush()
+    counter = db.get(AdmissionCounter, key)
+    if counter is None:  # pragma: no cover - defensive
         counter = AdmissionCounter(key=key, active=0, limit=limit)
         db.add(counter)
         db.flush()
@@ -143,12 +169,19 @@ def admit_or_queue_job(
             text("SELECT 1 FROM admission_counters WHERE key = :k FOR UPDATE"),
             {"k": user_counter.key},
         )
+        # The ORM attributes were loaded before the locks; refresh so the
+        # limit checks below see the post-lock (latest committed) values.
+        db.refresh(global_counter, ["active", "limit"])
+        db.refresh(user_counter, ["active", "limit"])
     else:
         # SQLite serializes writers with a database-wide lock; the counter
         # updates below are the atomic step. (Test suite runs on SQLite.)
         db.flush()
 
-    # 2. Verify limits.
+    # 2. Verify limits against the DURABLE counter row values (the row is the
+    # authority once created; settings only seed it at creation and the
+    # startup sweep reconciles). This keeps tests and operator edits
+    # deterministic regardless of when settings were first cached.
     if global_counter.limit > 0 and global_counter.active >= global_counter.limit:
         _write_admission(db, job.id, AdmissionState.QUEUED, "global active-job limit reached")
         return AdmissionOutcome(
@@ -217,6 +250,29 @@ def _write_admission(
             admission.queued_at = None
         if state in (AdmissionState.FINISHED, AdmissionState.FAILED):
             admission.finished_at = now
+
+
+def sync_admission_limits(db: Session) -> None:
+    """Reconcile counter row limits from settings (startup sweep).
+
+    The row is the runtime authority; this makes operator config changes
+    effective for NEW limits without touching active counts. Called from
+    the API startup maintenance sweep.
+    """
+    settings = get_settings().admission
+    for key, limit in (
+        (GLOBAL_COUNTER_KEY, settings.global_active_limit),
+        (user_counter_key(0), settings.per_user_active_limit),
+    ):
+        _ensure_counter(db, key, limit)
+        db.execute(
+            text(
+                "UPDATE admission_counters SET \"limit\" = :l, updated_at = now() "
+                "WHERE key = :k"
+            ),
+            {"k": key, "l": limit},
+        )
+    db.commit()
 
 
 def finish_job_admission(db: Session, job_id: int, *, failed: bool = False) -> None:

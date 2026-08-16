@@ -130,3 +130,105 @@ def test_alembic_head_matches_models(migrated_engine):
         f"({len(unexpected)} unexpected item(s)): {unexpected}\n"
         f"Run `alembic revision --autogenerate` and commit the result."
     )
+
+
+def test_downgrade_reupgrade_rehearsal(migrated_engine):
+    """Upgrade → downgrade → re-upgrade with representative data (Review
+    Round 1 Finding 18 / plan §4: migration upgrade/rollback rehearsal).
+
+    Seeds users, jobs, queue rows, active/expired leases and role grants,
+    then downgrades to 0003 and back to head, asserting both directions
+    succeed and the re-upgraded schema still holds the seeded rows.
+    """
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import text
+
+    with migrated_engine.connect() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO users (username, email, password_hash, is_active, token_version) "
+                "VALUES ('rehearsal', 'rehearsal@test.local', 'x', true, 0)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO processing_jobs (job_id, status, user_id) "
+                "VALUES ('rehearsal-job-1', 'pending', "
+                "(SELECT id FROM users WHERE username='rehearsal'))"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO admission_counters (key, active, \"limit\") VALUES ('global', 1, 4)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO resource_slots (sidecar_id, slot_index, enabled, state, generation) "
+                "VALUES ('primary', 0, true, 'leased', 3)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO user_roles (user_id, role, granted_by) "
+                "VALUES ((SELECT id FROM users WHERE username='rehearsal'), 'operator', 'tests')"
+            )
+        )
+        conn.commit()
+
+    cfg = Config("alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
+
+    command.downgrade(cfg, "0003_job_steps")
+    # The downgrade must drop the new tables (their rows are scheduler
+    # ephemera; destructive downgrade is a documented separate action).
+    with migrated_engine.connect() as conn:
+        exists = conn.execute(
+            text("SELECT to_regclass('public.resource_slots')")
+        ).scalar()
+        assert exists is None
+        # 0003-era data survives the downgrade.
+        user_count = conn.execute(
+            text("SELECT count(*) FROM users WHERE username='rehearsal'")
+        ).scalar()
+        assert user_count == 1
+
+    command.upgrade(cfg, "head")
+    with migrated_engine.connect() as conn:
+        # 0003-era data still present after re-upgrade.
+        job_count = conn.execute(
+            text("SELECT count(*) FROM processing_jobs WHERE job_id='rehearsal-job-1'")
+        ).scalar()
+        assert job_count == 1
+        # New tables recreated empty and usable.
+        conn.execute(
+            text(
+                "INSERT INTO admission_counters (key, active, \"limit\") VALUES ('global', 1, 4)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO resource_slots (sidecar_id, slot_index, enabled, state, generation) "
+                "VALUES ('primary', 0, true, 'leased', 3)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO user_roles (user_id, role, granted_by) "
+                "VALUES ((SELECT id FROM users WHERE username='rehearsal'), 'operator', 'tests')"
+            )
+        )
+        conn.commit()
+        slot_state = conn.execute(
+            text("SELECT state FROM resource_slots WHERE sidecar_id='primary'")
+        ).scalar()
+        assert slot_state == "leased"
+        active = conn.execute(
+            text("SELECT active FROM admission_counters WHERE key='global'")
+        ).scalar()
+        assert active == 1
+        role = conn.execute(
+            text("SELECT role FROM user_roles WHERE role='operator'")
+        ).scalar()
+        assert role == "operator"

@@ -117,12 +117,14 @@ async def lifespan(app: FastAPI):
     # crash gap), and seed the sidecar registry from operator configuration.
     try:
         from app.db.session import SessionLocal
+        from app.services.admission import sync_admission_limits
         from app.services.dispatch import sweep_outbox
         from app.services.lease import reap_expired_slots, reset_quarantined_slots
         from app.services.sidecar import seed_sidecars
 
         db = SessionLocal()
         try:
+            sync_admission_limits(db)
             published = sweep_outbox(db)
             if published:
                 logger.info("✅ Outbox sweep published %d pending dispatch(es)", published)
