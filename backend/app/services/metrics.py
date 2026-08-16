@@ -60,7 +60,7 @@ def record_latency(seconds: float) -> None:
     with _lock:
         for bound in (0.05, 0.1, 0.5, 1, 5):
             if seconds < bound:
-                _metrics[f"latency_bucket_lt_{bound}"] += 1
+                _metrics[f"latency_bucket_lt_{str(bound).replace('.', '_')}"] += 1
                 break
         else:
             _metrics["latency_bucket_ge_5"] += 1

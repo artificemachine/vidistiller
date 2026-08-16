@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
 from app.db.session import Base, get_db
+from app.routes.media import get_media_db
 from app.db.models import (
     ProcessingJob, ProcessingStatus, Video, Transcript,
     TranscriptSegment, Snapshot, Document, JobLog, LogLevel, User,
@@ -63,9 +64,13 @@ def test_db(test_engine):
             db.close()
 
     app.dependency_overrides[get_db] = _override
+    # WP1: media routes use a dedicated short-lived session that is closed
+    # before the response streams; point it at the test database too.
+    app.dependency_overrides[get_media_db] = _override
     yield session
     session.close()
     app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(get_media_db, None)
 
 
 @pytest.fixture()

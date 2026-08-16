@@ -24,17 +24,34 @@ short-lived explicit session that rolls back and closes before
 """
 
 from pathlib import Path
-from typing import Optional
+from typing import Generator, Optional
 
-from fastapi import APIRouter, Cookie, Header, Response
+from fastapi import APIRouter, Cookie, Depends, Header, Response
 from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.exceptions import ResourceNotFoundException
 from app.db.models import ProcessingJob
-from app.db.session import db_session
+from app.db.session import SessionLocal
 
 router = APIRouter(tags=["media"])
+
+
+def get_media_db() -> Generator[Session, None, None]:
+    """Short-lived session for media authorization (WP1).
+
+    Deliberately NOT the shared ``get_db`` dependency: its teardown runs only
+    after the response body has streamed, which is exactly what pinned a
+    connection per media request during the 2026-08-16 incident. Media routes
+    close this session explicitly before returning ``FileResponse``; the
+    teardown close below is a safety net for error paths.
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 async def _resolve_media_file(
@@ -44,49 +61,48 @@ async def _resolve_media_file(
     x_api_key: Optional[str],
     authorization: Optional[str],
     auth_token: Optional[str],
+    db: Session,
 ) -> Path:
     """Authenticate the caller, verify ownership, and resolve the file.
 
-    Runs entirely inside a short-lived ``db_session`` that is closed before
-    returning, so no connection is held open while the file streams. The
-    resolved ``Path`` is immutable once the session closes — no ORM objects
-    cross the boundary.
+    The caller (route) closes ``db`` before returning ``FileResponse``, so no
+    connection is held open while the file streams. The resolved ``Path`` is
+    immutable once the session closes — no ORM objects cross the boundary.
 
     Every failure raises NotFoundException so the response cannot be used to
     tell "job does not exist" apart from "job belongs to someone else".
     """
     from app.core.api_key_auth import get_current_user
 
-    with db_session() as db:
-        if x_api_key or authorization:
-            user = await get_current_user(x_api_key=x_api_key, authorization=authorization, db=db)
-        elif auth_token:
-            user = await get_current_user(
-                x_api_key=None, authorization=f"Bearer {auth_token}", db=db
-            )
-        else:
-            from app.exceptions import AuthenticationException
-            raise AuthenticationException("Not authenticated")
-
-        job = (
-            db.query(ProcessingJob)
-            .filter(ProcessingJob.job_id == job_id, ProcessingJob.user_id == user.id)
-            .first()
+    if x_api_key or authorization:
+        user = await get_current_user(x_api_key=x_api_key, authorization=authorization, db=db)
+    elif auth_token:
+        user = await get_current_user(
+            x_api_key=None, authorization=f"Bearer {auth_token}", db=db
         )
-        if job is None:
-            raise ResourceNotFoundException("Media")
+    else:
+        from app.exceptions import AuthenticationException
+        raise AuthenticationException("Not authenticated")
 
-        settings = get_settings()
-        data_dir = settings.storage.data_dir or str(Path(__file__).resolve().parents[2] / "data")
-        base = (Path(data_dir) / kind / job_id).resolve()
+    job = (
+        db.query(ProcessingJob)
+        .filter(ProcessingJob.job_id == job_id, ProcessingJob.user_id == user.id)
+        .first()
+    )
+    if job is None:
+        raise ResourceNotFoundException("Media")
 
-        candidate = (base / filename).resolve()
-        # Containment check catches traversal that survived path normalisation,
-        # including a symlink inside the job directory pointing outside it.
-        if not candidate.is_relative_to(base) or not candidate.is_file():
-            raise ResourceNotFoundException("Media")
+    settings = get_settings()
+    data_dir = settings.storage.data_dir or str(Path(__file__).resolve().parents[2] / "data")
+    base = (Path(data_dir) / kind / job_id).resolve()
 
-        return candidate
+    candidate = (base / filename).resolve()
+    # Containment check catches traversal that survived path normalisation,
+    # including a symlink inside the job directory pointing outside it.
+    if not candidate.is_relative_to(base) or not candidate.is_file():
+        raise ResourceNotFoundException("Media")
+
+    return candidate
 
 
 def _media_response(path: Path) -> FileResponse:
@@ -108,10 +124,16 @@ async def get_snapshot(
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     authorization: Optional[str] = Header(None),
     auth_token: Optional[str] = Cookie(None),
+    db: Session = Depends(get_media_db),
 ) -> Response:
     path = await _resolve_media_file(
-        "snapshots", job_id, filename, x_api_key, authorization, auth_token
+        "snapshots", job_id, filename, x_api_key, authorization, auth_token, db
     )
+    # WP1: end the read-only transaction and release the connection BEFORE
+    # the response body streams. The dependency teardown close is a safety
+    # net; this is the authoritative close.
+    db.rollback()
+    db.close()
     return _media_response(path)
 
 
@@ -122,8 +144,12 @@ async def get_slide(
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     authorization: Optional[str] = Header(None),
     auth_token: Optional[str] = Cookie(None),
+    db: Session = Depends(get_media_db),
 ) -> Response:
     path = await _resolve_media_file(
-        "slides", job_id, filename, x_api_key, authorization, auth_token
+        "slides", job_id, filename, x_api_key, authorization, auth_token, db
     )
+    # WP1: close before streaming (see get_snapshot).
+    db.rollback()
+    db.close()
     return _media_response(path)
