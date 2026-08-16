@@ -16,6 +16,7 @@ from app.routes.snapshots import router as snapshots_router
 from app.routes.health import router as health_router
 from app.routes.settings import router as settings_router
 from app.routes.ops import router as ops_router
+from app.routes.sidecars import router as sidecars_router
 
 # Create combined router
 router = APIRouter()
@@ -28,6 +29,7 @@ router.include_router(snapshots_router)
 router.include_router(jobs_router)
 router.include_router(health_router)
 router.include_router(ops_router)
+router.include_router(sidecars_router)
 
 # Export the combined router
 __all__ = ["router"]

@@ -7,6 +7,14 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush }),
 }));
 
+// SidecarSelector is rendered inside the form; keep its data fetch deterministic.
+vi.mock('@/lib/api', () => ({
+  default: { get: vi.fn() },
+}));
+vi.mock('swr', () => ({
+  default: () => ({ data: [], error: undefined }),
+}));
+
 import VideoSubmission from '@/components/VideoSubmission';
 
 function jsonResponse(status: number, body: unknown) {

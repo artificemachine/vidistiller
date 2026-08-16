@@ -34,4 +34,23 @@ describe('JobStepsProgress', () => {
     const { container } = render(<JobStepsProgress steps={[]} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('renders overall progress and ETA range when present', () => {
+    render(
+      <JobStepsProgress
+        steps={[]}
+        overallProgress={64}
+        eta={{ eta_low_seconds: 120, eta_high_seconds: 360, confidence: 0.82 }}
+      />
+    );
+    expect(screen.getByTestId('overall-progress')).toHaveTextContent('64%');
+    expect(screen.getByTestId('eta-range')).toHaveTextContent('eta 2m–6m');
+    expect(screen.getByTestId('eta-range')).toHaveTextContent('high confidence');
+  });
+
+  it('renders nothing extra when overall progress and eta are absent', () => {
+    render(<JobStepsProgress steps={[]} overallProgress={null} eta={undefined} />);
+    expect(screen.queryByTestId('overall-progress')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('eta-range')).not.toBeInTheDocument();
+  });
 });

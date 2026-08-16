@@ -79,6 +79,10 @@ interface JobDetail {
     image_height?: number;
   }>;
   steps?: JobStep[];
+  progress?: number | null;
+  eta_low_seconds?: number | null;
+  eta_high_seconds?: number | null;
+  confidence?: number | null;
 }
 
 function useIsMobile() {
@@ -516,6 +520,21 @@ export default function JobDetail() {
 
   const showPlayer = job.status === 'completed' && job.video_url;
 
+  // Progress/ETA are optional today — the component renders them only when
+  // the backend emits the fields (graceful when absent).
+  const jobStepsProps = {
+    steps: job.steps || [],
+    onRetry: retryStep,
+    overallProgress: job.progress ?? null,
+    eta: job.eta_low_seconds != null || job.eta_high_seconds != null || job.confidence != null
+      ? {
+          eta_low_seconds: job.eta_low_seconds ?? null,
+          eta_high_seconds: job.eta_high_seconds ?? null,
+          confidence: job.confidence ?? null,
+        }
+      : undefined,
+  };
+
   // Sidebar content: progress bar, summary, or transcript
   const sidebarSectionCount = (() => {
     const text = job?.transcripts[0]?.full_text || '';
@@ -656,7 +675,7 @@ export default function JobDetail() {
         }
       />
       <div className="mt-4 w-full max-w-md">
-        <JobStepsProgress steps={job.steps || []} onRetry={retryStep} />
+        <JobStepsProgress {...jobStepsProps} />
       </div>
     </div>
   );
@@ -712,7 +731,7 @@ export default function JobDetail() {
                   : 'waiting to start processing'
             }
           />
-          <JobStepsProgress steps={job.steps || []} onRetry={retryStep} />
+          <JobStepsProgress {...jobStepsProps} />
         </div>
       )}
       {isSlideMode ? (
@@ -789,7 +808,7 @@ export default function JobDetail() {
                     : 'waiting to start processing'
             }
           />
-          <JobStepsProgress steps={job.steps || []} onRetry={retryStep} />
+          <JobStepsProgress {...jobStepsProps} />
         </div>
 
         {showLogs && (

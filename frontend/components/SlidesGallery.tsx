@@ -32,6 +32,21 @@ export default function SlidesGallery({
 }: SlidesGalleryProps) {
   const [internalIndex, setInternalIndex] = useState(0);
 
+  // Preview-dimension hook must run unconditionally (rules-of-hooks), so it
+  // is called before the empty-state early return using a safe index.
+  const previewRawIndex = externalSelectedIndex !== undefined ? externalSelectedIndex : internalIndex;
+  const previewSafeIndex =
+    slides.length === 0
+      ? 0
+      : previewRawIndex < 0
+        ? slides.length - 1
+        : Math.min(previewRawIndex, slides.length - 1);
+  const previewCurrent = slides[previewSafeIndex];
+  const { previewAspect, onImageLoad } = useGalleryPreview(
+    previewCurrent?.image_width,
+    previewCurrent?.image_height
+  );
+
   if (!slides || slides.length === 0) {
     return (
       <div className="text-gray-500 dark:text-gray-400 text-sm">
@@ -43,11 +58,6 @@ export default function SlidesGallery({
   const rawIndex = externalSelectedIndex !== undefined ? externalSelectedIndex : internalIndex;
   const safeIndex = rawIndex < 0 ? slides.length - 1 : Math.min(rawIndex, slides.length - 1);
   const current = slides[safeIndex];
-
-  // Preview aspect ratio follows the backend-captured frame shape (portrait
-  // sources must not be forced into 16:9); natural-size fallback for legacy
-  // rows without captured dims. See frontend/hooks/useGalleryPreview.ts.
-  const { previewAspect, onImageLoad } = useGalleryPreview(current.image_width, current.image_height);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
   const baseUrl = apiUrl.replace(/\/api\/?$/, '');

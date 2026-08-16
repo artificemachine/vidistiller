@@ -215,7 +215,7 @@ export default function NavAuthButton() {
                 />
                 {confirmOverwrite ? (
                   <div className="flex flex-col gap-1">
-                    <p className="text-[11px] text-yellow-400">"{saveName.trim()}" already exists. overwrite?</p>
+                    <p className="text-[11px] text-yellow-400">&quot;{saveName.trim()}&quot; already exists. overwrite?</p>
                     <div className="flex gap-1">
                       <button
                         onClick={() => handleSave(true)}

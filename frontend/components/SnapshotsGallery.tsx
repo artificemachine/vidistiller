@@ -22,6 +22,21 @@ interface SnapshotsGalleryProps {
 export default function SnapshotsGallery({ snapshots, onDelete, externalSelectedIndex, onSelectedIndexChange }: SnapshotsGalleryProps) {
   const [internalIndex, setInternalIndex] = useState(0);
 
+  // Preview-dimension hook must run unconditionally (rules-of-hooks), so it
+  // is called before the empty-state early return using a safe index.
+  const previewRawIndex = externalSelectedIndex !== undefined ? externalSelectedIndex : internalIndex;
+  const previewSafeIndex =
+    snapshots.length === 0
+      ? 0
+      : previewRawIndex < 0
+        ? snapshots.length - 1
+        : Math.min(previewRawIndex, snapshots.length - 1);
+  const previewCurrent = snapshots[previewSafeIndex];
+  const { previewAspect, onImageLoad } = useGalleryPreview(
+    previewCurrent?.image_width,
+    previewCurrent?.image_height
+  );
+
   if (!snapshots || snapshots.length === 0) {
     return <div className="text-gray-500 dark:text-gray-400 text-sm">no snapshots captured yet. use the player above to capture frames.</div>;
   }
@@ -30,11 +45,6 @@ export default function SnapshotsGallery({ snapshots, onDelete, externalSelected
   const rawIndex = externalSelectedIndex !== undefined ? externalSelectedIndex : internalIndex;
   const safeIndex = rawIndex < 0 ? snapshots.length - 1 : Math.min(rawIndex, snapshots.length - 1);
   const current = snapshots[safeIndex];
-
-  // Preview aspect ratio follows the backend-captured frame shape (portrait
-  // sources must not be forced into 16:9); natural-size fallback for legacy
-  // rows without captured dims. See frontend/hooks/useGalleryPreview.ts.
-  const { previewAspect, onImageLoad } = useGalleryPreview(current.image_width, current.image_height);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
   // Strip /api suffix if present to get base URL for static files
