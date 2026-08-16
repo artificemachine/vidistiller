@@ -8,6 +8,7 @@ YouTube video transcripts.
 import logging
 import os
 import re
+import threading
 from math import ceil
 
 from celery import Celery
@@ -55,14 +56,120 @@ celery_app = Celery(
     backend=redis_url,
 )
 
+# WP2: explicit broker visibility/redelivery semantics. The visibility
+# timeout must exceed the longest bounded task (slide detection) so a
+# still-running delivery is not redelivered while active; the task-level
+# time limits bound the worst case. Late-ack + prefetch 1 and the existing
+# claim-step idempotency protections are preserved.
+_broker_visibility_seconds = int(os.getenv("CELERY_VISIBILITY_TIMEOUT", "900"))
+
 celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
     task_track_started=True,
     task_acks_late=True,
+    task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
+    broker_transport_options={
+        "visibility_timeout": _broker_visibility_seconds,
+    },
+    # Explicit per-task hard limits (bounded processing, no runaway jobs).
+    task_time_limit=int(os.getenv("CELERY_TASK_TIME_LIMIT", "7200")),
+    task_soft_time_limit=int(os.getenv("CELERY_TASK_SOFT_TIME_LIMIT", "6600")),
+    # WP2: align default CPU concurrency with the two-CPU container quota.
+    worker_concurrency=int(os.getenv("CELERY_WORKER_CONCURRENCY", "2")),
 )
+
+
+def _mint_exec_uuid() -> str:
+    """Unique per-incarnation execution UUID (fencing, Review Round 1 Finding 5).
+
+    Never use the Celery request.id as a fencing token: it is preserved
+    across redelivery, so a stale delivery could otherwise re-validate an
+    expired execution. Callers mint one UUID per worker incarnation and
+    carry it on claims, heartbeats, releases and completions.
+    """
+    import uuid as _uuid
+
+    return str(_uuid.uuid4())
+
+
+def _finish_admission_for_job(db, job_id: int, *, failed: bool = False) -> None:
+    """Release admission counters exactly once for a terminal job (WP2)."""
+    try:
+        from app.services.admission import finish_job_admission
+
+        finish_job_admission(db, job_id, failed=failed)
+    except Exception as exc:
+        logger.warning("admission finish failed for job %s: %s", job_id, exc)
+        db.rollback()
+
+
+def _mark_stage_delivered(db, job_id: int, stage: str) -> None:
+    """Mark the newest outbox row for (job, stage) delivered (WP2)."""
+    try:
+        from app.db.models import TaskOutbox
+        from app.services.admission import mark_outbox_delivered
+
+        row = (
+            db.query(TaskOutbox)
+            .filter(
+                TaskOutbox.job_id == job_id,
+                TaskOutbox.stage == stage,
+                TaskOutbox.state.in_(("pending", "published")),
+            )
+            .order_by(TaskOutbox.id.desc())
+            .first()
+        )
+        if row is not None:
+            mark_outbox_delivered(db, row.id)
+    except Exception as exc:
+        logger.debug("outbox delivered mark failed for job %s: %s", job_id, exc)
+        db.rollback()
+
+
+def _resolve_sidecar_for_job(db, job) -> tuple:
+    """Resolve the sidecar for a job: preference first, then routed capacity.
+
+    Returns (telemetry|None, capabilities). None when no sidecar is
+    compatible/available — the caller decides between queueing visibly and
+    running without a lease (sequential fallback).
+    """
+    from app.services.sidecar import inventory, routed_sidecar
+
+    preference = getattr(job, "sidecar_preference", None)
+    if preference and preference != "auto":
+        return None, ()
+    telemetry_rows = inventory(db)
+    cap = ("text",)
+    chosen = routed_sidecar(db, telemetry_rows, preference=preference, capabilities=cap)
+    if chosen is None and preference is None:
+        chosen = routed_sidecar(db, telemetry_rows, capabilities=cap)
+    return chosen, cap
+
+
+def _lease_slot_for_job(db, job, exec_uuid: str):
+    """Acquire a sidecar slot for a job under its fencing token (WP2)."""
+    from app.services.lease import acquire_slot
+
+    preference = getattr(job, "sidecar_preference", None)
+    if preference and preference != "auto":
+        return acquire_slot(db, job, exec_uuid=exec_uuid, preferred_sidecar=preference)
+    return acquire_slot(db, job, exec_uuid=exec_uuid)
+
+
+def _release_slot_if_held(db, slot, exec_uuid: str) -> None:
+    """Release a held slot exactly once (idempotent under fencing triple)."""
+    if slot is None:
+        return
+    try:
+        from app.services.lease import release_slot
+
+        release_slot(db, slot.id, exec_uuid, slot.generation)
+    except Exception as exc:
+        logger.warning("slot release failed for slot %s: %s", slot.id, exc)
+        db.rollback()
 
 
 # ==============================================================================
@@ -508,6 +615,8 @@ def process_transcript(self, job_id: int):
                 job.status = ProcessingStatus.FAILED
                 job.error_message = f"Unexpected error: {str(e)[:500]}"
                 db.commit()
+                _finish_admission_for_job(db, job_id, failed=True)
+                db.commit()
         except Exception:
             pass
         raise self.retry(exc=e, countdown=30)
@@ -885,10 +994,24 @@ def process_snapshots(self, job_id: int):
         _data_dir = get_settings().storage.data_dir or str(
             Path(__file__).resolve().parent.parent / "data"
         )
+        exec_uuid = _mint_exec_uuid()
+        _mark_stage_delivered(db, job_id, "snapshots")
+
+        def _progress(percent: int) -> None:
+            try:
+                from app.services.job_steps import set_step_progress
+
+                set_step_progress(db, job.id, "snapshots", claimed.claim_token, percent)
+                db.commit()
+            except Exception:
+                db.rollback()
+
         frames = SnapshotService().extract_frames(
             job.video_file_path,
             output_dir=str(Path(_data_dir) / "snapshots" / job.job_id),
+            progress_cb=lambda done, total: _progress(5 + int(done / max(total, 1) * 80)),
         )
+        _progress(90)
         snapshots = SnapshotService().save_snapshots(db, job.id, frames)
         complete_step(
             db,
@@ -901,6 +1024,8 @@ def process_snapshots(self, job_id: int):
         from app.db.models import ProcessingMode, ProcessingStatus
         if job.processing_mode != ProcessingMode.SLIDE_AWARE.value:
             job.status = ProcessingStatus.COMPLETED
+            db.commit()
+            _finish_admission_for_job(db, job_id)
             db.commit()
         return {"status": "completed", "count": len(snapshots)}
     except Exception as exc:
@@ -933,6 +1058,10 @@ def process_slides(self, job_id: int):
 
     db = SessionLocal()
     slide_claimed = False
+    slot = None
+    exec_uuid = None
+    heartbeat_stop = None
+    heartbeat_thread = None
     try:
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if not job:
@@ -978,6 +1107,8 @@ def process_slides(self, job_id: int):
                 from app.services.job_steps import fail_step
                 fail_step(db, job.id, "slides", self.request.id, "No video file")
             db.commit()
+            _finish_admission_for_job(db, job_id)
+            db.commit()
             return {"error": "No video file"}
 
         # Mark as processing and store Celery task ID for cancellation
@@ -985,6 +1116,7 @@ def process_slides(self, job_id: int):
         job.celery_task_id = self.request.id
         db.commit()
         _add_log(db, job_id, "Starting slide detection pipeline...", "info", "slide_detect")
+        _mark_stage_delivered(db, job_id, "slides")
 
         def cancel_check() -> bool:
             return _is_slide_cancelled(db, job_id)
@@ -992,6 +1124,52 @@ def process_slides(self, job_id: int):
         provider, llm_model = _resolve_job_llm(db, job)
         if provider is None:
             _add_log(db, job_id, "No LLM provider available; slide disambiguation will be skipped", "warning", "slide_detect")
+
+        # WP2: acquire a sidecar slot under a fresh per-incarnation fencing
+        # UUID, heartbeat it independently of the blocking pipeline, and
+        # release exactly once at the end. A lost lease is logged but never
+        # kills in-flight work (Review Round 1 Finding 5); the reaper's
+        # quarantine window prevents overcommit.
+        exec_uuid = _mint_exec_uuid()
+        slot = _lease_slot_for_job(db, job, exec_uuid)
+        if slot is not None:
+            _add_log(
+                db, job_id,
+                f"Acquired sidecar slot {slot.sidecar_id}#{slot.slot_index} (gen {slot.generation})",
+                "info", "slide_lease",
+            )
+
+        heartbeat_stop = threading.Event()
+
+        def _heartbeat_loop() -> None:
+            from app.db.session import SessionLocal as _SL
+            from app.services.lease import heartbeat_slot
+
+            interval = get_settings().admission.heartbeat_interval_seconds
+            while not heartbeat_stop.wait(interval):
+                try:
+                    hb_db = _SL()
+                    try:
+                        ok = heartbeat_slot(
+                            hb_db, slot.id, exec_uuid, slot.generation
+                        )
+                        hb_db.commit()
+                        if not ok:
+                            logger.error(
+                                "Slot %s heartbeat rejected (stale fence); work continues conservatively",
+                                slot.id,
+                            )
+                    finally:
+                        hb_db.close()
+                except Exception as exc:
+                    logger.warning("slot heartbeat failed: %s", exc)
+
+        heartbeat_thread = None
+        if slot is not None:
+            heartbeat_thread = threading.Thread(
+                target=_heartbeat_loop, name=f"lease-hb-{job_id}", daemon=True
+            )
+            heartbeat_thread.start()
 
         def _finish(slide_status: str) -> None:
             """Mark the job COMPLETED with the given slide_status and clear the task ID."""
@@ -1006,6 +1184,8 @@ def process_slides(self, job_id: int):
                         complete_step(db, j.id, "slides", self.request.id)
                     else:
                         fail_step(db, j.id, "slides", self.request.id, slide_status)
+                db.commit()
+                _finish_admission_for_job(db, j.id)
                 db.commit()
 
         service = SlideDetectionService()
@@ -1037,6 +1217,16 @@ def process_slides(self, job_id: int):
         return {"error": str(e)}
 
     finally:
+        if heartbeat_thread is not None:
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=5)
+        if slot is not None and exec_uuid is not None:
+            try:
+                _release_slot_if_held(db, slot, exec_uuid)
+                db.commit()
+            except Exception as exc:
+                logger.warning("slot release in finally failed: %s", exc)
+                db.rollback()
         db.close()
 
 

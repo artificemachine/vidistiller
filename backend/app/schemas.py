@@ -395,6 +395,24 @@ class JobCreate(BaseModel):
         default=False,
         description="Bypass the duplicate-video check and create the job anyway",
     )
+    sidecar_preference: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="Preferred sidecar (registered id) or 'auto'. Server-side registry only — never a URL (WP3).",
+    )
+
+    @field_validator("sidecar_preference")
+    @classmethod
+    def normalize_sidecar_preference(cls, v):
+        if v is None or v.strip().lower() in ("", "auto"):
+            return None
+        pref = v.strip()
+        # Registry ids are alphanumeric words with dashes/underscores only.
+        if "://" in pref or "/" in pref or not all(
+            c.isalnum() or c in "-_" for c in pref
+        ):
+            raise ValueError("sidecar_preference must be 'auto' or a registered sidecar id")
+        return pref
 
     @field_validator("video_url")
     @classmethod
@@ -800,3 +818,47 @@ class ValidationErrorResponse(BaseModel):
             }
         }
     )
+
+
+# ==============================================================================
+# OPS SCHEMAS (WP4) — sanitized, allowlisted operator DTOs
+# ==============================================================================
+
+class OperatorJobRow(BaseSchema):
+    """One row of the global operations view.
+
+    Allowlisted by construction: owner identity, status, admission/queue
+    state, sidecar, elapsed time, progress. Never includes source URLs,
+    transcripts, output paths, tokens or credentials (Review Round 1
+    Finding 11).
+    """
+    job_id: str = Field(..., description="Public job UUID")
+    owner_id: Optional[int] = Field(None, description="Job owner user id (operators only)")
+    owner_username: Optional[str] = Field(None, description="Job owner username (operators only)")
+    status: str = Field(..., description="Processing status")
+    error_message: Optional[str] = Field(None, description="Sanitized failure category (not raw error)")
+    admission_state: str = Field(..., description="queued/admitted/finished/failed")
+    queue_reason: Optional[str] = Field(None, description="Why the job is queued, when queued")
+    queue_position: Optional[int] = Field(None, description="1-based position in the queue when queued")
+    sidecar_id: Optional[str] = Field(None, description="Assigned sidecar registered id")
+    model: Optional[str] = Field(None, description="Assigned model/sidecar label")
+    elapsed_seconds: Optional[float] = Field(None, description="Elapsed time (or total for terminal jobs)")
+    progress: Optional[int] = Field(None, description="Overall monotonic progress 0..100")
+    processing_mode: Optional[str] = Field(None, description="standard or slide_aware")
+    created_at: Optional[datetime] = Field(None, description="Job creation time")
+
+
+class SidecarStatusRow(BaseSchema):
+    """Live sidecar telemetry for operators (WP3)."""
+    registered_id: str
+    label: str
+    healthy: bool
+    served_models: List[str] = Field(default_factory=list)
+    declared_model: Optional[str] = None
+    running_requests: int = 0
+    waiting_requests: int = 0
+    reserved_slots: int = 0
+    total_slots: int = 0
+    vram_used_mib: Optional[int] = None
+    vram_total_mib: Optional[int] = None
+    stale: bool = False

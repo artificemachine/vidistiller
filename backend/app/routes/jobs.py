@@ -184,6 +184,8 @@ def create_job(
                 )
 
         processing_mode = ProcessingMode.SLIDE_AWARE.value if job_data.is_slide_mode else ProcessingMode.STANDARD.value
+        from app.services.sidecar import validate_sidecar_preference
+        sidecar_pref = validate_sidecar_preference(db, job_data.sidecar_preference)
         new_job = ProcessingJob(
             job_id=str(uuid.uuid4()),
             status=ProcessingStatus.PENDING,
@@ -191,6 +193,7 @@ def create_job(
             source_type=source_type.value,
             processing_mode=processing_mode,
             caption_language=job_data.caption_language,
+            sidecar_preference=sidecar_pref,
             user_id=current_user.id,
         )
 
@@ -203,11 +206,40 @@ def create_job(
             extract_snapshots=job_data.extract_snapshots,
             is_slide_mode=job_data.is_slide_mode,
         )
+        # WP2: admit or queue atomically in the same transaction that creates
+        # the job. A job that cannot start is queued with a visible reason —
+        # it is never overcommitted nor failed ambiguously. When admitted, an
+        # outbox dispatch row is written; it is published to Redis only after
+        # commit (durable at-least-once, Review Round 1 Finding 7).
+        from app.services.admission import admit_or_queue_job
+
+        outcome = admit_or_queue_job(
+            db, new_job, preferred_sidecar=sidecar_pref
+        )
         db.commit()
         db.refresh(new_job)
 
-        # Trigger transcript processing in background (task sets celery_task_id itself)
-        process_transcript.delay(new_job.id)
+        if outcome.state == "admitted":
+            from app.services.admission import (
+                mark_outbox_delivered,
+                pending_outbox_rows,
+            )
+            from app.services.dispatch import publish_outbox
+
+            published = publish_outbox(db, job_id=new_job.id)
+            if published:
+                db.commit()
+            # Legacy safety: if nothing was published (no outbox row or Redis
+            # unavailable), fall back to the direct .delay() path so a
+            # pre-outbox deployment never silently drops jobs. The task
+            # itself remains idempotent via claim_step.
+            if not published:
+                from app.tasks import process_transcript
+                process_transcript.delay(new_job.id)
+        else:
+            logger.info(
+                "Job %s queued (admission): %s", new_job.job_id, outcome.queue_reason
+            )
 
         return JobResponse.model_validate(new_job)
 

@@ -55,9 +55,26 @@ _DEFAULT_ALLOWED_LLM_HOSTS = "localhost,127.0.0.1,::1,ollama,vllm,host.docker.in
 
 # Configure database connection URL (set DATABASE_URL env var in production)
 class DatabaseSettings(BaseSettings):
-    """Database connection settings."""
+    """Database connection settings.
+
+    WP1: pool parameters are configurable with conservative production
+    defaults. ``idle_in_transaction_timeout_ms`` mirrors PostgreSQL's
+    ``idle_in_transaction_session_timeout`` at the application layer
+    (applied per-connection on connect); 0 disables the guard.
+    """
 
     DATABASE_URL: str = "sqlite:///./dev.db"
+
+    # SQLAlchemy QueuePool configuration (WP1)
+    pool_size: int = Field(default=20, validation_alias="DB_POOL_SIZE")
+    max_overflow: int = Field(default=40, validation_alias="DB_MAX_OVERFLOW")
+    pool_timeout: int = Field(default=30, validation_alias="DB_POOL_TIMEOUT")
+    pool_recycle: int = Field(default=3600, validation_alias="DB_POOL_RECYCLE")
+    pool_pre_ping: bool = Field(default=True, validation_alias="DB_POOL_PRE_PING")
+    # Application-level idle-in-transaction guard (ms). 0 = disabled.
+    idle_in_transaction_timeout_ms: int = Field(
+        default=30000, validation_alias="DB_IDLE_IN_TX_TIMEOUT_MS"
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -429,6 +446,34 @@ class StorageSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
+class AdmissionSettings(BaseSettings):
+    """Admission control and sidecar lease configuration (WP2).
+
+    Conservative production defaults; every value is operator-configurable.
+    The lease TTL must exceed the maximum LLM request timeout plus a grace
+    period (Review Round 1 Finding 5), and slots are only reclaimed after a
+    quarantine window so a stale external request can never be silently
+    overcommitted.
+    """
+
+    # Global active-job cap (0 = unlimited, but then no queueing occurs).
+    global_active_limit: int = Field(default=4, validation_alias="ADMISSION_GLOBAL_ACTIVE_LIMIT")
+    # Per-user active-job cap.
+    per_user_active_limit: int = Field(default=2, validation_alias="ADMISSION_PER_USER_ACTIVE_LIMIT")
+    # Sidecar lease TTL (seconds). Default 1200 > LLM_TIMEOUT 600 + grace.
+    lease_ttl_seconds: int = Field(default=1200, validation_alias="LEASE_TTL_SECONDS")
+    # Heartbeat interval (seconds); must be well below the TTL.
+    heartbeat_interval_seconds: int = Field(default=60, validation_alias="LEASE_HEARTBEAT_INTERVAL_SECONDS")
+    # Quarantine after expiry before a slot may be reset to free (seconds).
+    quarantine_seconds: int = Field(default=900, validation_alias="LEASE_QUARANTINE_SECONDS")
+    # Scheduler sweep interval (seconds) for outbox recovery.
+    sweep_interval_seconds: int = Field(default=30, validation_alias="ADMISSION_SWEEP_INTERVAL_SECONDS")
+    # Number of slots per sidecar (capacity lane).
+    slots_per_sidecar: int = Field(default=1, validation_alias="SIDECAR_SLOTS")
+
+    model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
+
+
 # Transcript confidence scores — named constants instead of inline magic numbers.
 # YouTube's own captions are authoritative transcripts; lower score reflects minor
 # formatting artefacts (auto-timing, HTML entities). Whisper is a local model with
@@ -450,6 +495,11 @@ class SlideDetectionSettings(BaseSettings):
     ocr_enabled: bool = True
     layout_sample_count: int = 5
     incremental_ssim_threshold: float = 0.95
+    # WP3: batched ambiguity classification. Items per request; 1 = legacy
+    # sequential behavior. Concurrency > 1 enables bounded parallel batches
+    # under the sidecar lease (Review Round 1 Finding 8).
+    llm_batch_size: int = Field(default=20, validation_alias="SLIDE_LLM_BATCH_SIZE")
+    llm_batch_concurrency: int = Field(default=1, validation_alias="SLIDE_LLM_BATCH_CONCURRENCY")
 
     # pip_speaker (screencasting) tuning: screen motion scores 0.80-0.90 naturally,
     # so real transitions need a lower floor and slides need a longer minimum duration.
@@ -500,6 +550,7 @@ class Settings(BaseSettings):
     email: EmailSettings = Field(default_factory=EmailSettings)
     password_reset: PasswordResetSettings = Field(default_factory=PasswordResetSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
+    admission: AdmissionSettings = Field(default_factory=AdmissionSettings)
     api_key: ApiKeySettings = Field(default_factory=ApiKeySettings)
     vllm_fleet: VLLMFleetSettings = Field(default_factory=VLLMFleetSettings)
     environment: Environment = Environment.DEVELOPMENT

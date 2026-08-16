@@ -35,6 +35,32 @@ class ProcessingStatus(PyEnum):
     CANCELLED = "cancelled"
 
 
+class AdmissionState(PyEnum):
+    """Admission lifecycle of a job against scarce processing resources.
+
+    Kept separate from ProcessingStatus (Review Round 1 Finding 17): queue
+    state is a scheduler concern, not a processing lifecycle state, and a
+    separate column keeps the processing enum additive-safe for rollback.
+    """
+    QUEUED = "queued"
+    ADMITTED = "admitted"
+    FINISHED = "finished"
+    FAILED = "failed"
+
+
+class SlotState(PyEnum):
+    """Lifecycle of one sidecar slot lease.
+
+    free -> leased -> (expired | free). Reclamation moves a slot to
+    ``expired`` rather than directly back to ``free`` so a stale external
+    request cannot be silently overcommitted (Review Round 1 Finding 5); a
+    slot is only reset to free after a reviewed quarantine window.
+    """
+    FREE = "free"
+    LEASED = "leased"
+    EXPIRED = "expired"
+
+
 class ProcessingMode(PyEnum):
     """Processing mode for a job."""
     STANDARD = "standard"
@@ -90,6 +116,9 @@ class ProcessingJob(Base):
     # decide" (defaults to English). Set explicitly so an auto-dubbed video is
     # transcribed in the language the user asked for, not the first dub track.
     caption_language: Optional[str] = Column(String(10), nullable=True)
+    # WP3: server-side sidecar registry id, or None/"auto" for automatic
+    # routing. Only an exact registered id is accepted (never a URL).
+    sidecar_preference: Optional[str] = Column(String(64), nullable=True, index=True)
     user_id: Optional[int] = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: datetime = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at: datetime = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -103,6 +132,9 @@ class ProcessingJob(Base):
     logs = relationship("JobLog", back_populates="job", cascade="all, delete-orphan", order_by="JobLog.created_at")
     slides = relationship("Slide", back_populates="job", cascade="all, delete-orphan", order_by="Slide.slide_number")
     steps = relationship("JobStep", back_populates="job", cascade="all, delete-orphan", order_by="JobStep.id")
+    admission = relationship("JobAdmission", back_populates="job", uselist=False, cascade="all, delete-orphan")
+    slots = relationship("ResourceSlot", back_populates="job")
+    outbox = relationship("TaskOutbox", back_populates="job", cascade="all, delete-orphan")
     slide_detection_metadata = relationship("SlideDetectionMetadata", back_populates="job", uselist=False, cascade="all, delete-orphan")
 
     # Index on job_id for quick lookup
@@ -465,7 +497,6 @@ class SlideDetectionMetadata(Base):
 
 class User(Base):
     """User account for authentication and job ownership tracking."""
-
     __tablename__ = "users"
 
     id: int = Column(Integer, primary_key=True)
@@ -491,6 +522,7 @@ class User(Base):
 
     # Relationships
     jobs = relationship("ProcessingJob", back_populates="user")
+    roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan")
 
     # Indexes
     __table_args__ = (
@@ -500,3 +532,216 @@ class User(Base):
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, username={self.username}, email={self.email})>"
+
+
+# ==============================================================================
+# ADMISSION CONTROL + LEASE MODELS (WP2)
+# ==============================================================================
+
+class AdmissionCounter(Base):
+    """Durable global/per-user active-job counter, locked in admission txns.
+
+    Rows are locked in deterministic order (``global`` first, then
+    ``user:<id>``) so concurrent admissions serialize without deadlock.
+    """
+
+    __tablename__ = "admission_counters"
+
+    key: str = Column(String(64), primary_key=True)
+    active: int = Column(Integer, nullable=False, default=0, server_default="0")
+    limit: int = Column(Integer, nullable=False, default=0, server_default="0")
+    updated_at: datetime = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<AdmissionCounter(key={self.key}, active={self.active}, limit={self.limit})>"
+
+
+class JobAdmission(Base):
+    """Admission state and queue reason for one job (WP2)."""
+
+    __tablename__ = "job_admissions"
+
+    job_id: int = Column(Integer, ForeignKey("processing_jobs.id", ondelete="CASCADE"), primary_key=True)
+    state: AdmissionState = Column(
+        Enum(AdmissionState, values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+        default=AdmissionState.QUEUED,
+        server_default="queued",
+    )
+    queue_reason: Optional[str] = Column(String(512), nullable=True)
+    policy_version: int = Column(Integer, nullable=False, default=1, server_default="1")
+    queued_at: Optional[datetime] = Column(DateTime, nullable=True)
+    admitted_at: Optional[datetime] = Column(DateTime, nullable=True)
+    finished_at: Optional[datetime] = Column(DateTime, nullable=True)
+    created_at: datetime = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at: datetime = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    job = relationship("ProcessingJob", back_populates="admission")
+
+    __table_args__ = (
+        Index("ix_job_admissions_state_queued_at", "state", "queued_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<JobAdmission(job_id={self.job_id}, state={self.state.value})>"
+
+
+class ResourceSlot(Base):
+    """One unit of scarce sidecar capacity (WP2).
+
+    Fencing contract (Review Round 1 Finding 5): every lease carries a
+    per-incarnation ``claim_exec_uuid`` (never the Celery task id, which is
+    preserved across redelivery) and a monotonic ``generation``. Heartbeats,
+    releases and completions are conditional updates keyed on both.
+    """
+
+    __tablename__ = "resource_slots"
+
+    id: int = Column(Integer, primary_key=True)
+    sidecar_id: str = Column(String(64), nullable=False)
+    slot_index: int = Column(Integer, nullable=False)
+    enabled: bool = Column(Boolean, nullable=False, default=True, server_default="true")
+    state: SlotState = Column(
+        Enum(SlotState, values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+        default=SlotState.FREE,
+        server_default="free",
+    )
+    job_id: Optional[int] = Column(Integer, ForeignKey("processing_jobs.id", ondelete="SET NULL"), nullable=True)
+    claim_exec_uuid: Optional[str] = Column(String(64), nullable=True)
+    generation: int = Column(Integer, nullable=False, default=0, server_default="0")
+    heartbeat_at: Optional[datetime] = Column(DateTime, nullable=True)
+    expires_at: Optional[datetime] = Column(DateTime, nullable=True)
+    created_at: datetime = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at: datetime = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    job = relationship("ProcessingJob", back_populates="slots")
+    events = relationship("LeaseEvent", back_populates="slot", order_by="LeaseEvent.id", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("sidecar_id", "slot_index", name="uq_resource_slots_sidecar_slot"),
+        Index("ix_resource_slots_state_expires", "state", "expires_at"),
+        Index("ix_resource_slots_sidecar_state", "sidecar_id", "state"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ResourceSlot(sidecar={self.sidecar_id}#{self.slot_index}, state={self.state.value}, gen={self.generation})>"
+
+
+class LeaseEvent(Base):
+    """Append-only audit trail for slot lease transitions (WP2)."""
+
+    __tablename__ = "lease_events"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    slot_id: Optional[int] = Column(Integer, ForeignKey("resource_slots.id", ondelete="SET NULL"), nullable=True)
+    job_id: Optional[int] = Column(Integer, nullable=True)
+    sidecar_id: Optional[str] = Column(String(64), nullable=True)
+    event: str = Column(String(16), nullable=False)
+    exec_uuid: Optional[str] = Column(String(64), nullable=True)
+    generation: Optional[int] = Column(Integer, nullable=True)
+    detail: Optional[str] = Column(String(512), nullable=True)
+    created_at: datetime = Column(DateTime, server_default=func.now(), nullable=False)
+
+    slot = relationship("ResourceSlot", back_populates="events")
+
+    __table_args__ = (
+        Index("ix_lease_events_slot_created", "slot_id", "created_at"),
+        Index("ix_lease_events_job_created", "job_id", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<LeaseEvent(slot={self.slot_id}, event={self.event}, gen={self.generation})>"
+
+
+class TaskOutbox(Base):
+    """Durable at-least-once dispatch records (WP2).
+
+    A stage is written ``pending`` inside the admission transaction, then
+    published to Redis only after commit. The API startup sweep re-publishes
+    stale pending rows, closing the commit-then-crash dispatch gap.
+    """
+
+    __tablename__ = "task_outbox"
+
+    id: int = Column(Integer, primary_key=True)
+    job_id: int = Column(Integer, ForeignKey("processing_jobs.id", ondelete="CASCADE"), nullable=False)
+    stage: str = Column(String(32), nullable=False)
+    generation: int = Column(Integer, nullable=False, default=0, server_default="0")
+    state: str = Column(String(16), nullable=False, default="pending", server_default="pending")
+    payload: Optional[dict] = Column(JSON, nullable=True)
+    created_at: datetime = Column(DateTime, server_default=func.now(), nullable=False)
+    published_at: Optional[datetime] = Column(DateTime, nullable=True)
+    delivered_at: Optional[datetime] = Column(DateTime, nullable=True)
+
+    job = relationship("ProcessingJob", back_populates="outbox")
+
+    __table_args__ = (
+        Index("ix_task_outbox_state_created", "state", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<TaskOutbox(job={self.job_id}, stage={self.stage}, state={self.state})>"
+
+
+# ==============================================================================
+# SIDECAR REGISTRY (WP3)
+# ==============================================================================
+
+class Sidecar(Base):
+    """Trusted operator-registered sidecar endpoint (WP3).
+
+    ``registered_id`` is the stable allowlisted identifier users may select;
+    the endpoint URL is operator-owned configuration and is never accepted
+    from a client. Capabilities are declared; live health/served model is
+    verified separately by the inventory probe.
+    """
+
+    __tablename__ = "sidecars"
+
+    id: int = Column(Integer, primary_key=True)
+    registered_id: str = Column(String(64), nullable=False, unique=True)
+    label: str = Column(String(128), nullable=False)
+    base_url: str = Column(String(512), nullable=False)
+    capabilities: list = Column(JSON, nullable=False)
+    declared_model: Optional[str] = Column(String(128), nullable=True)
+    enabled: bool = Column(Boolean, nullable=False, default=True, server_default="true")
+    created_at: datetime = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at: datetime = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<Sidecar(id={self.registered_id}, url={self.base_url}, enabled={self.enabled})>"
+
+
+# ==============================================================================
+# OPERATOR RBAC (WP4)
+# ==============================================================================
+
+class UserRole(Base):
+    """Durable auditable role grant (WP4).
+
+    Grants are revoked by setting ``revoked_at``; rows are never deleted so
+    the audit history is preserved. Authorization checks read the DB and
+    fail closed. No username is ever hardcoded as authorization.
+    """
+
+    __tablename__ = "user_roles"
+
+    id: int = Column(Integer, primary_key=True)
+    user_id: int = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role: str = Column(String(32), nullable=False)
+    granted_by: Optional[str] = Column(String(128), nullable=True)
+    granted_at: datetime = Column(DateTime, server_default=func.now(), nullable=False)
+    revoked_by: Optional[str] = Column(String(128), nullable=True)
+    revoked_at: Optional[datetime] = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="roles")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "role", name="uq_user_roles_user_role"),
+        Index("ix_user_roles_user_id", "user_id"),
+        Index("ix_user_roles_role", "role"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserRole(user={self.user_id}, role={self.role}, revoked={self.revoked_at is not None})>"
