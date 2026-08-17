@@ -1320,3 +1320,78 @@ def test_admitted_final_transcript_retry_is_not_skipped(db_factory):
     assert status[0] == "processing", status
     assert status[1] == "final-retry"
     db.close()
+
+
+def test_failed_queued_job_redelivery_rejected(db_factory):
+    """A FAILED job whose admission is QUEUED (not admitted) must not re-enter
+    processing — it holds no counter and is not dispatchable (P25-NEW-60)."""
+    from app.db.models import JobAdmission, JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
+    from app.services.admission import admit_or_queue_job
+    from app.services.job_steps import seed_job_steps
+
+    db = db_factory()
+    user_id = _seed(db, global_limit=1, per_user_limit=10, slots=1)
+    job1 = _mkjob(db, user_id)
+    admit_or_queue_job(db, job1, exec_uuid="e1")
+    db.commit()
+    job2 = _mkjob(db, user_id)
+    # job2 becomes QUEUED (global limit 1 held by job1).
+    admit_or_queue_job(db, job2, exec_uuid="e2")
+    db.commit()
+    job2.status = ProcessingStatus.FAILED
+    db.commit()
+    job_id = job2.id
+    db.close()
+
+    db = db_factory()
+    admission = db.get(JobAdmission, job_id)
+    assert admission.state.value == "queued", admission.state
+    # The FAILED re-entry predicate requires positively ADMITTED — must fail.
+    claimed = db.execute(
+        text(
+            "UPDATE processing_jobs SET status = 'processing', "
+            "celery_task_id = :task_id "
+            "WHERE id = :job_id AND (celery_task_id IS NULL "
+            "OR celery_task_id = :task_id) "
+            "AND (status IN ('pending', 'processing') "
+            "OR (status = 'failed' AND EXISTS (SELECT 1 FROM job_admissions ja "
+            "WHERE ja.job_id = processing_jobs.id AND ja.state = 'admitted')))"
+        ),
+        {"job_id": job_id, "task_id": "late-redelivery"},
+    )
+    assert claimed.rowcount == 0, "queued FAILED job was re-entered"
+    db.rollback()
+    db.close()
+
+
+def test_failed_untracked_job_redelivery_rejected(db_factory):
+    """A FAILED job with NO admission row (legacy) must not re-enter
+    processing outside admission accounting (P25-NEW-60)."""
+    from app.db.models import JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
+    from app.services.job_steps import seed_job_steps
+
+    db = db_factory()
+    user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
+    job = _mkjob(db, user_id)
+    job.status = ProcessingStatus.FAILED
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    db = db_factory()
+    assert db.get(__import__("app.db.models", fromlist=["JobAdmission"]).JobAdmission, job_id) is None
+    claimed = db.execute(
+        text(
+            "UPDATE processing_jobs SET status = 'processing', "
+            "celery_task_id = :task_id "
+            "WHERE id = :job_id AND (celery_task_id IS NULL "
+            "OR celery_task_id = :task_id) "
+            "AND (status IN ('pending', 'processing') "
+            "OR (status = 'failed' AND EXISTS (SELECT 1 FROM job_admissions ja "
+            "WHERE ja.job_id = processing_jobs.id AND ja.state = 'admitted')))"
+        ),
+        {"job_id": job_id, "task_id": "late-redelivery"},
+    )
+    assert claimed.rowcount == 0, "untracked FAILED job was re-entered"
+    db.rollback()
+    db.close()

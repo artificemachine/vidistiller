@@ -828,18 +828,19 @@ def process_transcript(self, job_id: int):
             job.status == ProcessingStatus.FAILED
             and self.request.retries >= self.max_retries
         ):
-            # P22-NEW-51: distinguish an AUTHORIZED final retry (admission
-            # still held) from a terminal redelivery (admission already
-            # released). Only the latter is skipped — the final authorized
-            # attempt must run so the exhaustion handler releases admission.
+            # P22-NEW-51/P25-NEW-60: distinguish an AUTHORIZED final retry
+            # (admission positively ADMITTED) from a terminal redelivery
+            # (admission released, queued, or absent). Only positively
+            # admitted retries run — the exhaustion handler then releases
+            # admission.
             from app.db.models import AdmissionState, JobAdmission
 
             admission = db.get(JobAdmission, job.id)
-            admission_released = (
+            admission_held = (
                 admission is not None
-                and admission.state in (AdmissionState.FINISHED, AdmissionState.FAILED)
+                and admission.state == AdmissionState.ADMITTED
             )
-            if admission_released:
+            if not admission_held:
                 logger.info(
                     "Job %s failed after max retries; skipping late redelivery", job_id
                 )
@@ -889,9 +890,9 @@ def process_transcript(self, job_id: int):
                 "WHERE id = :job_id AND (celery_task_id IS NULL "
                 "OR celery_task_id = :task_id) "
                 "AND (status IN ('pending', 'processing') "
-                "OR (status = 'failed' AND NOT EXISTS (SELECT 1 FROM job_admissions ja "
+                "OR (status = 'failed' AND EXISTS (SELECT 1 FROM job_admissions ja "
                 "WHERE ja.job_id = processing_jobs.id "
-                "AND ja.state IN ('finished', 'failed'))))"
+                "AND ja.state = 'admitted')))"
             ),
             {
                 "job_id": job_id,
