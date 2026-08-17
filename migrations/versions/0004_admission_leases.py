@@ -135,6 +135,7 @@ def upgrade() -> None:
         sa.Column("state", sa.String(length=16), nullable=False, server_default="pending"),
         sa.Column("payload", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column("claimed_at", sa.DateTime(), nullable=True),
         sa.Column("published_at", sa.DateTime(), nullable=True),
         sa.Column("delivered_at", sa.DateTime(), nullable=True),
         sa.ForeignKeyConstraint(["job_id"], ["processing_jobs.id"], ondelete="CASCADE"),

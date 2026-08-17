@@ -437,7 +437,7 @@ def mark_outbox_published(db: Session, outbox_id: int) -> None:
 def mark_outbox_delivered(db: Session, outbox_id: int) -> None:
     db.execute(
         update(TaskOutbox)
-        .where(TaskOutbox.id == outbox_id, TaskOutbox.state.in_(("published", "publishing")))
+        .where(TaskOutbox.id == outbox_id, TaskOutbox.state.in_(("pending", "published", "publishing")))
         .values(state="delivered", delivered_at=_utcnow())
     )
 

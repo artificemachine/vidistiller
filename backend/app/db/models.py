@@ -672,6 +672,10 @@ class TaskOutbox(Base):
     state: str = Column(String(16), nullable=False, default="pending", server_default="pending")
     payload: Optional[dict] = Column(JSON, nullable=True)
     created_at: datetime = Column(DateTime, server_default=func.now(), nullable=False)
+    # Set when a publisher claims the row (pending -> publishing); the
+    # maintenance sweep uses it to reclaim rows a crashed publisher left in
+    # 'publishing' (Review Round 2 NEW-4).
+    claimed_at: Optional[datetime] = Column(DateTime, nullable=True)
     published_at: Optional[datetime] = Column(DateTime, nullable=True)
     delivered_at: Optional[datetime] = Column(DateTime, nullable=True)
 

@@ -195,22 +195,23 @@ def run_maintenance_cycle(db: Session) -> dict:
 
     try:
         # Recover outbox rows a crashed publisher left in 'publishing'
-        # (Review Round 2 N7): they become pending again for the sweep.
+        # (Review Round 2 N7/NEW-4): they become pending again for the
+        # sweep, keyed on claimed_at (set when the row was claimed).
         from datetime import UTC, datetime as _dt, timedelta as _td
 
         if db.bind.dialect.name == "postgresql":
             reclaimed = db.execute(
                 text(
-                    "UPDATE task_outbox SET state = 'pending' "
-                    "WHERE state = 'publishing' AND updated_at < now() - interval '5 minutes'"
+                    "UPDATE task_outbox SET state = 'pending', claimed_at = NULL "
+                    "WHERE state = 'publishing' AND claimed_at < now() - interval '5 minutes'"
                 )
             )
         else:
             cutoff = _dt.now(UTC).replace(tzinfo=None) - _td(minutes=5)
             reclaimed = db.execute(
                 text(
-                    "UPDATE task_outbox SET state = 'pending' "
-                    "WHERE state = 'publishing' AND updated_at < :cutoff"
+                    "UPDATE task_outbox SET state = 'pending', claimed_at = NULL "
+                    "WHERE state = 'publishing' AND claimed_at < :cutoff"
                 ),
                 {"cutoff": cutoff},
             )

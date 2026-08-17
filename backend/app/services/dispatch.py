@@ -10,6 +10,7 @@ commit-then-crash dispatch gap (Review Round 1 Finding 7).
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Optional
 
 from sqlalchemy import text
@@ -19,6 +20,10 @@ from app.db.models import TaskOutbox
 from app.services.admission import mark_outbox_published, pending_outbox_rows
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _task_for_stage(stage: str):
@@ -71,7 +76,7 @@ def publish_outbox(
         if db.bind.dialect.name == "postgresql":
             claimed = db.execute(
                 text(
-                    "UPDATE task_outbox SET state = 'publishing' "
+                    "UPDATE task_outbox SET state = 'publishing', claimed_at = now() "
                     "WHERE id = :id AND state = 'pending' RETURNING id"
                 ),
                 {"id": row.id},
@@ -82,10 +87,10 @@ def publish_outbox(
         else:
             db.execute(
                 text(
-                    "UPDATE task_outbox SET state = 'publishing' "
+                    "UPDATE task_outbox SET state = 'publishing', claimed_at = :now "
                     "WHERE id = :id AND state = 'pending'"
                 ),
-                {"id": row.id},
+                {"id": row.id, "now": _utcnow()},
             )
             db.flush()
 

@@ -1019,6 +1019,15 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
                     )
                 db.commit()
                 summarize_claimed = taken.rowcount == 1
+                if not summarize_claimed:
+                    # Zero-row takeover: another incarnation owns the step or
+                    # it is missing. Do NOT proceed without the claim — abort
+                    # and release the slot (Review Round 2 N3).
+                    logger.warning(
+                        "Summarize: force takeover of step for job %s affected 0 rows; aborting",
+                        job.id,
+                    )
+                    raise SidecarCapacityExhausted(job_id)
 
         # Read the owner preference only for language selection. The concrete
         # endpoint is resolved after the transcript length is known so context
@@ -1052,6 +1061,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         leased_sidecar = get_sidecar(db, slot.sidecar_id)
         if leased_sidecar is None:  # registry row removed mid-flight: abort
             logger.error("Summarize: leased sidecar %s missing from registry", slot.sidecar_id)
+            _release_summarize_claim(db, job_id, exec_uuid)
             raise SidecarCapacityExhausted(job_id)
         provider, _model = _resolve_provider_for_slot(db, slot)
         if provider is None:
@@ -1234,7 +1244,7 @@ def process_snapshots(self, job_id: int):
     """Extract snapshots under the snapshots step's independent claim token."""
     from pathlib import Path
 
-    from app.db.models import ProcessingJob
+    from app.db.models import ProcessingJob, ProcessingMode, ProcessingStatus
     from app.db.session import SessionLocal
     from app.services.job_steps import claim_step, complete_step, fail_step
     from app.services.snapshot import SnapshotService
@@ -1286,7 +1296,6 @@ def process_snapshots(self, job_id: int):
             exec_uuid,
             {"count": len(snapshots), "frames_analyzed": len(frames)},
         )
-        from app.db.models import ProcessingMode, ProcessingStatus
         if job.processing_mode != ProcessingMode.SLIDE_AWARE.value:
             job.status = ProcessingStatus.COMPLETED
             _finish_admission_for_job(db, job_id)
