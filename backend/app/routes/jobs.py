@@ -1024,14 +1024,21 @@ def summarize_transcript(
             text("SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"),
             {"job_id": job.id},
         )
-    if job.summarize_status == "processing":
-        running_task_id = job.celery_task_id
-    force_generation = _mint_force_generation(db, job.id)
-    state = db.execute(
-        text("SELECT summarize_status FROM processing_jobs WHERE id = :job_id"),
+    # P18-NEW-38: read BOTH summarize_status and celery_task_id fresh under
+    # the lock — the ORM object may predate a worker's task-id write, and
+    # revoking the stale id would leave the live worker running.
+    locked = db.execute(
+        text(
+            "SELECT summarize_status, celery_task_id FROM processing_jobs "
+            "WHERE id = :job_id"
+        ),
         {"job_id": job.id},
-    ).scalar()
-    if state == "failed":
+    ).first()
+    locked_status = locked[0] if locked else None
+    if job.summarize_status == "processing" or locked_status == "processing":
+        running_task_id = locked[1] if locked else job.celery_task_id
+    force_generation = _mint_force_generation(db, job.id)
+    if locked_status == "failed":
         db.rollback()
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
@@ -1085,6 +1092,14 @@ def retry_job_step(
 
     if step_name not in CANONICAL_STEP_NAMES:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown processing step")
+    # P18-NEW-39: acquire the JOB row lock BEFORE resetting the step so the
+    # retry transaction follows the same job->step lock order as claim_step
+    # and the summarize task — concurrent retry/claim cannot deadlock.
+    if db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"),
+            {"job_id": job.id},
+        )
     if not retry_failed_step(db, job.id, step_name):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Step is not retryable")
 

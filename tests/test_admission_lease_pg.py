@@ -1061,15 +1061,17 @@ def test_step_retry_route_co_commits_outbox(db_factory):
     owner = db.get(User, user_id)
     db.close()
 
-    # Real .delay() failure: point the transcript task's delay at a broken
-    # stub so publish_outbox fails exactly like a Redis outage, while the
-    # route's co-commit already happened.
+    # Real .delay() failure: the REAL publish_outbox runs, but the mapped
+    # task's .delay() raises exactly like a Redis outage. The dispatcher's
+    # own claim/rollback/reset logic is exercised, and the row must return
+    # to 'pending' for the sweep.
     import app.services.dispatch as dispatch_mod
+    from app.tasks import process_transcript as _pt
 
-    original_publish = dispatch_mod.publish_outbox
-    def _boom(*a, **k):
+    original_delay = _pt.delay
+    def _boom_delay(*a, **k):
         raise RuntimeError("redis down")
-    dispatch_mod.publish_outbox = _boom
+    _pt.delay = _boom_delay
     try:
         # Invoke the REAL route handler.
         from app.routes.jobs import retry_job_step
@@ -1081,16 +1083,16 @@ def test_step_retry_route_co_commits_outbox(db_factory):
         finally:
             d.close()
     finally:
-        dispatch_mod.publish_outbox = original_publish
+        _pt.delay = original_delay
 
-    # A fresh session sees exactly one pending outbox row (sweep-recoverable)
+    # A fresh session sees exactly one PENDING outbox row (sweep-recoverable)
     # and the step reset to pending.
     db = db_factory()
     rows = db.query(TaskOutbox).filter(
         TaskOutbox.job_id == job_id, TaskOutbox.stage == "transcribe"
     ).all()
     assert len(rows) == 1, f"expected exactly one outbox row, got {len(rows)}"
-    assert rows[0].state in ("pending", "publishing"), rows[0].state
+    assert rows[0].state == "pending", rows[0].state
     step = db.query(JobStep).filter(
         JobStep.job_id == job_id, JobStep.name == "transcribe"
     ).first()
