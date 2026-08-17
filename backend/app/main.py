@@ -11,6 +11,7 @@ Initializes the FastAPI application with:
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+import asyncio
 import logging
 import os
 import sys
@@ -103,14 +104,55 @@ async def lifespan(app: FastAPI):
     the app's own startup path let this drift silently for a long time: see
     migrations/versions/0001_squashed_baseline.py for the incident history.
     """
+    ok = False
     try:
-        health_check()
-        logger.info("✅ Database connection healthy on startup")
+        ok = health_check()
     except Exception as e:
-        logger.error(f"❌ Database health check failed on startup: {e}")
-        raise
+        logger.error(f"❌ Database health check raised on startup: {e}")
+    if not ok:
+        logger.error("❌ Database health check failed on startup")
+        raise RuntimeError("Database health check failed on startup")
+    logger.info("✅ Database connection healthy on startup")
+
+    # WP2: recover undelivered dispatch rows after a crash (the commit-then-
+    # crash gap), and seed the sidecar registry from operator configuration.
+    try:
+        from app.db.session import SessionLocal
+        from app.services.admission import sync_admission_limits
+        from app.services.dispatch import sweep_outbox
+        from app.services.scheduler import scheduler_loop
+        from app.services.sidecar import reconcile_slots, refresh_telemetry_cache, seed_sidecars
+
+        db = SessionLocal()
+        try:
+            sync_admission_limits(db)
+            published = sweep_outbox(db)
+            if published:
+                logger.info("✅ Outbox sweep published %d pending dispatch(es)", published)
+            seeded = seed_sidecars(db)
+            if seeded:
+                logger.info("✅ Seeded %d sidecar(s) from operator config", seeded)
+            created = reconcile_slots(db)
+            if created:
+                logger.info("✅ Provisioned %d sidecar slot row(s)", created)
+            refresh_telemetry_cache(db)
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.error("⚠️ Startup maintenance sweep failed (non-fatal): %s", exc)
+
+    # WP2: periodic scheduler (queue promotion, outbox sweep, lease reaper,
+    # telemetry refresh). Runs until shutdown.
+    scheduler_stop = asyncio.Event()
+    scheduler_task = asyncio.create_task(scheduler_loop(scheduler_stop))
 
     yield
+
+    scheduler_stop.set()
+    try:
+        await asyncio.wait_for(scheduler_task, timeout=10)
+    except asyncio.TimeoutError:
+        scheduler_task.cancel()
 
 
 app = FastAPI(
@@ -266,6 +308,18 @@ async def health():
     return {"status": "healthy"}
 
 
+@app.get("/metrics", tags=["Health"])
+async def metrics():
+    """Operational metrics in Prometheus text exposition format (WP6)."""
+    from app.services.metrics import render_prometheus, snapshot
+    from fastapi.responses import PlainTextResponse
+
+    body = render_prometheus()
+    # Keep /metrics itself out of the request counters it reports.
+    _ = snapshot
+    return PlainTextResponse(body, media_type="text/plain; version=0.0.4")
+
+
 @app.get("/readyz", tags=["Health"])
 async def readyz():
     """Readiness check — the app can serve traffic.
@@ -274,14 +328,21 @@ async def readyz():
     a broker is configured). Returns 503 with per-dependency status when any is
     unreachable, so an orchestrator can stop routing to a pod whose DB is down
     instead of trusting a static 'healthy'.
+
+    WP1: the database probe uses a dedicated single-connection engine with a
+    short pool timeout (2s) so a saturated application pool reports 'not
+    ready' within a bounded time instead of blocking (Review Round 1
+    Finding 4). Redis uses explicit connect+read timeouts.
     """
+    import redis as _redis
+
     checks = {"database": health_check()}
 
     try:
-        import redis as _redis
         client = _redis.from_url(
             os.getenv("REDIS_URL", "redis://localhost:6379/0"),
             socket_connect_timeout=2,
+            socket_timeout=2,
         )
         client.ping()
         checks["redis"] = True

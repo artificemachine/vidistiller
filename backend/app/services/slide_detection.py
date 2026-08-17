@@ -184,6 +184,11 @@ class SlideDetectionService:
         of the app uses. The provider is injected by the caller (the slide task
         resolves the job owner's LLM settings).
 
+        WP3: batched by default (bounded structured requests with stable item ids,
+        schema validation, retry-only-failed-items, deterministic ordering, and a
+        sequential fallback). The batch size is configurable; ``batch_size=1``
+        preserves the legacy one-call-per-transition behavior.
+
         Args:
             pairs: List of dicts with "ssim", "ocr_text_before", "ocr_text_after"
             cancel_check: Optional callable that returns True if task was cancelled
@@ -200,6 +205,23 @@ class SlideDetectionService:
             )
             return pairs
 
+        batch_size = self.slide_settings.llm_batch_size
+        if batch_size <= 1:
+            return self._classify_sequential(
+                pairs, cancel_check, provider, model
+            )
+        return self._classify_batched(
+            pairs, cancel_check, provider, model, batch_size
+        )
+
+    def _classify_sequential(
+        self,
+        pairs: List[Dict],
+        cancel_check: Optional[Callable[[], bool]],
+        provider,
+        model: Optional[str],
+    ) -> List[Dict]:
+        """Legacy one-call-per-ambiguous-transition classification (fallback)."""
         model = model or self.slide_settings.llm_model
         timeout = self.slide_settings.llm_timeout
         incremental_threshold = self.slide_settings.incremental_ssim_threshold
@@ -212,40 +234,215 @@ class SlideDetectionService:
             if pair.get("classification") != "ambiguous":
                 continue
 
-            ssim_val = pair.get("ssim", 0)
-
-            # Fast-path: high-confidence incremental bypasses LLM entirely
-            if ssim_val >= incremental_threshold:
-                pair["llm_classification"] = "incremental"
+            if self._apply_fast_path(pair, incremental_threshold):
                 classified += 1
                 continue
 
-            text_before = (pair.get("ocr_text_before") or "")[:500]
-            text_after = (pair.get("ocr_text_after") or "")[:500]
-
-            prompt = (
-                "You are analysing a presentation video. Two consecutive frames have an SSIM "
-                f"similarity of {ssim_val:.3f} (1.0 = identical, 0.0 = completely different).\n\n"
-                f"OCR text from the BEFORE frame:\n{text_before or '(no text detected)'}\n\n"
-                f"OCR text from the AFTER frame:\n{text_after or '(no text detected)'}\n\n"
-                "Is this a NEW SLIDE (completely different content) or an INCREMENTAL BUILD "
-                "(same slide with added content like bullet points)?\n\n"
-                "Respond with exactly one word: TRANSITION or INCREMENTAL"
-            )
-
+            prompt = self._build_classification_prompt(pair)
             try:
                 answer = provider.generate(prompt, model, timeout=timeout, max_tokens=10).strip().upper()
-                if "INCREMENTAL" in answer:
-                    pair["llm_classification"] = "incremental"
-                else:
-                    pair["llm_classification"] = "transition"
+                pair["llm_classification"] = self._parse_answer(answer)
                 classified += 1
             except Exception as e:
                 logger.warning(f"LLM classification failed: {e}")
                 pair["llm_classification"] = "transition"
 
-        logger.info(f"LLM classified {classified} ambiguous transitions")
+        logger.info(f"LLM classified {classified} ambiguous transitions (sequential)")
         return pairs
+
+    def _classify_batched(
+        self,
+        pairs: List[Dict],
+        cancel_check: Optional[Callable[[], bool]],
+        provider,
+        model: Optional[str],
+        batch_size: int,
+    ) -> List[Dict]:
+        """Batched classification with stable ids, schema validation, and fallback.
+
+        Each batch is a single structured request carrying stable item ids
+        (``t_<index>``) so results map deterministically back onto the pairs.
+        Items whose answer fails schema validation are retried sequentially;
+        a whole-batch failure falls back to sequential classification for that
+        batch. Bounded concurrency: batches run sequentially by default (the
+        sidecar lease authorizes one lane); ``llm_batch_concurrency`` > 1 uses
+        a bounded thread pool for deployments with multi-slot leases.
+        """
+        model = model or self.slide_settings.llm_model
+        timeout = self.slide_settings.llm_timeout
+        incremental_threshold = self.slide_settings.incremental_ssim_threshold
+        concurrency = self.slide_settings.llm_batch_concurrency
+
+        ambiguous = [
+            (i, pair)
+            for i, pair in enumerate(pairs)
+            if pair.get("classification") == "ambiguous"
+        ]
+        if not ambiguous:
+            return pairs
+
+        # Fast-path items never hit the LLM.
+        for _, pair in ambiguous:
+            if pair.get("ssim", 0) >= incremental_threshold:
+                pair["llm_classification"] = "incremental"
+
+        to_classify = [
+            (i, pair)
+            for i, pair in ambiguous
+            if pair.get("llm_classification") is None
+        ]
+        batches = [
+            to_classify[offset : offset + batch_size]
+            for offset in range(0, len(to_classify), batch_size)
+        ]
+
+        classified = 0
+
+        def classify_batch(batch: List[tuple]) -> int:
+            """Return number classified in this batch."""
+            if cancel_check and cancel_check():
+                raise CancelledException()
+            items = [
+                {
+                    "id": f"t_{i}",
+                    "ssim": pair.get("ssim", 0),
+                    "ocr_text_before": (pair.get("ocr_text_before") or "")[:500],
+                    "ocr_text_after": (pair.get("ocr_text_after") or "")[:500],
+                }
+                for i, pair in batch
+            ]
+            prompt = self._build_batch_prompt(items)
+            try:
+                answer = provider.generate(
+                    prompt, model, timeout=timeout, max_tokens=min(4000, 40 + 20 * len(items))
+                ).strip()
+                results = self._parse_batch_answer(answer)
+            except Exception as e:
+                logger.warning(f"Batch LLM classification failed ({len(batch)} items): {e}")
+                results = {}
+
+            count = 0
+            retry_items: List[tuple] = []
+            for i, pair in batch:
+                item_id = f"t_{i}"
+                label = results.get(item_id)
+                if label in ("transition", "incremental"):
+                    pair["llm_classification"] = label
+                    count += 1
+                else:
+                    retry_items.append((i, pair))
+
+            # Retry only failed items sequentially (schema validation fallback).
+            for i, pair in retry_items:
+                if cancel_check and cancel_check():
+                    raise CancelledException()
+                if self._apply_fast_path(pair, incremental_threshold):
+                    count += 1
+                    continue
+                try:
+                    answer = provider.generate(
+                        self._build_classification_prompt(pair),
+                        model,
+                        timeout=timeout,
+                        max_tokens=10,
+                    ).strip().upper()
+                    pair["llm_classification"] = self._parse_answer(answer)
+                    count += 1
+                except Exception as e:
+                    logger.warning(f"LLM classification retry failed: {e}")
+                    pair["llm_classification"] = "transition"
+                    count += 1
+            return count
+
+        if concurrency <= 1:
+            for batch in batches:
+                classified += classify_batch(batch)
+        else:
+            # Bounded concurrency under the lease: at most ``concurrency``
+            # batches in flight (plan §3).
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=concurrency) as pool:
+                futures = [pool.submit(classify_batch, batch) for batch in batches]
+                for future in futures:
+                    try:
+                        classified += future.result()
+                    except CancelledException:
+                        for f in futures:
+                            f.cancel()
+                        raise
+
+        logger.info(
+            f"LLM classified {classified} ambiguous transitions "
+            f"(batched, {len(batches)} batches)"
+        )
+        return pairs
+
+    @staticmethod
+    def _apply_fast_path(pair: Dict, incremental_threshold: float) -> bool:
+        """High-confidence incremental bypasses the LLM entirely."""
+        if pair.get("ssim", 0) >= incremental_threshold:
+            pair["llm_classification"] = "incremental"
+            return True
+        return False
+
+    @staticmethod
+    def _build_classification_prompt(pair: Dict) -> str:
+        ssim_val = pair.get("ssim", 0)
+        text_before = (pair.get("ocr_text_before") or "")[:500]
+        text_after = (pair.get("ocr_text_after") or "")[:500]
+        return (
+            "You are analysing a presentation video. Two consecutive frames have an SSIM "
+            f"similarity of {ssim_val:.3f} (1.0 = identical, 0.0 = completely different).\n\n"
+            f"OCR text from the BEFORE frame:\n{text_before or '(no text detected)'}\n\n"
+            f"OCR text from the AFTER frame:\n{text_after or '(no text detected)'}\n\n"
+            "Is this a NEW SLIDE (completely different content) or an INCREMENTAL BUILD "
+            "(same slide with added content like bullet points)?\n\n"
+            "Respond with exactly one word: TRANSITION or INCREMENTAL"
+        )
+
+    @staticmethod
+    def _parse_answer(answer: str) -> str:
+        return "incremental" if "INCREMENTAL" in answer else "transition"
+
+    @staticmethod
+    def _build_batch_prompt(items: List[Dict]) -> str:
+        """One structured batch request with stable item ids."""
+        lines = []
+        for item in items:
+            lines.append(
+                f"[{item['id']}] ssim={item['ssim']:.3f} | "
+                f"before={item['ocr_text_before'] or '(no text)'} | "
+                f"after={item['ocr_text_after'] or '(no text)'}"
+            )
+        return (
+            "You are analysing a presentation video. Classify each ambiguous frame pair "
+            "below as either TRANSITION (new slide, different content) or INCREMENTAL "
+            "(same slide with added content).\n\n"
+            + "\n".join(lines)
+            + "\n\nRespond with exactly one line per item, in the format "
+            "<id>: TRANSITION or <id>: INCREMENTAL, nothing else."
+        )
+
+    @classmethod
+    def _parse_batch_answer(cls, answer: str) -> Dict[str, str]:
+        """Parse the batch response into {item_id: label}.
+
+        Schema validation: only lines matching ``t_<digits>: TRANSITION|INCREMENTAL``
+        are accepted; anything else is treated as missing (retried sequentially).
+        """
+        import re
+
+        pattern = re.compile(r"^(t_\d+)\s*[:\-]\s*(TRANSITION|INCREMENTAL)\b", re.IGNORECASE)
+        results: Dict[str, str] = {}
+        for line in answer.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            m = pattern.match(line)
+            if m:
+                results[m.group(1)] = "incremental" if m.group(2).upper() == "INCREMENTAL" else "transition"
+        return results
 
     # ------------------------------------------------------------------
     # Step 4: Slide Grouping
@@ -470,6 +667,20 @@ class SlideDetectionService:
             model: Concrete model id passed to the provider
         """
         from app.db.models import Slide, SlideDetectionMetadata
+        from app.services.job_steps import set_step_progress
+
+        def _progress(percent: int) -> None:
+            """Persist monotonic progress on the slides step (WP5)."""
+            try:
+                claim = next(
+                    (s.claim_token for s in job.steps if s.name == "slides" and s.claim_token),
+                    None,
+                )
+                if claim:
+                    set_step_progress(db, job.id, "slides", claim, percent)
+                    db.commit()
+            except Exception:
+                db.rollback()
 
         start_time = time.time()
         video_path = job.video_file_path
@@ -505,6 +716,7 @@ class SlideDetectionService:
         transitions, total_frames_sampled = self.ssim_transition_scan(
             video_path, self.slide_settings.sampling_fps, layout
         )
+        _progress(15)
         _add_log(f"Found {len(transitions)} potential transitions", "info", "slide_ssim")
 
         # 4. LLM classification for ambiguous transitions
@@ -515,10 +727,12 @@ class SlideDetectionService:
             _add_log(f"Classifying {ambiguous_count} ambiguous transitions with LLM...", "info", "slide_llm")
             # Get OCR text for ambiguous frames; cache is reused by final_state_capture
             frame_ocr_cache = self._add_ocr_context_to_transitions(video_path, transitions, layout)
+            _progress(30)
             transitions = self.llm_ambiguity_classification(
                 transitions, cancel_check, provider=provider, model=model
             )
             llm_classifications = ambiguous_count
+            _progress(55)
 
         # 5. Slide grouping
         _add_log("Grouping transitions into slides...", "info", "slide_grouping")
@@ -532,6 +746,7 @@ class SlideDetectionService:
         if cancel_check and cancel_check():
             raise CancelledException()
         slide_dicts = self.final_state_capture(video_path, slide_dicts, output_dir, frame_ocr_cache=frame_ocr_cache)
+        _progress(85)
 
         # 7. Transcript alignment
         segments = []

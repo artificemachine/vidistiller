@@ -22,6 +22,8 @@ def service():
         settings.slide_detection.ocr_enabled = True
         settings.slide_detection.layout_sample_count = 5
         settings.slide_detection.incremental_ssim_threshold = 0.95
+        settings.slide_detection.llm_batch_size = 1   # legacy sequential path
+        settings.slide_detection.llm_batch_concurrency = 1
         settings.slide_detection.pip_speaker_ssim_threshold = 0.65
         settings.slide_detection.pip_speaker_ssim_ambiguous_low = 0.65
         settings.slide_detection.pip_speaker_ssim_ambiguous_high = 0.80

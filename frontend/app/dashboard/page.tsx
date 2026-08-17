@@ -6,6 +6,7 @@ import apiClient from '@/lib/api';
 import Link from 'next/link';
 import { useAuthStore } from '@/lib/authStore';
 import pkg from '@/package.json';
+import QueueStatus from '@/components/QueueStatus';
 
 interface Job {
   job_id: string;
@@ -14,6 +15,9 @@ interface Job {
   video_title?: string;
   created_at: string;
   updated_at: string;
+  admission_state?: string | null;
+  queue_reason?: string | null;
+  queue_position?: number | null;
 }
 
 type SortBy = 'newest' | 'oldest' | 'status_asc' | 'status_desc';
@@ -352,6 +356,11 @@ export default function Dashboard() {
                     <span className={`px-3 py-1 rounded-full text-sm font-semibold ${getStatusColor(job.status)}`}>
                       {job.status}
                     </span>
+                    <QueueStatus
+                      admissionState={job.admission_state}
+                      queueReason={job.queue_reason}
+                      queuePosition={job.queue_position}
+                    />
                   </td>
                   <td className="px-6 py-4 text-sm text-text-dark/60 dark:text-text-light/60">
                     {new Date(job.created_at).toLocaleDateString()}

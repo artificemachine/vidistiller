@@ -1,0 +1,36 @@
+{
+  "sidecars": [
+    {
+      "registered_id": "primary",
+      "label": "Primary (VM913 · 8×RTX 3090)",
+      "base_url": "http://192.0.2.36:8000",
+      "capabilities": ["text"],
+      "declared_model": "qwen3.8-27b",
+      "enabled": true
+    },
+    {
+      "registered_id": "secondary",
+      "label": "Secondary (VM903 · 2×RTX 3090)",
+      "base_url": "http://192.0.2.16:8000",
+      "capabilities": ["text"],
+      "declared_model": "gemma4-31b-awq",
+      "enabled": true
+    },
+    {
+      "registered_id": "vision",
+      "label": "Vision (VM901 · 2×RTX 3080)",
+      "base_url": "http://192.0.2.10:8100",
+      "capabilities": ["vision"],
+      "declared_model": "qwen25-15b",
+      "enabled": true
+    },
+    {
+      "registered_id": "aux",
+      "label": "Aux (VM2900 · RTX 3090)",
+      "base_url": "http://192.0.2.20:8100",
+      "capabilities": ["text"],
+      "declared_model": null,
+      "enabled": false
+    }
+  ]
+}

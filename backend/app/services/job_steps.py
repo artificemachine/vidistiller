@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Mapping
 
-from sqlalchemy import update
+from sqlalchemy import text, update
 from sqlalchemy.orm import Session
 
 from app.db.models import JobStep, JobStepStatus, ProcessingJob
@@ -22,6 +22,12 @@ TERMINAL_STATUSES = frozenset({
     JobStepStatus.COMPLETED,
     JobStepStatus.SKIPPED,
 })
+
+# A RUNNING step whose claim is older than this is presumed orphaned (the
+# worker died without completing/acking — Review Round 2 F1). Redelivery can
+# then reclaim it instead of skipping forever. Must comfortably exceed the
+# longest task hard limit (CELERY_TASK_TIME_LIMIT, default 7200s).
+ORPHANED_CLAIM_TTL_SECONDS = 7200
 
 
 def _utcnow() -> datetime:
@@ -65,13 +71,39 @@ def _step(db: Session, job_id: int, name: str) -> JobStep | None:
 
 
 def claim_step(db: Session, job_id: int, name: str, claim_token: str) -> JobStep | None:
-    """Atomically claim a pending, failed, or cancelled step for one worker."""
+    """Atomically claim a pending, failed, cancelled, or orphaned step.
+
+    The claim is ONE conditional UPDATE whose WHERE clause carries the full
+    eligibility predicate (Review Round 2 N1): the row must be pending/
+    failed/cancelled, OR running-and-orphaned (started_at older than
+    ``ORPHANED_CLAIM_TTL_SECONDS``). Because the UPDATE is atomic and
+    rowcount-checked, two concurrent claimers can never both succeed — the
+    loser's WHERE no longer matches after the winner transitions the row.
+    """
+    from datetime import UTC, datetime as _dt, timedelta as _td
+
+    # Serialize with terminalization (P9-NEW-17): lock the JOB row so a
+    # concurrent capacity-exhaustion terminalizer (which locks the same row
+    # before failing the job) cannot interleave with our claim. Also refuse
+    # to claim a step on a terminal job: a job failed/cancelled concurrently
+    # must never receive a fresh claim (the claimer loses the race).
+    if db.bind.dialect.name == "postgresql":
+        job_row = db.execute(
+            text(
+                "SELECT status FROM processing_jobs WHERE id = :job_id FOR UPDATE"
+            ),
+            {"job_id": job_id},
+        ).first()
+        if job_row is None or job_row[0] in ("failed", "cancelled"):
+            return None
+
     existing = _step(db, job_id, name)
     if existing is None or existing.status in TERMINAL_STATUSES:
         return None
-    if existing.status == JobStepStatus.RUNNING:
-        return existing if existing.claim_token == claim_token else None
+    if existing.status == JobStepStatus.RUNNING and existing.claim_token == claim_token:
+        return existing  # same incarnation re-entry
 
+    orphan_cutoff = _dt.now(UTC).replace(tzinfo=None) - _td(seconds=ORPHANED_CLAIM_TTL_SECONDS)
     statement = (
         update(JobStep)
         .where(
@@ -93,7 +125,29 @@ def claim_step(db: Session, job_id: int, name: str, claim_token: str) -> JobStep
         .execution_options(synchronize_session="fetch")
     )
     if db.execute(statement).rowcount != 1:
-        return None
+        # Either another claimant won (status now RUNNING under a newer
+        # started_at), or the row is RUNNING under a live claim. The only
+        # remaining legal path is orphaned reclamation, which is itself a
+        # single atomic conditional UPDATE (Review Round 2 N1).
+        statement = (
+            update(JobStep)
+            .where(
+                JobStep.id == existing.id,
+                JobStep.status == JobStepStatus.RUNNING,
+                JobStep.started_at < orphan_cutoff,
+            )
+            .values(
+                status=JobStepStatus.RUNNING,
+                attempt=JobStep.attempt + 1,
+                claim_token=claim_token,
+                started_at=_utcnow(),
+                finished_at=None,
+                error_message=None,
+            )
+            .execution_options(synchronize_session="fetch")
+        )
+        if db.execute(statement).rowcount != 1:
+            return None
     db.flush()
     return _step(db, job_id, name)
 

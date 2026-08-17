@@ -65,13 +65,32 @@ router = APIRouter(prefix="/jobs", tags=["Jobs"])
 def _get_job_for_user(
     db: Session, job_id: str, current_user: User
 ) -> ProcessingJob:
-    """Fetch a job by job_id and verify ownership. Returns 404 if not found or not owned."""
-    job = db.query(ProcessingJob).filter(ProcessingJob.job_id == job_id).first()
+    """Fetch a job by job_id AND ownership in the SQL predicate (P27-NEW-64).
+
+    Returns 404 if not found or not owned — indistinguishable either way.
+    """
+    job = (
+        db.query(ProcessingJob)
+        .filter(
+            ProcessingJob.job_id == job_id,
+            ProcessingJob.user_id == current_user.id,
+        )
+        .first()
+    )
     if not job:
         raise ResourceNotFoundException("Job", job_id)
-    if job.user_id != current_user.id:
-        raise ResourceNotFoundException("Job", job_id)
     return job
+
+
+def _finish_job_admission_for_route(db: Session, job_id: int, *, failed: bool = False) -> bool:
+    """Route-level admission release (cancel/delete paths), Review Round 2 F5.
+
+    P27-NEW-63: errors PROPAGATE so a cancellation never commits its fence
+    and revokes the worker without a durable admission release.
+    """
+    from app.services.admission import finish_job_admission
+
+    return finish_job_admission(db, job_id, failed=failed)
 
 
 def _find_duplicate_job(
@@ -184,6 +203,8 @@ def create_job(
                 )
 
         processing_mode = ProcessingMode.SLIDE_AWARE.value if job_data.is_slide_mode else ProcessingMode.STANDARD.value
+        from app.services.sidecar import validate_sidecar_preference
+        sidecar_pref = validate_sidecar_preference(db, job_data.sidecar_preference)
         new_job = ProcessingJob(
             job_id=str(uuid.uuid4()),
             status=ProcessingStatus.PENDING,
@@ -191,6 +212,7 @@ def create_job(
             source_type=source_type.value,
             processing_mode=processing_mode,
             caption_language=job_data.caption_language,
+            sidecar_preference=sidecar_pref,
             user_id=current_user.id,
         )
 
@@ -203,11 +225,47 @@ def create_job(
             extract_snapshots=job_data.extract_snapshots,
             is_slide_mode=job_data.is_slide_mode,
         )
+        # WP2: admit or queue atomically in the same transaction that creates
+        # the job. A job that cannot start is queued with a visible reason —
+        # it is never overcommitted nor failed ambiguously. When admitted, an
+        # outbox dispatch row is written; it is published to Redis only after
+        # commit (durable at-least-once, Review Round 1 Finding 7).
+        from app.services.admission import admit_or_queue_job
+
+        outcome = admit_or_queue_job(
+            db, new_job, preferred_sidecar=sidecar_pref
+        )
         db.commit()
         db.refresh(new_job)
 
-        # Trigger transcript processing in background (task sets celery_task_id itself)
-        process_transcript.delay(new_job.id)
+        if outcome.state == "admitted":
+            from app.services.admission import (
+                mark_outbox_delivered,
+                pending_outbox_rows,
+            )
+            from app.services.dispatch import publish_outbox
+
+            published = publish_outbox(db, job_id=new_job.id)
+            if published:
+                db.commit()
+            # Legacy safety: if nothing was published (no outbox row or Redis
+            # unavailable), fall back to the direct .delay() path so a
+            # pre-outbox deployment never silently drops jobs. The task
+            # itself remains idempotent via claim_step. A Redis outage here
+            # must not fail the already-committed job creation.
+            if not published:
+                try:
+                    from app.tasks import process_transcript
+                    process_transcript.delay(new_job.id)
+                except Exception as _delay_exc:
+                    logger.warning(
+                        "Job %s committed but dispatch failed (Redis down?): %s — outbox sweep will retry",
+                        new_job.job_id, _delay_exc,
+                    )
+        else:
+            logger.info(
+                "Job %s queued (admission): %s", new_job.job_id, outcome.queue_reason
+            )
 
         return JobResponse.model_validate(new_job)
 
@@ -278,6 +336,10 @@ def list_jobs(
         data = JobStatusResponse.model_validate(job)
         if job.videos:
             data.video_title = job.videos[0].title
+        # WP2/WP5: admission state, queue position, progress, ETA for the owner.
+        from app.services.job_payload import enrich_job_payload
+
+        enrich_job_payload(db, job, data)
         results.append(data)
     return results
 
@@ -446,16 +508,24 @@ def get_job(
             joinedload(ProcessingJob.snapshots),
             joinedload(ProcessingJob.slides),
         )
-        .filter(ProcessingJob.job_id == job_id)
+        # P29-NEW-67: ownership scoped in the SQL predicate — never load
+        # another user's job graph before authorization.
+        .filter(
+            ProcessingJob.job_id == job_id,
+            ProcessingJob.user_id == current_user.id,
+        )
         .first()
     )
 
     if not job:
         raise ResourceNotFoundException("Job", job_id)
-    if job.user_id != current_user.id:
-        raise ResourceNotFoundException("Job", job_id)
 
     response = JobResponse.model_validate(job)
+
+    # WP2/WP5: admission state, queue position, progress, ETA for the owner.
+    from app.services.job_payload import enrich_job_payload
+
+    enrich_job_payload(db, job, response)
 
     _data_dir = get_settings().storage.data_dir or str(Path(__file__).resolve().parent.parent.parent / "data")
     data_root = Path(_data_dir)
@@ -510,7 +580,11 @@ def get_job_status(
     - 404: Job not found
     """
     job = _get_job_for_user(db, job_id, current_user)
-    return JobStatusResponse.model_validate(job)
+    status = JobStatusResponse.model_validate(job)
+    from app.services.job_payload import enrich_job_payload
+
+    enrich_job_payload(db, job, status)
+    return status
 
 
 # ==============================================================================
@@ -941,24 +1015,81 @@ def summarize_transcript(
     # caller did not force, do not dispatch a second task (two concurrent
     # tasks on the same job race on the document row and one can mark the
     # job failed even though the other saved a valid summary).
-    if job.summarize_status == "processing":
-        if not force:
-            return JSONResponse(
-                status_code=status.HTTP_202_ACCEPTED,
-                content={"message": "Summarization already in progress", "job_id": job_id},
-            )
-        # force: kill the running task so only one generation proceeds.
-        # Also clear the stale celery_task_id so the newly dispatched task
-        # does not skip itself via the staleness guard (a dead task id from a
-        # lost/redelivered delivery would otherwise block force re-runs).
-        if job.celery_task_id:
-            celery_app.control.revoke(job.celery_task_id, terminate=True, signal="SIGTERM")
-        job.celery_task_id = None
+    running_task_id = None
+    if job.summarize_status == "processing" and not force:
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={"message": "Summarization already in progress", "job_id": job_id},
+        )
 
-    # Dispatch background summarization task (task sets celery_task_id itself)
-    summarize_transcript_task.delay(job.id, force)
-    job.summarize_status = "processing"
+    # P17-NEW: the ENTIRE force transaction is atomic (P16-NEW-36): lock the
+    # job row, mint the generation, re-check status under the lock, update
+    # state/task-id, enqueue the outbox row, then commit ONCE. No pre-outbox
+    # commit exists, so a crash can never leave processing state without a
+    # recoverable dispatch. Revoke runs only after the durable row commits.
+    from app.services.admission import enqueue_first_stage
+    from app.services.dispatch import publish_outbox
+
+    if db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"),
+            {"job_id": job.id},
+        )
+    # P18-NEW-38: read BOTH summarize_status and celery_task_id fresh under
+    # the lock — the ORM object may predate a worker's task-id write, and
+    # revoking the stale id would leave the live worker running.
+    locked = db.execute(
+        text(
+            "SELECT summarize_status, celery_task_id FROM processing_jobs "
+            "WHERE id = :job_id"
+        ),
+        {"job_id": job.id},
+    ).first()
+    locked_status = locked[0] if locked else None
+    if job.summarize_status == "processing" or locked_status == "processing":
+        running_task_id = locked[1] if locked else job.celery_task_id
+    force_generation = _mint_force_generation(db, job.id)
+    if locked_status == "failed":
+        db.rollback()
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"message": "Summarization was cancelled; cannot force-start", "job_id": job_id},
+        )
+    # P18-NEW-38/P19-NEW-40: clear task identity with a DIRECT locked UPDATE
+    # (never a stale-ORM assignment that can be a no-op against a live id).
+    db.execute(
+        text(
+            "UPDATE processing_jobs SET celery_task_id = NULL, "
+            "summarize_status = 'processing' WHERE id = :job_id"
+        ),
+        {"job_id": job.id},
+    )
+    enqueue_first_stage(
+        db, job.id, str(uuid.uuid4()),
+        stage="summarize",
+        payload={"force": force, "force_generation": force_generation},
+    )
     db.commit()
+
+    # P15-NEW-34: state + outbox row are durable now. Revoke the old task
+    # AFTER the durable recovery state exists (P16-NEW-36): a revoke failure
+    # or crash cannot strand committed processing state without a
+    # recoverable dispatch.
+    if running_task_id:
+        try:
+            celery_app.control.revoke(running_task_id, terminate=True, signal="SIGTERM")
+        except Exception as exc:
+            logger.warning("revoke of stale task %s failed: %s", running_task_id, exc)
+
+    try:
+        publish_outbox(db, job_id=job.id)
+        db.commit()
+    except Exception as exc:
+        logger.warning(
+            "summarize dispatch publish failed for job %s (outbox will retry): %s",
+            job.id, exc,
+        )
+        db.rollback()
 
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
@@ -979,21 +1110,57 @@ def retry_job_step(
 
     if step_name not in CANONICAL_STEP_NAMES:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown processing step")
+    # P18-NEW-39: acquire the JOB row lock BEFORE resetting the step so the
+    # retry transaction follows the same job->step lock order as claim_step
+    # and the summarize task — concurrent retry/claim cannot deadlock.
+    if db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"),
+            {"job_id": job.id},
+        )
     if not retry_failed_step(db, job.id, step_name):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Step is not retryable")
-    db.commit()
 
     dispatchers = {
-        "download": lambda: process_video_download.delay(job.id),
-        "transcribe": lambda: process_transcript.delay(job.id),
-        "snapshots": lambda: process_snapshots.delay(job.id),
-        "slides": lambda: process_slides.delay(job.id),
-        "summarize": lambda: summarize_transcript_task.delay(job.id, True),
+        "download": lambda: _enqueue_stage_retry(db, job.id, "download"),
+        "transcribe": lambda: _enqueue_stage_retry(db, job.id, "transcribe"),
+        "snapshots": lambda: _enqueue_stage_retry(db, job.id, "snapshots"),
+        "slides": lambda: _enqueue_stage_retry(db, job.id, "slides"),
+        "summarize": lambda: _dispatch_summarize_retry(db, job),
     }
     if step_name == "export":
+        db.commit()
         return {"message": "Export step reset; request the export download again", "job_id": job_id}
+    if step_name == "summarize":
+        # The step reset above and _dispatch_summarize_retry's generation/
+        # status/outbox co-commit run in ONE transaction (P16-NEW-36): no
+        # pre-outbox commit exists here.
+        _dispatch_summarize_retry(db, job)
+        return {"message": f"Retry for {step_name} started", "job_id": job_id}
+    # P16-NEW-36: the step reset and the durable outbox row commit in ONE
+    # transaction (no crash gap leaving a stranded pending step).
+    from app.services.admission import enqueue_first_stage
+
+    enqueue_first_stage(db, job.id, str(uuid.uuid4()), stage=step_name)
+    db.commit()
     dispatchers[step_name]()
     return {"message": f"Retry for {step_name} started", "job_id": job_id}
+
+
+def _enqueue_stage_retry(db: Session, job_id: int, step_name: str) -> None:
+    """Publish a step retry outbox row that was committed with the reset
+    (P15-NEW-35/P16-NEW-36). The row already exists; this only delivers it."""
+    from app.services.dispatch import publish_outbox
+
+    try:
+        publish_outbox(db, job_id=job_id)
+        db.commit()
+    except Exception as exc:
+        logger.warning(
+            "step retry publish failed for job %s/%s (outbox will retry): %s",
+            job_id, step_name, exc,
+        )
+        db.rollback()
 
 
 # ==============================================================================
@@ -1030,11 +1197,30 @@ def cancel_job(
 
     # Allow cancelling an in-progress summarization on a completed job
     if job.summarize_status == "processing":
-        if job.celery_task_id:
-            celery_app.control.revoke(job.celery_task_id, terminate=True, signal="SIGTERM")
-        job.summarize_status = "failed"
-        job.celery_task_id = None
+        # P19-NEW-40: lock + fresh-read the task id under the lock, then
+        # fence with a direct UPDATE; a worker committing its id after the
+        # initial ORM read must still be captured and cleared.
+        if db.bind.dialect.name == "postgresql":
+            db.execute(
+                text("SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"),
+                {"job_id": job.id},
+            )
+        locked = db.execute(
+            text("SELECT celery_task_id FROM processing_jobs WHERE id = :job_id"),
+            {"job_id": job.id},
+        ).first()
+        running_task_id = locked[0] if locked else None
+        # Fence in the DB first, then revoke (Review Round 2 F1).
+        db.execute(
+            text(
+                "UPDATE processing_jobs SET summarize_status = 'failed', "
+                "celery_task_id = NULL WHERE id = :job_id"
+            ),
+            {"job_id": job.id},
+        )
         db.commit()
+        if running_task_id:
+            celery_app.control.revoke(running_task_id, terminate=True, signal="SIGTERM")
         db.refresh(job)
         return JobStatusResponse.model_validate(job)
 
@@ -1044,22 +1230,110 @@ def cancel_job(
             "Only pending or processing jobs can be cancelled."
         )
 
-    # Revoke the running Celery task
-    if job.celery_task_id:
-        celery_app.control.revoke(job.celery_task_id, terminate=True, signal="SIGTERM")
-
-    job.status = ProcessingStatus.CANCELLED
-    job.error_message = "Cancelled by user"
-    job.celery_task_id = None
+    # Fence in the DB FIRST, then revoke the task (Review Round 2 F1/F5/N5):
+    # the status transition and the admission release happen in ONE
+    # transaction so a crash cannot leak the active-job counter. The revoke
+    # merely terminates the in-flight OS process.
+    # Lock order JOB -> ADMISSION (Review Round 2 P8-NEW-13): explicitly lock
+    # the job row before the admission transition so a concurrent promotion
+    # (which locks job then admission) serializes with cancellation.
+    if db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"),
+            {"job_id": job.id},
+        )
+    # P19-NEW-40: fresh-read the task id under the lock so a worker that
+    # committed its id after the initial ORM read is captured; clear it with
+    # a direct UPDATE, never a stale-ORM assignment.
+    locked = db.execute(
+        text("SELECT celery_task_id FROM processing_jobs WHERE id = :job_id"),
+        {"job_id": job.id},
+    ).first()
+    running_task_id = locked[0] if locked else None
+    db.execute(
+        text(
+            "UPDATE processing_jobs SET status = 'cancelled', "
+            "error_message = 'Cancelled by user', celery_task_id = NULL "
+            "WHERE id = :job_id"
+        ),
+        {"job_id": job.id},
+    )
+    _finish_job_admission_for_route(db, job.id, failed=True)
     db.commit()
-    db.refresh(job)
 
+    # Revoke the running Celery task (after the DB fence committed).
+    if running_task_id:
+        celery_app.control.revoke(running_task_id, terminate=True, signal="SIGTERM")
+
+    db.refresh(job)
     return JobStatusResponse.model_validate(job)
 
 
 # ==============================================================================
 # DELETE JOB - DELETE /jobs/{job_id}
 # ==============================================================================
+
+def _dispatch_summarize_retry(db: Session, job, reset_step: bool = False) -> None:
+    """Retry summarization with a fresh force generation (Review Round 2 NEW-7).
+
+    P14-NEW-31: persist the authorized 'processing' state before dispatch so
+    the retried task is not skipped by the failed-status guard.
+    P15-NEW-35/P16-NEW-36: generation mint, status transition, the step
+    reset (when requested) and the durable outbox row commit in ONE
+    transaction — no crash gap stranding processing state without a
+    recoverable dispatch. When called from the step-retry route the step
+    reset already happened in the same uncommitted transaction.
+    """
+    if reset_step:
+        from app.services.job_steps import retry_failed_step
+
+        retry_failed_step(db, job.id, "summarize")
+    gen = _mint_force_generation(db, job.id)
+    job.summarize_status = "processing"
+    from app.services.admission import enqueue_first_stage
+    from app.services.dispatch import publish_outbox
+
+    enqueue_first_stage(
+        db, job.id, str(uuid.uuid4()),
+        stage="summarize",
+        payload={"force": True, "force_generation": gen},
+    )
+    db.commit()
+    try:
+        publish_outbox(db, job_id=job.id)
+        db.commit()
+    except Exception as exc:
+        logger.warning(
+            "summarize retry publish failed for job %s (outbox will retry): %s",
+            job.id, exc,
+        )
+        db.rollback()
+
+
+def _mint_force_generation(db: Session, job_id: int) -> int:
+    """Atomically bump processing_jobs.force_generation and return the new
+    value (Review Round 2 NEW-7): concurrent force requests always receive
+    distinct generations."""
+    if db.bind.dialect.name == "postgresql":
+        row = db.execute(
+            text(
+                "UPDATE processing_jobs SET force_generation = force_generation + 1 "
+                "WHERE id = :job_id RETURNING force_generation"
+            ),
+            {"job_id": job_id},
+        ).first()
+        return int(row[0]) if row else 0
+    from datetime import UTC, datetime as _dt
+
+    from app.db.models import ProcessingJob
+
+    job = db.get(ProcessingJob, job_id)
+    if job is None:
+        return 0
+    job.force_generation = (job.force_generation or 0) + 1
+    db.flush()
+    return job.force_generation
+
 
 @router.delete(
     "/{job_id}",
@@ -1075,6 +1349,10 @@ def delete_job(
     """
     Delete a processing job and cascade-delete all related data.
 
+    Active (processing/pending) jobs are rejected: deleting them would orphan
+    the admission counter and the leased sidecar slot (Review Round 2 F5).
+    The caller must cancel first, which fences and releases atomically.
+
     **Path parameters:**
     - `job_id`: UUID of the processing job to delete
 
@@ -1083,8 +1361,24 @@ def delete_job(
     **Status codes:**
     - 204: Job deleted successfully
     - 404: Job not found
+    - 422: Active job cannot be deleted (cancel it first)
     """
     job = _get_job_for_user(db, job_id, current_user)
+
+    if job.status in (ProcessingStatus.PROCESSING, ProcessingStatus.PENDING):
+        raise ValidationException(
+            "Cannot delete an active job. Cancel it first (POST /jobs/{id}/cancel)."
+        )
+    if job.summarize_status == "processing":
+        raise ValidationException(
+            "Cannot delete a job with an in-progress summarization. "
+            "Cancel it first (POST /jobs/{id}/cancel)."
+        )
+
+    # Belt-and-braces admission release for terminal-but-unfinished rows
+    # (finish is exactly-once).
+    _finish_job_admission_for_route(db, job.id)
+    db.commit()
 
     try:
         db.delete(job)
