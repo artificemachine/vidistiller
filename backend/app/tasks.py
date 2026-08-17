@@ -261,6 +261,51 @@ def _delete_document_durably(db, doc_id: int) -> bool:
         return False
 
 
+def _fail_summarize_owned(
+    db, job_id: int, task_id: str, generation: int | None, reason: str
+) -> bool:
+    """Fail the summarize stage only when this delivery still owns it
+    (P23-NEW-55): the conditional update requires the task id, the expected
+    status and (when known) the generation, so a stale worker (superseded by
+    a newer force) can never clobber the newer delivery's state. Returns
+    True when the write applied.
+    """
+    try:
+        from app.services.job_steps import fail_step
+
+        if generation is not None:
+            res = db.execute(
+                text(
+                    "UPDATE processing_jobs SET summarize_status = 'failed', "
+                    "celery_task_id = NULL "
+                    "WHERE id = :job_id AND celery_task_id = :task_id "
+                    "AND summarize_status = 'processing' "
+                    "AND force_generation = :gen"
+                ),
+                {"job_id": job_id, "task_id": task_id, "gen": generation},
+            )
+        else:
+            res = db.execute(
+                text(
+                    "UPDATE processing_jobs SET summarize_status = 'failed', "
+                    "celery_task_id = NULL "
+                    "WHERE id = :job_id AND celery_task_id = :task_id "
+                    "AND summarize_status = 'processing'"
+                ),
+                {"job_id": job_id, "task_id": task_id},
+            )
+        if res.rowcount == 1:
+            fail_step(db, job_id, "summarize", task_id, reason)
+            db.commit()
+            return True
+        db.rollback()
+        return False
+    except Exception as exc:
+        logger.warning("owned summarize fail failed for job %s: %s", job_id, exc)
+        db.rollback()
+        return False
+
+
 def _force_generation_still_valid(db, job_id: int, force_generation: int) -> bool:
     """Revalidate a force generation under the job-row lock (P9-NEW-14).
 
@@ -497,7 +542,10 @@ def _transcribe_audio(db, job_id: int, job, video_service, video_url: str) -> tu
     Download audio and transcribe via Ollama Whisper.
 
     Returns (transcript_text, detected_language) on success.
-    Sets job status to FAILED and raises on failure so the caller can propagate.
+    Raises on failure WITHOUT setting the job status: the outer task's
+    exception handler owns terminalization, which happens only at true
+    retry exhaustion (P22-NEW-51 / P23-NEW-57). Marking FAILED here would
+    make the authorized final retry skip at the entry guard.
     """
     from app.db.models import ProcessingStatus
 
@@ -1442,12 +1490,11 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
         owner = db.query(User).filter(User.id == job.user_id).first() if job.user_id else None
 
         if not job.transcripts:
-            job.summarize_status = "failed"
-            job.celery_task_id = None
-            if summarize_claimed:
-                from app.services.job_steps import fail_step
-                fail_step(db, job.id, "summarize", exec_uuid, "No transcript available")
-            db.commit()
+            # P23-NEW-55: fail only if this delivery still owns the stage.
+            _fail_summarize_owned(
+                db, job.id, self.request.id, force_generation,
+                "No transcript available",
+            )
             _add_log(db, job_id, "No transcript available for summarization", "error", "summarize")
             return {"error": "No transcript"}
 
@@ -1636,7 +1683,10 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
                 final_ok = False
             else:
                 current_gen, current_status = int(row[0]), row[1]
-                if force and force_generation is not None and current_gen != force_generation:
+                # P22-NEW-54: generation fencing applies to EVERY worker that
+                # carries a generation (non-force deliveries too) — a worker
+                # that observed generation G must not complete after G+1.
+                if force_generation is not None and current_gen != force_generation:
                     final_ok = False
                 if current_status != "processing":
                     final_ok = False
@@ -1683,17 +1733,10 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
     except CancelledException:
         logger.info(f"Summarize task cancelled for job {job_id}")
         _add_log(db, job_id, "Summarization cancelled by user", "warning", "summarize")
-        try:
-            job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
-            if job:
-                job.summarize_status = "failed"
-                job.celery_task_id = None
-                if summarize_claimed:
-                    from app.services.job_steps import fail_step
-                    fail_step(db, job.id, "summarize", exec_uuid, "Cancelled")
-                db.commit()
-        except Exception:
-            pass
+        # P23-NEW-55: fail only if this delivery still owns the stage.
+        _fail_summarize_owned(
+            db, job_id, self.request.id, force_generation, "Cancelled"
+        )
         return {"status": "cancelled"}
 
     except SidecarCapacityExhausted:
@@ -1714,22 +1757,12 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
                 return {"status": "skipped", "reason": "job already terminal"}
             if disposition == "completed":
                 # Summarize-only context on a completed conversion: fail the
-                # summarize stage (guarded so a concurrent cancellation that
-                # already fenced it is not clobbered).
-                try:
-                    from app.db.models import ProcessingJob, ProcessingStatus
-
-                    job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
-                    if (
-                        job is not None
-                        and job.status == ProcessingStatus.COMPLETED
-                        and job.summarize_status == "processing"
-                    ):
-                        job.summarize_status = "failed"
-                        job.celery_task_id = None
-                        db.commit()
-                except Exception:
-                    db.rollback()
+                # summarize stage under the ownership fence (P23-NEW-55) so a
+                # concurrent cancellation or newer force is not clobbered.
+                _fail_summarize_owned(
+                    db, job_id, self.request.id, force_generation,
+                    "No sidecar capacity available after retries",
+                )
             return {"error": "No sidecar capacity available after retries"}
         raise self.retry(exc=SidecarCapacityExhausted(str(job_id)), countdown=60)
 
@@ -1744,6 +1777,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
             # saved a valid document and marked the job completed. Do not
             # overwrite that success with a failure — the document is the
             # source of truth.
+            already_done = False
             if job:
                 already_done = (
                     job.summarize_status == "completed"
@@ -1752,13 +1786,12 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
                     .first()
                     is not None
                 )
-                if not already_done:
-                    job.summarize_status = "failed"
-                    job.celery_task_id = None
-                    if summarize_claimed:
-                        from app.services.job_steps import fail_step
-                        fail_step(db, job.id, "summarize", exec_uuid, str(e))
-                    db.commit()
+            if not already_done:
+                # P23-NEW-55: fail only if this delivery still owns the stage
+                # (generation + task id + status fenced).
+                _fail_summarize_owned(
+                    db, job_id, self.request.id, force_generation, str(e)
+                )
         except Exception:
             pass
         return {"error": str(e)}
