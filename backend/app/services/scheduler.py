@@ -140,9 +140,9 @@ def reap_orphaned_steps(db: Session) -> int:
 
     cutoff = _dt.now(UTC).replace(tzinfo=None) - _td(seconds=ORPHANED_CLAIM_TTL_SECONDS)
     # Orphaned RUNNING steps on PROCESSING jobs (pipeline stages) AND on
-    # COMPLETED jobs whose summarize_status is 'processing' (interactive
-    # summarization — P11-NEW-24): a dead worker's summarize claim must be
-    # reclaimable even though the conversion itself is completed.
+    # COMPLETED jobs whose summarize_status is 'processing' — but only the
+    # summarize step qualifies on completed jobs (P14-NEW-33): a completed
+    # conversion has no legitimate download/transcribe/slides work left.
     orphaned = (
         db.query(JobStep)
         .join(ProcessingJob, ProcessingJob.id == JobStep.job_id)
@@ -159,7 +159,11 @@ def reap_orphaned_steps(db: Session) -> int:
         for step in orphaned
         if (
             step.job.status == ProcessingStatus.PROCESSING
-            or (step.job.status == ProcessingStatus.COMPLETED and step.job.summarize_status == "processing")
+            or (
+                step.job.status == ProcessingStatus.COMPLETED
+                and step.job.summarize_status == "processing"
+                and step.name == "summarize"
+            )
         )
     ]
     reaped = 0
@@ -175,7 +179,9 @@ def reap_orphaned_steps(db: Session) -> int:
             # (cancellation updates the job row in its terminal transaction),
             # then re-check the job is still eligible (processing pipeline
             # stages, or completed conversions with an active summarize
-            # step — P11-NEW-24).
+            # step — P11-NEW-24, scoped to summarize per P14-NEW-33).
+            if step.job.status == ProcessingStatus.COMPLETED and step.name != "summarize":
+                continue  # unrelated step on a completed job: not eligible
             job_locked = db.execute(
                 text(
                     "SELECT id FROM processing_jobs WHERE id = :job_id "

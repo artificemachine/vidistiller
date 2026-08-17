@@ -1028,9 +1028,11 @@ def summarize_transcript(
         db.commit()
 
     # Dispatch background summarization task (task sets celery_task_id itself)
-    summarize_transcript_task.delay(job.id, force, force_generation)
+    # P14-NEW-31: persist the authorized 'processing' state BEFORE publishing
+    # so a fast worker never observes 'failed' and skips a legitimate run.
     job.summarize_status = "processing"
     db.commit()
+    summarize_transcript_task.delay(job.id, force, force_generation)
 
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
@@ -1150,8 +1152,13 @@ def cancel_job(
 # ==============================================================================
 
 def _dispatch_summarize_retry(db: Session, job) -> None:
-    """Retry summarization with a fresh force generation (Review Round 2 NEW-7)."""
+    """Retry summarization with a fresh force generation (Review Round 2 NEW-7).
+
+    P14-NEW-31: persist the authorized 'processing' state before dispatch so
+    the retried task is not skipped by the failed-status guard.
+    """
     gen = _mint_force_generation(db, job.id)
+    job.summarize_status = "processing"
     db.commit()
     summarize_transcript_task.delay(job.id, True, gen)
 

@@ -143,16 +143,23 @@ def _finish_admission_for_job(db, job_id: int, *, failed: bool = False) -> None:
 
 
 def _mark_stage_delivered(db, job_id: int, stage: str) -> None:
-    """Mark the newest outbox row for (job, stage) delivered (WP2)."""
+    """Mark the newest outbox row for (job, stage) delivered (WP2).
+
+    ``transcribe`` (canonical step name) and ``transcript`` (outbox/task
+    name) are the same stage (P14-NEW-32).
+    """
     try:
         from app.db.models import TaskOutbox
         from app.services.admission import mark_outbox_delivered
 
+        stage_aliases = {stage}
+        if stage in ("transcribe", "transcript"):
+            stage_aliases = {"transcribe", "transcript"}
         row = (
             db.query(TaskOutbox)
             .filter(
                 TaskOutbox.job_id == job_id,
-                TaskOutbox.stage == stage,
+                TaskOutbox.stage.in_(tuple(stage_aliases)),
                 TaskOutbox.state.in_(("pending", "published", "publishing")),
             )
             .order_by(TaskOutbox.id.desc())
@@ -1192,6 +1199,15 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
                     job_id, force_generation, job.force_generation,
                 )
                 return {"status": "skipped", "reason": "superseded by a newer force request"}
+            # P14-NEW-31: re-check the authorized status UNDER the lock — a
+            # cancellation that committed between our earlier read and this
+            # lock must not be overwritten by forced recovery.
+            if job.summarize_status == "failed":
+                logger.info(
+                    "Summarize: job %s summarization cancelled before forced start; skipping",
+                    job_id,
+                )
+                return {"status": "skipped", "reason": "summarization cancelled"}
 
         # Store Celery task ID for cancellation
         job.celery_task_id = self.request.id
