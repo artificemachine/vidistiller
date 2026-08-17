@@ -477,3 +477,75 @@ def test_concurrent_claim_is_exactly_once(db_factory):
     assert step.attempt == 1
     assert step.claim_token == won[0]
     d.close()
+
+
+def test_promotion_cancellation_race_no_leak(db_factory):
+    """A job cancelled between candidate discovery and promotion must not be
+    admitted with leaked counters (Review Round 2 NEW-8)."""
+    from app.db.models import JobAdmission, ProcessingJob, ProcessingStatus
+    from app.services.admission import admit_or_queue_job, finish_job_admission
+    from app.services.scheduler import promote_queued_jobs
+
+    db = db_factory()
+    user_id = _seed(db, global_limit=1, per_user_limit=10, slots=1)
+    job1 = _mkjob(db, user_id)
+    admit_or_queue_job(db, job1, exec_uuid="e1")
+    db.commit()
+    job2 = _mkjob(db, user_id)
+    admit_or_queue_job(db, job2, exec_uuid="e2")  # queued (global limit 1)
+    db.commit()
+
+    # Free capacity, then cancel job2 BEFORE promotion runs.
+    finish_job_admission(db, job1.id)
+    db.commit()
+    job2.status = ProcessingStatus.CANCELLED
+    job2.celery_task_id = None
+    db.commit()
+
+    # Promotion must not admit the cancelled job.
+    assert promote_queued_jobs(db) == 0
+    adm = db.execute(
+        text("SELECT state FROM job_admissions WHERE job_id = :id"),
+        {"id": job2.id},
+    ).scalar()
+    assert adm == "queued", f"cancelled job was promoted: {adm}"
+    counter = db.execute(
+        text("SELECT active FROM admission_counters WHERE key='global'")
+    ).scalar()
+    assert int(counter) == 0, f"counter leaked: {counter}"
+    db.close()
+
+
+def test_reaper_cancellation_race_no_resurrect(db_factory):
+    """The orphan reaper must not resurrect a job terminalized between
+    candidate discovery and the atomic UPDATE (Review Round 2 NEW-9)."""
+    from app.db.models import JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
+    from app.services.job_steps import claim_step
+    from app.services.scheduler import reap_orphaned_steps
+
+    db = db_factory()
+    user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
+    job = _mkjob(db, user_id)
+    from app.services.job_steps import seed_job_steps
+
+    seed_job_steps(db, job, extract_snapshots=False, is_slide_mode=False)
+    db.commit()
+    claimed = claim_step(db, job.id, "transcribe", "stale-exec")
+    assert claimed is not None
+    # Make the claim look orphaned.
+    db.execute(
+        text("UPDATE job_steps SET started_at = now() - interval '3 hours' WHERE id = :id"),
+        {"id": claimed.id},
+    )
+    db.commit()
+    # Terminalize the job (cancellation) AFTER the step became orphaned.
+    job.status = ProcessingStatus.CANCELLED
+    job.celery_task_id = None
+    db.commit()
+
+    # The reaper's atomic predicate must refuse to reset the step because the
+    # job is no longer processing.
+    assert reap_orphaned_steps(db) == 0
+    step = db.query(JobStep).filter(JobStep.id == claimed.id).first()
+    assert step.status == JobStepStatus.RUNNING, "reaper resurrected a cancelled job's step"
+    db.close()

@@ -1016,12 +1016,21 @@ def summarize_transcript(
         running_task_id = job.celery_task_id
         job.celery_task_id = None
         job.summarize_status = "processing"
+        # Monotonic force generation (Review Round 2 NEW-7): the forced task
+        # requires this generation for its takeover, so a concurrent force
+        # request bumps it and fences the older forced task out.
+        job.force_generation = (job.force_generation or 0) + 1
+        force_generation = job.force_generation
         db.commit()
         if running_task_id:
             celery_app.control.revoke(running_task_id, terminate=True, signal="SIGTERM")
+    else:
+        job.force_generation = (job.force_generation or 0) + 1
+        force_generation = job.force_generation
+        db.commit()
 
     # Dispatch background summarization task (task sets celery_task_id itself)
-    summarize_transcript_task.delay(job.id, force)
+    summarize_transcript_task.delay(job.id, force, force_generation)
     job.summarize_status = "processing"
     db.commit()
 
@@ -1053,7 +1062,7 @@ def retry_job_step(
         "transcribe": lambda: process_transcript.delay(job.id),
         "snapshots": lambda: process_snapshots.delay(job.id),
         "slides": lambda: process_slides.delay(job.id),
-        "summarize": lambda: summarize_transcript_task.delay(job.id, True),
+        "summarize": lambda: _dispatch_summarize_retry(db, job),
     }
     if step_name == "export":
         return {"message": "Export step reset; request the export download again", "job_id": job_id}
@@ -1133,6 +1142,14 @@ def cancel_job(
 # ==============================================================================
 # DELETE JOB - DELETE /jobs/{job_id}
 # ==============================================================================
+
+def _dispatch_summarize_retry(db: Session, job) -> None:
+    """Retry summarization with a fresh force generation (Review Round 2 NEW-7)."""
+    job.force_generation = (job.force_generation or 0) + 1
+    gen = job.force_generation
+    db.commit()
+    summarize_transcript_task.delay(job.id, True, gen)
+
 
 @router.delete(
     "/{job_id}",

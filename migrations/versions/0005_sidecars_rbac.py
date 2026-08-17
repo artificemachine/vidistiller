@@ -62,6 +62,10 @@ def upgrade() -> None:
         "processing_jobs",
         sa.Column("sidecar_preference", sa.String(length=64), nullable=True),
     )
+    op.add_column(
+        "processing_jobs",
+        sa.Column("force_generation", sa.Integer(), nullable=False, server_default="0"),
+    )
     op.create_index(
         "ix_processing_jobs_sidecar_preference",
         "processing_jobs",
@@ -93,5 +97,6 @@ def downgrade() -> None:
     op.drop_index("ix_user_roles_user_id", table_name="user_roles")
     op.drop_table("user_roles")
     op.drop_index("ix_processing_jobs_sidecar_preference", table_name="processing_jobs")
+    op.drop_column("processing_jobs", "force_generation")
     op.drop_column("processing_jobs", "sidecar_preference")
     op.drop_table("sidecars")

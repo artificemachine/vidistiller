@@ -78,6 +78,15 @@ def promote_queued_jobs(db: Session, limit: int = 10) -> int:
             ).first()
             if locked is None:
                 continue  # promoted by another scheduler or no longer queued
+            # Consistent lock order job -> admission (Review Round 2 NEW-8):
+            # lock the JOB row so a concurrent cancellation (which updates the
+            # job row in its terminal transaction) serializes with us.
+            db.execute(
+                text(
+                    "SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"
+                ),
+                {"job_id": job_id},
+            )
         job = db.get(ProcessingJob, job_id)
         if job is None:
             continue
@@ -137,16 +146,19 @@ def reap_orphaned_steps(db: Session) -> int:
     )
     reaped = 0
     for step in orphaned:
-        # Atomic conditional reclamation (Review Round 2 NEW-2): the UPDATE
-        # re-checks the stale started_at AND the status so a newer claim
-        # (force takeover, another replica) can never be clobbered, and the
+        # Atomic conditional reclamation (Review Round 2 NEW-2/NEW-9): the
+        # UPDATE re-checks the stale started_at AND the status AND the job's
+        # terminal state so a newer claim (force takeover, another replica)
+        # or a concurrently terminalized job can never be clobbered; the
         # rowcount gate prevents duplicate outbox rows from concurrent
         # scheduler replicas.
         result = db.execute(
             text(
                 "UPDATE job_steps SET status = 'pending', claim_token = NULL, "
                 "percent = 0, started_at = NULL, finished_at = NULL, error_message = NULL "
-                "WHERE id = :id AND status = 'running' AND started_at < :cutoff"
+                "WHERE id = :id AND status = 'running' AND started_at < :cutoff "
+                "AND EXISTS (SELECT 1 FROM processing_jobs pj "
+                "WHERE pj.id = job_steps.job_id AND pj.status = 'processing')"
             ),
             {"id": step.id, "cutoff": cutoff},
         )

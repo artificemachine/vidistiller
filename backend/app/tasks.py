@@ -279,6 +279,32 @@ def _record_capacity_queue_reason(db, job) -> None:
         db.rollback()
 
 
+def _terminalize_capacity_exhausted(db, job_id: int) -> None:
+    """Terminalize a job whose capacity retries are exhausted (Review Round 2 NEW-6).
+
+    Celery retries are finite; after the last capacity retry the job must not
+    stay admitted/processing with counters held forever. Mark it failed with
+    a visible capacity reason and release the admission exactly once.
+    """
+    try:
+        from app.db.models import ProcessingJob, ProcessingStatus
+
+        job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+        if job is not None and job.status in (
+            ProcessingStatus.PENDING, ProcessingStatus.PROCESSING,
+        ):
+            job.status = ProcessingStatus.FAILED
+            job.error_message = "No sidecar capacity available after retries"
+            job.celery_task_id = None
+            if job.processing_mode == "slide_aware":
+                job.slide_status = "failed"
+            _finish_admission_for_job(db, job_id, failed=True)
+        db.commit()
+    except Exception as exc:
+        logger.warning("capacity-exhausted terminalize failed for job %s: %s", job_id, exc)
+        db.rollback()
+
+
 # ==============================================================================
 # TRANSCRIPT TASK HELPERS
 # ==============================================================================
@@ -870,13 +896,16 @@ def _resolve_job_llm(db, job, task=None, required_context_tokens: int = 0):
 # ==============================================================================
 
 @celery_app.task(bind=True, name="summarize_transcript", max_retries=3)
-def summarize_transcript_task(self, job_id: int, force: bool = False):
+def summarize_transcript_task(self, job_id: int, force: bool = False, force_generation: int | None = None):
     """
     Summarize a job's transcript in the background via LLM.
 
     Args:
         job_id: Database ID of the ProcessingJob
         force: If true, delete existing summary before regenerating
+        force_generation: Monotonic generation minted by the force route;
+            the takeover only applies when it still matches, so concurrent
+            force requests cannot clobber each other (Review Round 2 NEW-7).
     """
     from pathlib import Path
     from app.db.session import SessionLocal
@@ -993,6 +1022,14 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
                 # is authorized (Review Round 2 N1). Rowcount-checked so a
                 # concurrent claimer cannot be clobbered; accepts both a
                 # RUNNING step and a COMPLETED step (force regeneration).
+                # When a force_generation was minted, it must still match the
+                # job's current generation (Review Round 2 NEW-7) — a newer
+                # concurrent force bumps it and fences this takeover out.
+                gen_guard = ""
+                gen_params: dict = {"token": exec_uuid, "job_id": job.id}
+                if force_generation is not None:
+                    gen_guard = "AND force_generation = :gen"
+                    gen_params["gen"] = force_generation
                 if db.bind.dialect.name == "postgresql":
                     taken = db.execute(
                         text(
@@ -1000,22 +1037,23 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
                             "started_at = now(), attempt = attempt + 1, finished_at = NULL, "
                             "error_message = NULL "
                             "WHERE job_id = :job_id AND name = 'summarize' "
-                            "AND status IN ('running', 'completed')"
+                            "AND status IN ('running', 'completed') " + gen_guard
                         ),
-                        {"token": exec_uuid, "job_id": job.id},
+                        gen_params,
                     )
                 else:
                     from datetime import UTC, datetime as _dt
 
+                    gen_params["now"] = _dt.now(UTC).replace(tzinfo=None)
                     taken = db.execute(
                         text(
                             "UPDATE job_steps SET status = 'running', claim_token = :token, "
                             "started_at = :now, attempt = attempt + 1, finished_at = NULL, "
                             "error_message = NULL "
                             "WHERE job_id = :job_id AND name = 'summarize' "
-                            "AND status IN ('running', 'completed')"
+                            "AND status IN ('running', 'completed') " + gen_guard
                         ),
-                        {"token": exec_uuid, "job_id": job.id, "now": _dt.now(UTC).replace(tzinfo=None)},
+                        gen_params,
                     )
                 db.commit()
                 summarize_claimed = taken.rowcount == 1
@@ -1189,6 +1227,11 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
 
     except SidecarCapacityExhausted:
         logger.info("Summarize: job %s queued on sidecar capacity", job_id)
+        if self.request.retries >= self.max_retries:
+            # Retries exhausted: terminalize and release admission instead of
+            # leaving the job admitted forever (Review Round 2 NEW-6).
+            _terminalize_capacity_exhausted(db, job_id)
+            return {"error": "No sidecar capacity available after retries"}
         raise self.retry(exc=SidecarCapacityExhausted(str(job_id)), countdown=60)
 
     except Exception as e:
@@ -1255,6 +1298,10 @@ def process_snapshots(self, job_id: int):
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if job is None:
             return {"error": f"Job {job_id} not found"}
+        # Terminal guard (Review Round 2 NEW-9): a job terminalized between
+        # dispatch and execution must not be resurrected by redriven work.
+        if job.status in (ProcessingStatus.COMPLETED, ProcessingStatus.CANCELLED):
+            return {"status": "skipped", "reason": "job is terminal"}
         claimed = claim_step(db, job.id, "snapshots", exec_uuid)
         if claimed is None:
             return {"status": "skipped", "reason": "step is not retryable"}
@@ -1495,8 +1542,12 @@ def process_slides(self, job_id: int):
         # No slot available: the job stays admitted (counters held), the
         # admission row shows the capacity reason, and the task retries with
         # a bounded countdown — never overcommitting, never failing the job
-        # ambiguously (Review Round 2 F3/F6).
+        # ambiguously (Review Round 2 F3/F6). On exhaustion, terminalize and
+        # release admission (Review Round 2 NEW-6).
         logger.info("Slide task: job %s queued on sidecar capacity", job_id)
+        if self.request.retries >= self.max_retries:
+            _terminalize_capacity_exhausted(db, job_id)
+            return {"error": "No sidecar capacity available after retries"}
         raise self.retry(exc=SidecarCapacityExhausted(str(job_id)), countdown=60)
 
     except CancelledException:

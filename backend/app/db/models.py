@@ -119,6 +119,11 @@ class ProcessingJob(Base):
     # WP3: server-side sidecar registry id, or None/"auto" for automatic
     # routing. Only an exact registered id is accepted (never a URL).
     sidecar_preference: Optional[str] = Column(String(64), nullable=True, index=True)
+    # Monotonic generation for forced re-summarization (Review Round 2 NEW-7):
+    # the force route bumps it and the forced task's takeover requires the
+    # matching generation, so concurrent force requests cannot clobber each
+    # other's claims.
+    force_generation: int = Column(Integer, nullable=False, default=0, server_default="0")
     user_id: Optional[int] = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: datetime = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at: datetime = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
