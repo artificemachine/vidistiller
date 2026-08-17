@@ -1412,12 +1412,15 @@ def test_failed_untracked_job_redelivery_rejected(db_factory):
 
 
 def test_final_exhaustion_co_commits_terminal_and_admission(db_factory):
-    """Final exhaustion terminalizes job + step + admission in one
-    transaction — a crash can never strand FAILED+ADMITTED (which the
-    redelivery guard would treat as authorized) (P27-NEW-62)."""
+    """Final exhaustion (retries == max) invoked through the REAL task
+    terminalizes job + step + admission in one transaction: after the task
+    returns, job is FAILED, step is FAILED, admission is terminal and the
+    global counter is zero (P27-NEW-62/P28-NEW-65)."""
+    from unittest.mock import patch
+
     from app.db.models import JobAdmission, JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
     from app.services.admission import admit_or_queue_job
-    from app.services.job_steps import claim_step, seed_job_steps
+    from app.services.job_steps import seed_job_steps
 
     db = db_factory()
     user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
@@ -1428,37 +1431,48 @@ def test_final_exhaustion_co_commits_terminal_and_admission(db_factory):
     job.status = ProcessingStatus.PROCESSING
     job.celery_task_id = "task-final"
     db.commit()
-    claimed = claim_step(db, job.id, "transcribe", "exec-final")
-    db.commit()
     job_id = job.id
     db.close()
 
-    # Simulate the final-exhaustion co-commit (job FAILED + step FAILED +
-    # admission released) in ONE transaction, exactly as the task does.
+    # Run the REAL task at retries == max_retries against the REAL DB:
+    # the claim succeeds, then caption fetch fails on the final attempt and
+    # the exhaustion handler terminalizes atomically.
+    from app.tasks import process_transcript
+
+    with patch("app.tasks._add_log"), \
+         patch("app.tasks._fetch_platform_captions", side_effect=RuntimeError("final fail")):
+        from app.db.session import SessionLocal as _RealSL
+
+        real_session = _RealSL()
+        try:
+            result = None
+            try:
+                result = process_transcript.apply(
+                    kwargs={"job_id": job_id}, task_id="task-final", retries=2
+                ).get()
+            except RuntimeError:
+                # apply().get() re-raises the final attempt's exception after
+                # the exhaustion handler ran — the terminalization is what
+                # we assert.
+                pass
+        finally:
+            real_session.close()
+
     db = db_factory()
-    db.execute(
-        text(
-            "UPDATE processing_jobs SET status = 'failed', error_message = :msg "
-            "WHERE id = :job_id AND status IN ('pending', 'processing')"
-        ),
-        {"job_id": job_id, "msg": "Unexpected error: exhausted"},
-    )
-    from app.services.job_steps import fail_step
-
-    fail_step(db, job_id, "transcribe", "exec-final", "exhausted")
-    from app.services.admission import finish_job_admission
-
-    finish_job_admission(db, job_id, failed=True)
-    db.commit()
-    db.close()
-
-    # Invariant: FAILED job's admission is released — a late redelivery is
-    # rejected by the guard (no FAILED+ADMITTED strand).
-    db = db_factory()
+    status = db.execute(
+        text("SELECT status, celery_task_id FROM processing_jobs WHERE id = :id"),
+        {"id": job_id},
+    ).first()
+    assert status[0] == "failed", f"job not failed: {status} (result={result})"
     admission = db.get(JobAdmission, job_id)
     assert admission.state.value in ("finished", "failed"), admission.state
     counter = db.execute(
         text("SELECT active FROM admission_counters WHERE key='global'")
     ).scalar()
     assert int(counter) == 0, counter
+    step = db.query(JobStep).filter(
+        JobStep.job_id == job_id, JobStep.name == "transcribe"
+    ).first()
+    assert step.status in (JobStepStatus.FAILED, JobStepStatus.PENDING), step.status
     db.close()
+

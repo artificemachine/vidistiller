@@ -804,6 +804,10 @@ def process_transcript(self, job_id: int):
     # message retains request.id but gets a fresh exec_uuid, so it cannot
     # re-claim a step the previous incarnation still owns.
     exec_uuid = _mint_exec_uuid()
+    # P28-NEW-66: initialize exception-handler state BEFORE the main try —
+    # an early final-attempt failure must not hit UnboundLocalError in the
+    # exhaustion handler (which would prevent terminalization).
+    transcribe_claim = None
     db = SessionLocal()
     try:
         # 1. Load job
@@ -913,7 +917,6 @@ def process_transcript(self, job_id: int):
 
         video_service = VideoService()
         steps_enabled = bool(job.steps)
-        transcribe_claim = None
         if _has_persisted_steps(job):
             from app.services.job_steps import claim_step
 
