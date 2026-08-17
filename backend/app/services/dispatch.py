@@ -106,7 +106,17 @@ def publish_outbox(
             db.commit()
             continue
         try:
-            task.delay(row.job_id)
+            payload = row.payload or {}
+            if row.stage == "summarize" and payload.get("force"):
+                # Orphan-reaped summarize on a completed conversion: mint a
+                # fresh force generation and pass it (P12-NEW-26).
+                from app.routes.jobs import _mint_force_generation
+
+                gen = _mint_force_generation(db, row.job_id)
+                db.commit()
+                task.delay(row.job_id, True, gen)
+            else:
+                task.delay(row.job_id)
         except Exception as exc:
             logger.error("outbox publish failed for row %d: %s", row.id, exc)
             db.rollback()

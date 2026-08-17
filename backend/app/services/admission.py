@@ -415,15 +415,17 @@ def _enqueue_outbox(
 
 
 def enqueue_first_stage(
-    db: Session, job_id: int, exec_uuid: str, stage: str = "transcript"
+    db: Session, job_id: int, exec_uuid: str, stage: str = "transcript",
+    payload: Optional[dict] = None,
 ) -> TaskOutbox:
     """Write the concrete first-stage outbox row (WP2, Review Round 2 F2).
 
     The outbox holds the actual Celery stage (``transcript``, ``download``,
     …) — never an abstract ``dispatch`` marker — so the publish bridge can
-    map it directly to a task.
+    map it directly to a task. ``payload`` carries stage context (e.g.
+    summarize force) that the dispatcher forwards to the task (P12-NEW-26).
     """
-    return _enqueue_outbox(db, job_id, stage, exec_uuid)
+    return _enqueue_outbox(db, job_id, stage, exec_uuid, payload=payload)
 
 
 def mark_outbox_published(db: Session, outbox_id: int) -> None:

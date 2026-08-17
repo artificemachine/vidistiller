@@ -237,6 +237,23 @@ class SidecarCapacityExhausted(Exception):
     """
 
 
+def _delete_document_durably(db, doc_id: int) -> bool:
+    """Delete a document in its own committed transaction (P11-NEW-25).
+
+    The document was already committed by save_document; deleting in a fresh
+    committed transaction guarantees the stale artifact cannot survive a
+    rollback of the surrounding scope.
+    """
+    try:
+        db.execute(text("DELETE FROM documents WHERE id = :doc_id"), {"doc_id": doc_id})
+        db.commit()
+        return True
+    except Exception as exc:
+        logger.warning("durable document delete failed for doc %s: %s", doc_id, exc)
+        db.rollback()
+        return False
+
+
 def _force_generation_still_valid(db, job_id: int, force_generation: int) -> bool:
     """Revalidate a force generation under the job-row lock (P9-NEW-14).
 
@@ -327,6 +344,7 @@ def _terminalize_capacity_exhausted(db, job_id: int) -> str:
         # post-lock snapshot that cannot race a concurrently committing
         # claim. The conditional NOT EXISTS UPDATE below remains as the
         # atomic fail gate.
+        job_status_observed = None
         if db.bind.dialect.name == "postgresql":
             job_row = db.execute(
                 text(
@@ -336,15 +354,16 @@ def _terminalize_capacity_exhausted(db, job_id: int) -> str:
             ).first()
             if job_row is None:
                 return "already"
-            if job_row[0] == "completed":
-                return "completed"  # summarize-only context (P11-NEW-21)
-            if job_row[0] not in ("pending", "processing"):
-                return "already"  # terminal (failed/cancelled) or gone
+            job_status_observed = job_row[0]
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if job is None:
             return "already"
-        # Guard: any step running under a claim we do NOT own means another
-        # incarnation is actively processing — never terminalize it.
+        if job_status_observed is None:
+            job_status_observed = job.status.value
+        # Guard FIRST (P11-NEW-21): any step running under a claim we do NOT
+        # own means another incarnation is actively processing — never
+        # terminalize, regardless of job status (a completed conversion can
+        # still have an active summarize step).
         running_steps = (
             db.query(JobStep)
             .filter(JobStep.job_id == job_id, JobStep.status == JobStepStatus.RUNNING)
@@ -357,6 +376,12 @@ def _terminalize_capacity_exhausted(db, job_id: int) -> str:
                     job_id, step.name,
                 )
                 return "owned"
+        # THEN terminal-state disposition (dialect-safe: derived from the
+        # loaded ORM row on SQLite, from the locked row on PostgreSQL).
+        if job_status_observed == "completed":
+            return "completed"  # summarize-only context (P11-NEW-21)
+        if job_status_observed not in ("pending", "processing"):
+            return "already"  # terminal (failed/cancelled) or gone
         if job.status in (
             ProcessingStatus.PENDING, ProcessingStatus.PROCESSING,
         ):
@@ -648,6 +673,8 @@ def process_video_download(self, job_id: int):
         # P11-NEW-23: the claim was committed before the slow network/file
         # work; revalidate the job's terminal state under a fresh lock so a
         # concurrent cancellation cannot be resurrected by this worker.
+        # P12-NEW-27: the dependent dispatch is gated on the download step
+        # completion actually succeeding under our claim token.
         if db.bind.dialect.name == "postgresql":
             job_row = db.execute(
                 text(
@@ -659,7 +686,13 @@ def process_video_download(self, job_id: int):
                 fail_step(db, job.id, "download", exec_uuid, "job terminalized during download")
                 db.commit()
                 return {"job_id": job_id, "status": "skipped", "reason": "job is terminal"}
-        complete_step(db, job.id, "download", exec_uuid, {"path": Path(video_path).name})
+        step_done = complete_step(db, job.id, "download", exec_uuid, {"path": Path(video_path).name})
+        if not step_done:
+            # We lost the download claim (reaped or taken over): never
+            # mutate job state or dispatch dependent work on a claim we do
+            # not own (P12-NEW-27).
+            db.rollback()
+            return {"job_id": job_id, "status": "skipped", "reason": "download claim lost"}
         dependent_step = (
             "slides"
             if job.processing_mode == ProcessingMode.SLIDE_AWARE.value
@@ -874,6 +907,9 @@ def process_transcript(self, job_id: int):
                 if download_claim:
                     # P11-NEW-23: revalidate terminal state after the slow
                     # download before completing the step or dispatching.
+                    # P12-NEW-27: gate on the step completion result — a
+                    # lost claim must never dispatch dependent work.
+                    download_lost = False
                     if db.bind.dialect.name == "postgresql":
                         job_row = db.execute(
                             text(
@@ -885,7 +921,12 @@ def process_transcript(self, job_id: int):
                             fail_step(db, job.id, "download", exec_uuid, "job terminalized during download")
                             db.commit()
                             return {"status": "skipped", "reason": "job is terminal"}
-                    complete_step(db, job.id, "download", exec_uuid, {"path": _Path(video_path).name})
+                    if not complete_step(db, job.id, "download", exec_uuid, {"path": _Path(video_path).name}):
+                        download_lost = True
+                    if download_lost:
+                        db.rollback()
+                        _add_log(db, job_id, "Download claim lost; not dispatching dependent work", "warning", "video_download")
+                        return {"status": "skipped", "reason": "download claim lost"}
                 logger.info(f"Video downloaded for job {job_id}: {video_path}")
             except Exception as e:
                 if download_claim:
@@ -1428,6 +1469,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
                     "Summarize: job %s force generation superseded before final save; aborting",
                     job_id,
                 )
+                _release_summarize_claim(db, job_id, exec_uuid)
                 return {"status": "skipped", "reason": "superseded by a newer force request"}
         doc = llm.save_document(db, job.id, title, summary_content, "summary")
 
@@ -1493,11 +1535,14 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
         if not final_ok:
             # A newer force/cancellation won while the LLM ran: discard the
             # document and release the claim rather than overwriting state.
-            try:
-                db.query(Document).filter(Document.id == doc.id).delete()
-            except Exception:
-                pass
+            # The document delete is DURABLE (P11-NEW-25): save_document
+            # already committed it, so a rollback here would silently keep
+            # the stale document — delete in its own committed transaction
+            # and surface failure rather than acknowledging stale work.
+            cleanup_ok = _delete_document_durably(db, doc.id)
             _release_summarize_claim(db, job_id, exec_uuid)
+            if not cleanup_ok:
+                return {"error": "stale document cleanup failed"}
             return {"status": "skipped", "reason": "superseded before completion"}
 
         job.summarize_status = "completed"
@@ -1510,12 +1555,13 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
             )
             if not step_done:
                 # We lost the step claim (another incarnation took over):
-                # do not mark the job completed on our behalf.
-                try:
-                    db.query(Document).filter(Document.id == doc.id).delete()
-                except Exception:
-                    pass
+                # do not mark the job completed on our behalf. Durable
+                # delete of the just-committed document (P11-NEW-22).
                 db.rollback()
+                cleanup_ok = _delete_document_durably(db, doc.id)
+                _release_summarize_claim(db, job_id, exec_uuid)
+                if not cleanup_ok:
+                    return {"error": "stale document cleanup failed"}
                 return {"status": "skipped", "reason": "summarize claim lost before completion"}
         db.commit()
         _add_log(db, job_id, "Summarization completed", "info", "summarize")

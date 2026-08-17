@@ -173,33 +173,56 @@ def reap_orphaned_steps(db: Session) -> int:
         if db.bind.dialect.name == "postgresql":
             # Serialize with cancellation: take the job row lock FIRST
             # (cancellation updates the job row in its terminal transaction),
-            # then re-check the job is still processing.
+            # then re-check the job is still eligible (processing pipeline
+            # stages, or completed conversions with an active summarize
+            # step — P11-NEW-24).
             job_locked = db.execute(
                 text(
                     "SELECT id FROM processing_jobs WHERE id = :job_id "
-                    "AND status = 'processing' FOR UPDATE"
+                    "AND (status = 'processing' OR "
+                    "(status = 'completed' AND summarize_status = 'processing')) "
+                    "FOR UPDATE"
                 ),
                 {"job_id": step.job_id},
             ).first()
             if job_locked is None:
-                continue  # job terminalized concurrently
+                continue  # job terminalized concurrently or not eligible
+            if step.job.status == ProcessingStatus.COMPLETED:
+                # Re-dispatched summarize work must not be fenced out by a
+                # stale celery_task_id from the dead delivery, and the
+                # summarize_status must stay 'processing' so the fresh task
+                # runs (P12-NEW-26).
+                db.execute(
+                    text(
+                        "UPDATE processing_jobs SET celery_task_id = NULL "
+                        "WHERE id = :job_id AND status = 'completed' "
+                        "AND summarize_status = 'processing'"
+                    ),
+                    {"job_id": step.job_id},
+                )
         result = db.execute(
             text(
                 "UPDATE job_steps SET status = 'pending', claim_token = NULL, "
                 "percent = 0, started_at = NULL, finished_at = NULL, error_message = NULL "
                 "WHERE id = :id AND status = 'running' AND started_at < :cutoff "
                 "AND EXISTS (SELECT 1 FROM processing_jobs pj "
-                "WHERE pj.id = job_steps.job_id AND pj.status = 'processing')"
+                "WHERE pj.id = job_steps.job_id AND (pj.status = 'processing' OR "
+                "(pj.status = 'completed' AND pj.summarize_status = 'processing')))"
             ),
             {"id": step.id, "cutoff": cutoff},
         )
         if result.rowcount != 1:
             continue  # another replica reclaimed it (or a newer claim exists)
-        # Re-dispatch the stage via the durable outbox.
+        # Re-dispatch the stage via the durable outbox. For summarize on a
+        # completed conversion the outbox payload carries the summarize
+        # force flag so the fresh delivery keeps its context (P12-NEW-26).
         from app.services.admission import enqueue_first_stage
 
+        payload = None
+        if step.name == "summarize" and step.job.status == ProcessingStatus.COMPLETED:
+            payload = {"force": True}
         enqueue_first_stage(
-            db, step.job_id, str(uuid.uuid4()), stage=step.name
+            db, step.job_id, str(uuid.uuid4()), stage=step.name, payload=payload
         )
         reaped += 1
         logger.warning(
