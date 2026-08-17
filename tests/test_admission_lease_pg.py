@@ -1305,9 +1305,8 @@ def test_admitted_final_transcript_retry_is_not_skipped(db_factory):
             "celery_task_id = :task_id "
             "WHERE id = :job_id AND (celery_task_id IS NULL OR celery_task_id = :task_id) "
             "AND (status IN ('pending', 'processing') "
-            "OR (status = 'failed' AND NOT EXISTS (SELECT 1 FROM job_admissions ja "
-            "WHERE ja.job_id = processing_jobs.id "
-            "AND ja.state IN ('finished', 'failed'))))"
+            "OR (status = 'failed' AND EXISTS (SELECT 1 FROM job_admissions ja "
+            "WHERE ja.job_id = processing_jobs.id AND ja.state = 'admitted')))"
         ),
         {"job_id": job_id, "task_id": "final-retry"},
     )
@@ -1323,8 +1322,11 @@ def test_admitted_final_transcript_retry_is_not_skipped(db_factory):
 
 
 def test_failed_queued_job_redelivery_rejected(db_factory):
-    """A FAILED job whose admission is QUEUED (not admitted) must not re-enter
-    processing — it holds no counter and is not dispatchable (P25-NEW-60)."""
+    """A FAILED job whose admission is QUEUED must be skipped by the REAL
+    transcript task at retries == max_retries — no re-entry, no task-id
+    install, no work (P25-NEW-60/P26-NEW-61)."""
+    from unittest.mock import patch
+
     from app.db.models import JobAdmission, JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
     from app.services.admission import admit_or_queue_job
     from app.services.job_steps import seed_job_steps
@@ -1335,39 +1337,44 @@ def test_failed_queued_job_redelivery_rejected(db_factory):
     admit_or_queue_job(db, job1, exec_uuid="e1")
     db.commit()
     job2 = _mkjob(db, user_id)
-    # job2 becomes QUEUED (global limit 1 held by job1).
-    admit_or_queue_job(db, job2, exec_uuid="e2")
+    admit_or_queue_job(db, job2, exec_uuid="e2")  # QUEUED (global limit held)
     db.commit()
     job2.status = ProcessingStatus.FAILED
     db.commit()
     job_id = job2.id
     db.close()
 
+    from app.tasks import process_transcript
+
+    # Run the REAL task against the REAL DB (only log writing mocked): the
+    # entry guard must read the actual queued admission and skip.
+    from app.db.session import SessionLocal as _RealSL
+
+    real_session = _RealSL()
+    with patch("app.db.session.SessionLocal", return_value=real_session), \
+         patch("app.tasks._add_log"):
+        result = process_transcript.apply(
+            kwargs={"job_id": job_id}, task_id="late-redelivery", retries=2
+        ).get()
+    real_session.close()
+
+    assert result == {"job_id": job_id, "status": "failed", "skipped": True}, result
     db = db_factory()
-    admission = db.get(JobAdmission, job_id)
-    assert admission.state.value == "queued", admission.state
-    # The FAILED re-entry predicate requires positively ADMITTED — must fail.
-    claimed = db.execute(
-        text(
-            "UPDATE processing_jobs SET status = 'processing', "
-            "celery_task_id = :task_id "
-            "WHERE id = :job_id AND (celery_task_id IS NULL "
-            "OR celery_task_id = :task_id) "
-            "AND (status IN ('pending', 'processing') "
-            "OR (status = 'failed' AND EXISTS (SELECT 1 FROM job_admissions ja "
-            "WHERE ja.job_id = processing_jobs.id AND ja.state = 'admitted')))"
-        ),
-        {"job_id": job_id, "task_id": "late-redelivery"},
-    )
-    assert claimed.rowcount == 0, "queued FAILED job was re-entered"
-    db.rollback()
+    status = db.execute(
+        text("SELECT status, celery_task_id FROM processing_jobs WHERE id = :id"),
+        {"id": job_id},
+    ).first()
+    assert status[0] == "failed", status
+    assert status[1] is None, f"task id installed on queued job: {status[1]}"
     db.close()
 
 
 def test_failed_untracked_job_redelivery_rejected(db_factory):
-    """A FAILED job with NO admission row (legacy) must not re-enter
-    processing outside admission accounting (P25-NEW-60)."""
-    from app.db.models import JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
+    """A FAILED job with NO admission row must be skipped by the REAL
+    transcript task at retries == max_retries (P25-NEW-60/P26-NEW-61)."""
+    from unittest.mock import patch
+
+    from app.db.models import ProcessingJob, ProcessingStatus
     from app.services.job_steps import seed_job_steps
 
     db = db_factory()
@@ -1378,20 +1385,27 @@ def test_failed_untracked_job_redelivery_rejected(db_factory):
     job_id = job.id
     db.close()
 
+    from app.tasks import process_transcript
+
+    # Real task against the real DB: the guard must skip an untracked FAILED
+    # job at retries == max_retries.
+    from app.db.session import SessionLocal as _RealSL
+
+    real_session = _RealSL()
+    with patch("app.db.session.SessionLocal", return_value=real_session), \
+         patch("app.tasks._add_log"):
+        result = process_transcript.apply(
+            kwargs={"job_id": job_id}, task_id="late-redelivery", retries=2
+        ).get()
+    real_session.close()
+
+    assert result == {"job_id": job_id, "status": "failed", "skipped": True}, result
     db = db_factory()
-    assert db.get(__import__("app.db.models", fromlist=["JobAdmission"]).JobAdmission, job_id) is None
-    claimed = db.execute(
-        text(
-            "UPDATE processing_jobs SET status = 'processing', "
-            "celery_task_id = :task_id "
-            "WHERE id = :job_id AND (celery_task_id IS NULL "
-            "OR celery_task_id = :task_id) "
-            "AND (status IN ('pending', 'processing') "
-            "OR (status = 'failed' AND EXISTS (SELECT 1 FROM job_admissions ja "
-            "WHERE ja.job_id = processing_jobs.id AND ja.state = 'admitted')))"
-        ),
-        {"job_id": job_id, "task_id": "late-redelivery"},
-    )
-    assert claimed.rowcount == 0, "untracked FAILED job was re-entered"
-    db.rollback()
+    status = db.execute(
+        text("SELECT status, celery_task_id FROM processing_jobs WHERE id = :id"),
+        {"id": job_id},
+    ).first()
+    assert status[0] == "failed", status
+    assert status[1] is None
     db.close()
+
