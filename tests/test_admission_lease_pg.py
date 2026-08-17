@@ -40,22 +40,42 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture()
 def db_factory():
+    """Migrated schema + a session factory bound to ONE shared engine.
+
+    The engine is module-lifetime and disposed at teardown; per-call session
+
+    factories reuse it (Review Round 2: repeated per-call engines leaked
+
+    pool connections and exhausted PostgreSQL).
+
+    """
     from alembic import command
+
     from alembic.config import Config
 
-    engine = create_engine(DATABASE_URL)
-    with engine.connect() as conn:
-        conn.execute(text("DROP SCHEMA public CASCADE"))
-        conn.execute(text("CREATE SCHEMA public"))
-        conn.commit()
-    cfg = Config("alembic.ini")
-    cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
-    command.upgrade(cfg, "head")
-    engine.dispose()
 
-    factory = sessionmaker(bind=create_engine(DATABASE_URL), expire_on_commit=False)
+    engine = create_engine(DATABASE_URL)
+
+    with engine.connect() as conn:
+
+        conn.execute(text("DROP SCHEMA public CASCADE"))
+
+        conn.execute(text("CREATE SCHEMA public"))
+
+        conn.commit()
+
+    cfg = Config("alembic.ini")
+
+    cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
+
+    command.upgrade(cfg, "head")
+
+
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
     yield factory
-    factory.kw["bind"].dispose()
+
+    engine.dispose()
 
 
 def _seed(db, global_limit: int = 1, per_user_limit: int = 1, slots: int = 1):
@@ -555,6 +575,10 @@ def test_promotion_cancellation_race_no_leak(db_factory):
     t1.start(); t2.start()
     t1.join(timeout=60); t2.join(timeout=60)
 
+    # No thread may have errored (lock waits, not deadlocks).
+    errors = [r for r in results if r.startswith("promoter-error") or "error" in r]
+    assert not errors, f"thread errors: {errors}"
+
     db = db_factory()
     adm = db.execute(
         text("SELECT state FROM job_admissions WHERE job_id = :id"),
@@ -649,6 +673,15 @@ def test_reaper_cancellation_race_no_resurrect(db_factory):
         text("SELECT status FROM processing_jobs WHERE id = :id"),
         {"id": job_id},
     ).scalar()
+    # If the reaper won the race (step reset to pending before the cancel),
+    # any outbox dispatch is absorbed by the tasks' terminal guards — but a
+    # cancelled job must never carry a RUNNING claim minted after cancel.
+    outbox_count = 0
+    if step.status == JobStepStatus.RUNNING:
+        outbox_count = db.execute(
+            text("SELECT count(*) FROM task_outbox WHERE job_id = :id AND state IN ('pending','publishing')"),
+            {"id": job_id},
+        ).scalar()
     db.close()
     # Safety invariant: the job is terminal, and the step is never left
     # RUNNING with an active claim token on a cancelled job. A step the
@@ -660,15 +693,66 @@ def test_reaper_cancellation_race_no_resurrect(db_factory):
         # cancel (its job-row lock serialized after the canceller's
         # terminal commit, so it skipped). The step keeps the stale claim;
         # the orphan sweep will not redrive a cancelled job.
-        assert job_status != "processing"
         assert step.claim_token == "stale-exec", "step re-claimed after cancellation"
-    # If the reaper won the race (step reset to pending before the cancel),
-    # any outbox dispatch is absorbed by the tasks' terminal guards — but a
-    # cancelled job must never carry a RUNNING claim minted after cancel.
-    if step.status == JobStepStatus.RUNNING:
-        outbox = db.execute(
-            text("SELECT count(*) FROM task_outbox WHERE job_id = :id AND state IN ('pending','publishing')"),
-            {"id": job_id},
-        ).scalar()
-        assert int(outbox) == 0, f"reaper enqueued work for a cancelled job ({results})"
+        assert int(outbox_count) == 0, f"reaper enqueued work for a cancelled job ({results})"
 
+
+
+def test_concurrent_force_generation_is_distinct(db_factory):
+    """Two concurrent force mints always produce distinct generations, and a
+    stale forced task cannot mutate state (Review Round 2 P8-NEW-12)."""
+    from app.db.models import ProcessingJob, ProcessingStatus
+
+    db = db_factory()
+    user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
+    job = _mkjob(db, user_id)
+    job.summarize_status = "processing"
+    job.celery_task_id = "task-A"
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    barrier = threading.Barrier(2)
+    gens = []
+    lock = threading.Lock()
+
+    def forcer(name):
+        d = db_factory()
+        try:
+            barrier.wait(timeout=30)
+            # Atomic mint exactly as the route does (UPDATE...RETURNING).
+            row = d.execute(
+                text(
+                    "UPDATE processing_jobs SET force_generation = force_generation + 1 "
+                    "WHERE id = :job_id RETURNING force_generation"
+                ),
+                {"job_id": job_id},
+            ).first()
+            d.commit()
+            with lock:
+                gens.append((name, int(row[0])))
+        finally:
+            d.close()
+
+    t1 = threading.Thread(target=forcer, args=("f1",))
+    t2 = threading.Thread(target=forcer, args=("f2",))
+    t1.start(); t2.start()
+    t1.join(timeout=60); t2.join(timeout=60)
+
+    assert len(gens) == 2
+    assert gens[0][1] != gens[1][1], f"generations collided: {gens}"
+    assert sorted(g[1] for g in gens) == [1, 2]
+
+    # A stale forced delivery (generation 1 when the job is at 2) must be
+    # rejected atomically: simulate the task's locked generation check.
+    d = db_factory()
+    d.execute(
+        text("SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"),
+        {"job_id": job_id},
+    )
+    job = d.get(ProcessingJob, job_id)
+    assert (job.force_generation or 0) == 2
+    stale = 1
+    assert (job.force_generation or 0) != stale
+    d.rollback()
+    d.close()

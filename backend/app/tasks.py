@@ -281,24 +281,24 @@ def _record_capacity_queue_reason(db, job) -> None:
         db.rollback()
 
 
-def _terminalize_capacity_exhausted(db, job_id: int) -> None:
+def _terminalize_capacity_exhausted(db, job_id: int) -> bool:
     """Terminalize a job whose capacity retries are exhausted (Review Round 2 NEW-6).
+
+    Returns True when this call performed the terminalization, False when it
+    skipped because another incarnation owns a running step (duplicate
+    redelivery — the owner must finish, P8-NEW-11). Callers MUST propagate
+    the skip: no stage state may be mutated when False.
 
     Celery retries are finite; after the last capacity retry the job must not
     stay admitted/processing with counters held forever. Mark it failed with
     a visible capacity reason and release the admission exactly once.
-
-    Duplicate-redelivery guard (Review Round 2 P7-NEW-10): if another
-    incarnation currently owns a running step of this job, this delivery is
-    a duplicate of live work, NOT a genuine capacity shortage — do nothing
-    and let the owning incarnation finish.
     """
     try:
         from app.db.models import JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
 
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if job is None:
-            return
+            return False
         # Guard: any step running under a claim we do NOT own means another
         # incarnation is actively processing — never terminalize it.
         running_steps = (
@@ -312,7 +312,7 @@ def _terminalize_capacity_exhausted(db, job_id: int) -> None:
                     "capacity exhaustion for job %s skipped: step %s is owned by another incarnation",
                     job_id, step.name,
                 )
-                return
+                return False
         if job.status in (
             ProcessingStatus.PENDING, ProcessingStatus.PROCESSING,
         ):
@@ -323,9 +323,11 @@ def _terminalize_capacity_exhausted(db, job_id: int) -> None:
                 job.slide_status = "failed"
             _finish_admission_for_job(db, job_id, failed=True)
         db.commit()
+        return True
     except Exception as exc:
         logger.warning("capacity-exhausted terminalize failed for job %s: %s", job_id, exc)
         db.rollback()
+        return False
 
 
 # ==============================================================================
@@ -976,11 +978,22 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
             logger.info("Summarize: job %s already completed, skipping", job_id)
             return {"status": "skipped", "reason": "already completed"}
 
-        # Force-generation fence (Review Round 2 NEW-7): a forced delivery
-        # carries the generation minted by the force route; if the job's
-        # generation has since moved on (a newer force won), this delivery is
-        # stale and must not mutate any state.
+        # Force-generation fence (Review Round 2 NEW-7/P8-NEW-12): for a
+        # forced delivery, the generation check is ATOMIC with the state
+        # mutation — we take the job-row FOR UPDATE lock (the force route
+        # mints generations with UPDATE...RETURNING, which also locks the
+        # row), so a newer force mint can neither slip between the check and
+        # the commit nor run concurrently with it. On PostgreSQL this
+        # serializes; on SQLite the writer lock provides the same effect.
         if force and force_generation is not None:
+            if db.bind.dialect.name == "postgresql":
+                db.execute(
+                    text(
+                        "SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"
+                    ),
+                    {"job_id": job_id},
+                )
+            db.refresh(job, ["force_generation", "summarize_status"])
             if (job.force_generation or 0) != force_generation:
                 logger.info(
                     "Summarize: job %s force generation %s is stale (current %s); skipping",
@@ -1281,8 +1294,12 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
             # conversion, fail only the summarize stage; for a still-
             # processing conversion, fail the whole job. The duplicate-
             # redelivery guard inside _terminalize_capacity_exhausted
-            # prevents harming another incarnation's live work.
-            _terminalize_capacity_exhausted(db, job_id)
+            # prevents harming another incarnation's live work — when it
+            # returns False (another owner holds a running step), this
+            # delivery performs NO mutation at all (P8-NEW-11).
+            terminalized = _terminalize_capacity_exhausted(db, job_id)
+            if not terminalized:
+                return {"status": "skipped", "reason": "another incarnation owns this job"}
             try:
                 from app.db.models import ProcessingJob, ProcessingStatus
 

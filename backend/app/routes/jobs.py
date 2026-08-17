@@ -1123,6 +1123,14 @@ def cancel_job(
     # transaction so a crash cannot leak the active-job counter. The revoke
     # merely terminates the in-flight OS process.
     running_task_id = job.celery_task_id
+    # Lock order JOB -> ADMISSION (Review Round 2 P8-NEW-13): explicitly lock
+    # the job row before the admission transition so a concurrent promotion
+    # (which locks job then admission) serializes with cancellation.
+    if db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"),
+            {"job_id": job.id},
+        )
     job.status = ProcessingStatus.CANCELLED
     job.error_message = "Cancelled by user"
     job.celery_task_id = None
