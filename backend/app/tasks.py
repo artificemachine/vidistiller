@@ -517,8 +517,16 @@ def _transcribe_audio(db, job_id: int, job, video_service, video_url: str) -> tu
     except Exception as e:
         _add_log(db, job_id, f"Ollama transcription failed: {e}", "error", "whisper")
         logger.error(f"Ollama transcription failed: {e}")
-        job.status = ProcessingStatus.FAILED
-        job.error_message = f"Transcription failed: {str(e)[:500]}"
+        # P21-NEW-49: conditional write — never overwrite a committed
+        # cancellation with FAILED.
+        db.execute(
+            text(
+                "UPDATE processing_jobs SET status = 'failed', "
+                "error_message = :msg "
+                "WHERE id = :job_id AND status IN ('pending', 'processing')"
+            ),
+            {"job_id": job_id, "msg": f"Transcription failed: {str(e)[:500]}"},
+        )
         db.commit()
         raise
 
@@ -807,22 +815,26 @@ def process_transcript(self, job_id: int):
         # P20-NEW-42: a conditional UPDATE — if a cancellation/force won the
         # job-row lock first (status now CANCELLED/FAILED), this worker's
         # stale write must not resurrect the job or install an uncaptured
-        # task id; it skips instead.
-        if db.bind.dialect.name == "postgresql":
-            claimed_start = db.execute(
-                text(
-                    "UPDATE processing_jobs SET status = 'processing', "
-                    "celery_task_id = :task_id "
-                    "WHERE id = :job_id AND status IN ('pending', 'processing')"
-                ),
-                {"job_id": job_id, "task_id": self.request.id},
-            )
-            if claimed_start.rowcount != 1:
-                db.rollback()
-                return {"job_id": job_id, "status": "skipped", "reason": "job is terminal"}
-        else:
-            job.status = ProcessingStatus.PROCESSING
-            job.celery_task_id = self.request.id
+        # task id; it skips instead. FAILED is allowed only for authorized
+        # retries (retries < max); the exhaustion guard above already
+        # skipped terminal redeliveries (P21-NEW-46).
+        claimed_start = db.execute(
+            text(
+                "UPDATE processing_jobs SET status = 'processing', "
+                "celery_task_id = :task_id "
+                "WHERE id = :job_id AND (status IN ('pending', 'processing') "
+                "OR (status = 'failed' AND :retries < :max_retries))"
+            ),
+            {
+                "job_id": job_id,
+                "task_id": self.request.id,
+                "retries": self.request.retries,
+                "max_retries": self.max_retries,
+            },
+        )
+        if claimed_start.rowcount != 1:
+            db.rollback()
+            return {"job_id": job_id, "status": "skipped", "reason": "job is terminal"}
         db.commit()
         _add_log(db, job_id, f"Job started: {video_url}", "info", "init")
         logger.info(f"Processing transcript for job {job_id}: {video_url}")
@@ -1003,11 +1015,34 @@ def process_transcript(self, job_id: int):
         db.rollback()
         _add_log(db, job_id, f"Job failed unexpectedly: {e}", "error", "fatal")
         logger.error(f"Job {job_id} failed unexpectedly: {e}")
+        # P21-NEW-46/P21-NEW-49: intermediate retries must NOT set FAILED —
+        # the retried incarnation needs to re-enter processing (the start
+        # update accepts pending/processing), and a concurrent cancellation
+        # must never be overwritten with FAILED. Only final exhaustion
+        # terminalizes, and only via a conditional update.
+        exhausted = self.request.retries >= self.max_retries
         try:
             job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
-            if job:
-                job.status = ProcessingStatus.FAILED
-                job.error_message = f"Unexpected error: {str(e)[:500]}"
+            if job is not None and exhausted:
+                if db.bind.dialect.name == "postgresql":
+                    res = db.execute(
+                        text(
+                            "UPDATE processing_jobs SET status = 'failed', "
+                            "error_message = :msg "
+                            "WHERE id = :job_id AND status IN ('pending', 'processing')"
+                        ),
+                        {"job_id": job_id, "msg": f"Unexpected error: {str(e)[:500]}"},
+                    )
+                else:
+                    res = db.execute(
+                        text(
+                            "UPDATE processing_jobs SET status = 'failed', "
+                            "error_message = :msg "
+                            "WHERE id = :job_id AND status IN ('pending', 'processing')"
+                        ),
+                        {"job_id": job_id, "msg": f"Unexpected error: {str(e)[:500]}"},
+                    )
+                _ = res
         except Exception:
             pass
         # Retry-stall fix (Review Round 2 NEW-1): the transcribe claim was
@@ -1023,7 +1058,7 @@ def process_transcript(self, job_id: int):
                 db.commit()
         except Exception:
             db.rollback()
-        if self.request.retries >= self.max_retries:
+        if exhausted:
             # Retries exhausted: this is a terminal failure — release the
             # active-job admission exactly once (Review Round 2 F5/N5).
             _finish_admission_for_job(db, job_id, failed=True)
@@ -1226,25 +1261,24 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
                 )
                 return {"status": "skipped", "reason": "summarization cancelled"}
 
-        # Store Celery task ID for cancellation. P20-NEW-42: conditional
-        # UPDATE so a cancellation/force that won the lock first cannot be
-        # overwritten by this worker's stale write (non-PG falls back to ORM
-        # within the existing transaction).
-        if db.bind.dialect.name == "postgresql":
-            installed = db.execute(
-                text(
-                    "UPDATE processing_jobs SET celery_task_id = :task_id, "
-                    "summarize_status = 'processing' "
-                    "WHERE id = :job_id AND summarize_status IN ('processing', 'pending')"
-                ),
-                {"job_id": job_id, "task_id": self.request.id},
-            )
-            if installed.rowcount != 1:
-                db.rollback()
-                return {"status": "skipped", "reason": "job is terminal"}
-        else:
-            job.celery_task_id = self.request.id
-            job.summarize_status = "processing"
+        # Store Celery task ID for cancellation. P20-NEW-42/P21-NEW-47:
+        # conditional UPDATE fenced on the generation observed at startup
+        # for ALL workers (not only force): if a force minted a newer
+        # generation while this worker waited, its install affects zero rows
+        # and it skips. Dialect-safe rowcount check (P21-NEW-50).
+        observed_gen = getattr(job, "force_generation", 0) or 0
+        installed = db.execute(
+            text(
+                "UPDATE processing_jobs SET celery_task_id = :task_id, "
+                "summarize_status = 'processing' "
+                "WHERE id = :job_id AND summarize_status IN ('processing', 'pending') "
+                "AND force_generation = :gen"
+            ),
+            {"job_id": job_id, "task_id": self.request.id, "gen": observed_gen},
+        )
+        if installed.rowcount != 1:
+            db.rollback()
+            return {"status": "skipped", "reason": "job superseded or terminal"}
         db.commit()
         _add_log(db, job_id, "Starting LLM summarization...", "info", "summarize")
         _mark_stage_delivered(db, job_id, "summarize")
@@ -1784,10 +1818,25 @@ def process_snapshots(self, job_id: int):
         )
         _progress(90)
         snapshots = SnapshotService().save_snapshots(db, job.id, frames)
-        # P20-NEW-43: gate the finalizer on fresh job status under the job
-        # row lock AND on the step completion result — a cancelled/failed
-        # job is never resurrected, and a lost claim never writes terminal
-        # state.
+        # P20-NEW-43/P21-NEW-48: gate the finalizer on fresh job status under
+        # the JOB row lock FIRST (job->step order, matching claim_step), then
+        # complete the step; a cancelled/failed job is never resurrected and
+        # a lost claim never writes terminal state.
+        terminal_ok = True
+        if db.bind.dialect.name == "postgresql":
+            fresh = db.execute(
+                text(
+                    "SELECT status FROM processing_jobs WHERE id = :job_id FOR UPDATE"
+                ),
+                {"job_id": job_id},
+            ).first()
+        else:
+            fresh = db.execute(
+                text("SELECT status FROM processing_jobs WHERE id = :job_id"),
+                {"job_id": job_id},
+            ).first()
+        if fresh is not None and fresh[0] in ("cancelled", "failed"):
+            terminal_ok = False
         step_done = complete_step(
             db,
             job.id,
@@ -1795,25 +1844,9 @@ def process_snapshots(self, job_id: int):
             exec_uuid,
             {"count": len(snapshots), "frames_analyzed": len(frames)},
         )
-        terminal_ok = True
-        if job.processing_mode != ProcessingMode.SLIDE_AWARE.value:
-            if db.bind.dialect.name == "postgresql":
-                fresh = db.execute(
-                    text(
-                        "SELECT status FROM processing_jobs WHERE id = :job_id FOR UPDATE"
-                    ),
-                    {"job_id": job_id},
-                ).first()
-            else:
-                fresh = db.execute(
-                    text("SELECT status FROM processing_jobs WHERE id = :job_id"),
-                    {"job_id": job_id},
-                ).first()
-            if fresh is not None and fresh[0] in ("cancelled", "failed"):
-                terminal_ok = False
-            else:
-                job.status = ProcessingStatus.COMPLETED
-                _finish_admission_for_job(db, job_id)
+        if terminal_ok and job.processing_mode != ProcessingMode.SLIDE_AWARE.value:
+            job.status = ProcessingStatus.COMPLETED
+            _finish_admission_for_job(db, job_id)
         if not step_done or not terminal_ok:
             # Lost claim or terminalized job: no terminal write.
             db.rollback()
@@ -1824,11 +1857,19 @@ def process_snapshots(self, job_id: int):
         db.rollback()
         try:
             fail_step(db, job_id, "snapshots", exec_uuid, str(exc))
-            # Terminal failure: release the admission with the step failure.
+            # Terminal failure with a conditional write (P21-NEW-49): a
+            # cancellation committed during extraction must not be
+            # overwritten with FAILED.
             job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
             if job and job.processing_mode != ProcessingMode.SLIDE_AWARE.value:
-                job.status = ProcessingStatus.FAILED
-                job.error_message = f"Snapshot extraction failed: {str(exc)[:500]}"
+                db.execute(
+                    text(
+                        "UPDATE processing_jobs SET status = 'failed', "
+                        "error_message = :msg "
+                        "WHERE id = :job_id AND status IN ('pending', 'processing')"
+                    ),
+                    {"job_id": job_id, "msg": f"Snapshot extraction failed: {str(exc)[:500]}"},
+                )
                 _finish_admission_for_job(db, job_id, failed=True)
             db.commit()
         except Exception:

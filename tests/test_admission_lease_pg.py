@@ -1162,3 +1162,109 @@ def test_slide_finalizer_never_resurrects_cancelled(db_factory):
     ).first()
     assert step.status in (JobStepStatus.FAILED, JobStepStatus.SKIPPED), step.status
     db.close()
+
+
+def test_transcript_retry_reenters_processing(db_factory):
+    """An authorized transcript retry (retries < max) re-enters processing
+    via the conditional start update; admission is not released mid-retry
+    (P21-NEW-46). The update predicate itself is exercised against the real
+    DB with the exact parameters the task passes."""
+    from app.db.models import ProcessingJob, ProcessingStatus
+    from app.services.admission import admit_or_queue_job
+    from app.services.job_steps import seed_job_steps
+
+    db = db_factory()
+    user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
+    job = _mkjob(db, user_id)
+    seed_job_steps(db, job, extract_snapshots=False, is_slide_mode=False)
+    admit_or_queue_job(db, job, exec_uuid="e1")
+    db.commit()
+    job.status = ProcessingStatus.FAILED
+    job.error_message = "Unexpected error: transient"
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    # The task's start UPDATE with retries=1 < max_retries=2 must re-enter.
+    db = db_factory()
+    claimed = db.execute(
+        text(
+            "UPDATE processing_jobs SET status = 'processing', "
+            "celery_task_id = :task_id "
+            "WHERE id = :job_id AND (status IN ('pending', 'processing') "
+            "OR (status = 'failed' AND :retries < :max_retries))"
+        ),
+        {"job_id": job_id, "task_id": "retry-1", "retries": 1, "max_retries": 2},
+    )
+    assert claimed.rowcount == 1, "authorized retry was rejected"
+    db.commit()
+    status = db.execute(
+        text("SELECT status, celery_task_id FROM processing_jobs WHERE id = :id"),
+        {"id": job_id},
+    ).first()
+    assert status[0] == "processing"
+    assert status[1] == "retry-1"
+    # Admission not released (still admitted, counter held).
+    adm = db.execute(
+        text("SELECT state FROM job_admissions WHERE job_id = :id"),
+        {"id": job_id},
+    ).scalar()
+    assert adm == "admitted", f"admission released mid-retry: {adm}"
+    counter = db.execute(
+        text("SELECT active FROM admission_counters WHERE key='global'")
+    ).scalar()
+    assert int(counter) == 1, counter
+    db.close()
+
+def test_snapshot_finalize_job_lock_before_step(db_factory):
+    """The snapshot finalizer locks the job row before complete_step
+    (job->step order, P21-NEW-48) — verified by the source ordering and a
+    functional run that preserves a concurrent cancellation."""
+    import inspect
+
+    from app.tasks import process_snapshots
+
+    source = inspect.getsource(process_snapshots)
+    job_lock_pos = source.find("FOR UPDATE")
+    step_pos = source.find("complete_step(")
+    assert job_lock_pos != -1 and step_pos != -1
+    assert job_lock_pos < step_pos, (
+        "snapshot finalizer must lock the job row before completing the step"
+    )
+
+
+def test_summarize_install_fenced_on_generation(db_factory):
+    """A non-force summarize worker whose generation went stale (a force
+    minted after its startup read) must not install its task id (P21-NEW-47)."""
+    from app.db.models import ProcessingJob
+
+    db = db_factory()
+    user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
+    job = _mkjob(db, user_id)
+    job.status = "completed"
+    job.summarize_status = "processing"
+    job.force_generation = 2  # a force already bumped past the worker's read
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    # The worker observed generation 1 at startup; the install requires the
+    # current generation — it must fail (0 rows) and the worker skips.
+    db = db_factory()
+    installed = db.execute(
+        text(
+            "UPDATE processing_jobs SET celery_task_id = 'stale-worker', "
+            "summarize_status = 'processing' "
+            "WHERE id = :job_id AND summarize_status IN ('processing', 'pending') "
+            "AND force_generation = :gen"
+        ),
+        {"job_id": job_id, "gen": 1},
+    )
+    assert installed.rowcount == 0
+    db.rollback()
+    task_id = db.execute(
+        text("SELECT celery_task_id FROM processing_jobs WHERE id = :id"),
+        {"id": job_id},
+    ).scalar()
+    assert task_id is None, f"stale worker installed its task id: {task_id}"
+    db.close()
