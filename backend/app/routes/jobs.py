@@ -65,24 +65,32 @@ router = APIRouter(prefix="/jobs", tags=["Jobs"])
 def _get_job_for_user(
     db: Session, job_id: str, current_user: User
 ) -> ProcessingJob:
-    """Fetch a job by job_id and verify ownership. Returns 404 if not found or not owned."""
-    job = db.query(ProcessingJob).filter(ProcessingJob.job_id == job_id).first()
+    """Fetch a job by job_id AND ownership in the SQL predicate (P27-NEW-64).
+
+    Returns 404 if not found or not owned — indistinguishable either way.
+    """
+    job = (
+        db.query(ProcessingJob)
+        .filter(
+            ProcessingJob.job_id == job_id,
+            ProcessingJob.user_id == current_user.id,
+        )
+        .first()
+    )
     if not job:
-        raise ResourceNotFoundException("Job", job_id)
-    if job.user_id != current_user.id:
         raise ResourceNotFoundException("Job", job_id)
     return job
 
 
-def _finish_job_admission_for_route(db: Session, job_id: int, *, failed: bool = False) -> None:
-    """Route-level admission release (cancel/delete paths), Review Round 2 F5."""
+def _finish_job_admission_for_route(db: Session, job_id: int, *, failed: bool = False) -> bool:
+    """Route-level admission release (cancel/delete paths), Review Round 2 F5.
+
+    P27-NEW-63: errors PROPAGATE so a cancellation never commits its fence
+    and revokes the worker without a durable admission release.
+    """
     from app.services.admission import finish_job_admission
 
-    try:
-        finish_job_admission(db, job_id, failed=failed)
-    except Exception as exc:
-        logger.warning("admission finish failed for job %s: %s", job_id, exc)
-        db.rollback()
+    return finish_job_admission(db, job_id, failed=failed)
 
 
 def _find_duplicate_job(

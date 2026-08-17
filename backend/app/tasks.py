@@ -131,15 +131,16 @@ def _test_barrier(db, job_id: int, stage: str, claimed: bool) -> None:
         _time.sleep(0.2)
 
 
-def _finish_admission_for_job(db, job_id: int, *, failed: bool = False) -> None:
-    """Release admission counters exactly once for a terminal job (WP2)."""
-    try:
-        from app.services.admission import finish_job_admission
+def _finish_admission_for_job(db, job_id: int, *, failed: bool = False) -> bool:
+    """Release admission counters exactly once for a terminal job (WP2).
 
-        finish_job_admission(db, job_id, failed=failed)
-    except Exception as exc:
-        logger.warning("admission finish failed for job %s: %s", job_id, exc)
-        db.rollback()
+    P27-NEW-63: errors PROPAGATE (no swallow/rollback inside) so callers
+    never acknowledge a terminal state or revoke workers without a durable
+    DB fence. Returns True when this call performed the release.
+    """
+    from app.services.admission import finish_job_admission
+
+    return finish_job_admission(db, job_id, failed=failed)
 
 
 def _mark_stage_delivered(db, job_id: int, stage: str) -> None:
@@ -1091,48 +1092,45 @@ def process_transcript(self, job_id: int):
         # must never be overwritten with FAILED. Only final exhaustion
         # terminalizes, and only via a conditional update.
         exhausted = self.request.retries >= self.max_retries
+        if not exhausted:
+            # Intermediate retry: release the claim, then retry (P22-NEW-51).
+            try:
+                if transcribe_claim is not None:
+                    from app.services.job_steps import fail_step
+
+                    fail_step(db, job.id, "transcribe", exec_uuid, f"retrying: {str(e)[:300]}")
+                    db.commit()
+            except Exception:
+                db.rollback()
+            db.commit()
+            raise self.retry(exc=e, countdown=30)
+
+        # P27-NEW-62: FINAL exhaustion — the job FAILED write, the step
+        # failure, the admission transition and the counter decrement commit
+        # in ONE transaction, so a crash can never strand FAILED+ADMITTED
+        # (which the redelivery guard would treat as an authorized retry).
         try:
             job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
-            if job is not None and exhausted:
-                if db.bind.dialect.name == "postgresql":
-                    res = db.execute(
-                        text(
-                            "UPDATE processing_jobs SET status = 'failed', "
-                            "error_message = :msg "
-                            "WHERE id = :job_id AND status IN ('pending', 'processing')"
-                        ),
-                        {"job_id": job_id, "msg": f"Unexpected error: {str(e)[:500]}"},
-                    )
-                else:
-                    res = db.execute(
-                        text(
-                            "UPDATE processing_jobs SET status = 'failed', "
-                            "error_message = :msg "
-                            "WHERE id = :job_id AND status IN ('pending', 'processing')"
-                        ),
-                        {"job_id": job_id, "msg": f"Unexpected error: {str(e)[:500]}"},
-                    )
-                _ = res
-        except Exception:
-            pass
-        # Retry-stall fix (Review Round 2 NEW-1): the transcribe claim was
-        # COMMITTED before the pipeline ran, so an ordinary transient failure
-        # must release the claim BEFORE self.retry() — otherwise the retried
-        # incarnation (new exec_uuid) is fenced out and the step stalls until
-        # the orphan reaper. Release exactly the claim we own.
-        try:
-            if transcribe_claim is not None:
-                from app.services.job_steps import fail_step
+            if job is not None:
+                db.execute(
+                    text(
+                        "UPDATE processing_jobs SET status = 'failed', "
+                        "error_message = :msg "
+                        "WHERE id = :job_id AND status IN ('pending', 'processing')"
+                    ),
+                    {"job_id": job_id, "msg": f"Unexpected error: {str(e)[:500]}"},
+                )
+                if transcribe_claim is not None:
+                    from app.services.job_steps import fail_step
 
-                fail_step(db, job.id, "transcribe", exec_uuid, f"retrying: {str(e)[:300]}")
+                    fail_step(db, job.id, "transcribe", exec_uuid, f"exhausted: {str(e)[:300]}")
+                _finish_admission_for_job(db, job_id, failed=True)
                 db.commit()
-        except Exception:
+        except Exception as exc:
             db.rollback()
-        if exhausted:
-            # Retries exhausted: this is a terminal failure — release the
-            # active-job admission exactly once (Review Round 2 F5/N5).
-            _finish_admission_for_job(db, job_id, failed=True)
-        db.commit()
+            logger.error("final exhaustion terminalization failed for job %s: %s", job_id, exc)
+            # Do NOT retry past the limit; surface the failure.
+            raise self.retry(exc=e, countdown=30)
         raise self.retry(exc=e, countdown=30)
     finally:
         db.close()

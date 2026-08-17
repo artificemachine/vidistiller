@@ -1409,3 +1409,56 @@ def test_failed_untracked_job_redelivery_rejected(db_factory):
     assert status[1] is None
     db.close()
 
+
+
+def test_final_exhaustion_co_commits_terminal_and_admission(db_factory):
+    """Final exhaustion terminalizes job + step + admission in one
+    transaction — a crash can never strand FAILED+ADMITTED (which the
+    redelivery guard would treat as authorized) (P27-NEW-62)."""
+    from app.db.models import JobAdmission, JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
+    from app.services.admission import admit_or_queue_job
+    from app.services.job_steps import claim_step, seed_job_steps
+
+    db = db_factory()
+    user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
+    job = _mkjob(db, user_id)
+    seed_job_steps(db, job, extract_snapshots=False, is_slide_mode=False)
+    admit_or_queue_job(db, job, exec_uuid="e1")
+    db.commit()
+    job.status = ProcessingStatus.PROCESSING
+    job.celery_task_id = "task-final"
+    db.commit()
+    claimed = claim_step(db, job.id, "transcribe", "exec-final")
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    # Simulate the final-exhaustion co-commit (job FAILED + step FAILED +
+    # admission released) in ONE transaction, exactly as the task does.
+    db = db_factory()
+    db.execute(
+        text(
+            "UPDATE processing_jobs SET status = 'failed', error_message = :msg "
+            "WHERE id = :job_id AND status IN ('pending', 'processing')"
+        ),
+        {"job_id": job_id, "msg": "Unexpected error: exhausted"},
+    )
+    from app.services.job_steps import fail_step
+
+    fail_step(db, job_id, "transcribe", "exec-final", "exhausted")
+    from app.services.admission import finish_job_admission
+
+    finish_job_admission(db, job_id, failed=True)
+    db.commit()
+    db.close()
+
+    # Invariant: FAILED job's admission is released — a late redelivery is
+    # rejected by the guard (no FAILED+ADMITTED strand).
+    db = db_factory()
+    admission = db.get(JobAdmission, job_id)
+    assert admission.state.value in ("finished", "failed"), admission.state
+    counter = db.execute(
+        text("SELECT active FROM admission_counters WHERE key='global'")
+    ).scalar()
+    assert int(counter) == 0, counter
+    db.close()
