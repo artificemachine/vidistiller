@@ -1004,6 +1004,7 @@ def summarize_transcript(
     # caller did not force, do not dispatch a second task (two concurrent
     # tasks on the same job race on the document row and one can mark the
     # job failed even though the other saved a valid summary).
+    running_task_id = None
     if job.summarize_status == "processing":
         if not force:
             return JSONResponse(
@@ -1012,7 +1013,8 @@ def summarize_transcript(
             )
         # force: fence in the DB FIRST (status + stale task id cleared), then
         # revoke the running task so only one generation proceeds
-        # (Review Round 2 N1/F1: fence-before-revoke).
+        # (Review Round 2 N1/F1: fence-before-revoke). The revoke itself is
+        # deferred until AFTER the durable outbox row exists (P16-NEW-36).
         running_task_id = job.celery_task_id
         job.celery_task_id = None
         job.summarize_status = "processing"
@@ -1021,8 +1023,7 @@ def summarize_transcript(
         # distinct generations and the older forced task is fenced out.
         force_generation = _mint_force_generation(db, job.id)
         db.commit()
-        if running_task_id:
-            celery_app.control.revoke(running_task_id, terminate=True, signal="SIGTERM")
+        # running_task_id revoke happens below, after the outbox row commits.
     else:
         # P14-NEW-31/P15-NEW-34: persist the authorized 'processing' state
         # IN THE SAME transaction as the generation mint, before any
@@ -1047,9 +1048,15 @@ def summarize_transcript(
             )
         db.commit()
 
-    # P15-NEW-34: the processing state was already persisted above. Re-check
-    # under the lock that a cancellation did not win during the revoke; if it
-    # did, do NOT publish — the cancellation is authoritative.
+    # P15-NEW-34/P16-NEW-36: the processing state was already persisted
+    # above. Re-check under the lock that a cancellation did not win during
+    # the revoke; if it did, do NOT publish — the cancellation is
+    # authoritative. The durable outbox row is inserted IN THE SAME
+    # transaction as this check (one commit) so there is no commit-to-outbox
+    # crash gap (P16-NEW-36).
+    from app.services.admission import enqueue_first_stage
+    from app.services.dispatch import publish_outbox
+
     if db.bind.dialect.name == "postgresql":
         db.execute(
             text("SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"),
@@ -1065,21 +1072,23 @@ def summarize_transcript(
             status_code=status.HTTP_409_CONFLICT,
             content={"message": "Summarization was cancelled; cannot force-start", "job_id": job_id},
         )
-    db.commit()
-
-    # Dispatch background summarization task via the durable outbox
-    # (P15-NEW-35): the outbox row is persisted atomically with the state
-    # transition above, and the publisher/sweep delivers it — a crash or
-    # Redis failure after commit leaves a recoverable message.
-    from app.services.admission import enqueue_first_stage
-    from app.services.dispatch import publish_outbox
-
     enqueue_first_stage(
         db, job.id, str(uuid.uuid4()),
         stage="summarize",
         payload={"force": force, "force_generation": force_generation},
     )
     db.commit()
+
+    # P15-NEW-34: the force/processing state + outbox row are durable now.
+    # Revoke the old task AFTER the durable recovery state exists
+    # (P16-NEW-36): a revoke failure or crash cannot strand committed
+    # processing state without a recoverable dispatch.
+    if running_task_id:
+        try:
+            celery_app.control.revoke(running_task_id, terminate=True, signal="SIGTERM")
+        except Exception as exc:
+            logger.warning("revoke of stale task %s failed: %s", running_task_id, exc)
+
     try:
         publish_outbox(db, job_id=job.id)
         db.commit()
@@ -1111,7 +1120,6 @@ def retry_job_step(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown processing step")
     if not retry_failed_step(db, job.id, step_name):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Step is not retryable")
-    db.commit()
 
     dispatchers = {
         "download": lambda: _enqueue_stage_retry(db, job.id, "download"),
@@ -1121,18 +1129,29 @@ def retry_job_step(
         "summarize": lambda: _dispatch_summarize_retry(db, job),
     }
     if step_name == "export":
+        db.commit()
         return {"message": "Export step reset; request the export download again", "job_id": job_id}
+    if step_name == "summarize":
+        # _dispatch_summarize_retry mints the generation, sets processing and
+        # enqueues the outbox row in one transaction.
+        db.commit()
+        _dispatch_summarize_retry(db, job)
+        return {"message": f"Retry for {step_name} started", "job_id": job_id}
+    # P16-NEW-36: the step reset and the durable outbox row commit in ONE
+    # transaction (no crash gap leaving a stranded pending step).
+    from app.services.admission import enqueue_first_stage
+
+    enqueue_first_stage(db, job.id, str(uuid.uuid4()), stage=step_name)
+    db.commit()
     dispatchers[step_name]()
     return {"message": f"Retry for {step_name} started", "job_id": job_id}
 
 
 def _enqueue_stage_retry(db: Session, job_id: int, step_name: str) -> None:
-    """Durably dispatch a step retry via the outbox (P15-NEW-35)."""
-    from app.services.admission import enqueue_first_stage
+    """Publish a step retry outbox row that was committed with the reset
+    (P15-NEW-35/P16-NEW-36). The row already exists; this only delivers it."""
     from app.services.dispatch import publish_outbox
 
-    enqueue_first_stage(db, job_id, str(uuid.uuid4()), stage=step_name)
-    db.commit()
     try:
         publish_outbox(db, job_id=job_id)
         db.commit()
@@ -1235,7 +1254,9 @@ def _dispatch_summarize_retry(db: Session, job) -> None:
     """
     gen = _mint_force_generation(db, job.id)
     job.summarize_status = "processing"
-    db.commit()
+    # P16-NEW-36: generation mint, status transition, and the durable outbox
+    # row commit in ONE transaction — no crash gap stranding processing
+    # state without a recoverable dispatch.
     from app.services.admission import enqueue_first_stage
     from app.services.dispatch import publish_outbox
 
