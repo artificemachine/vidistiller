@@ -81,6 +81,11 @@ def promote_queued_jobs(db: Session, limit: int = 10) -> int:
         job = db.get(ProcessingJob, job_id)
         if job is None:
             continue
+        # Revalidate AFTER the lock: a job cancelled/terminalized between
+        # candidate discovery and the lock must not be admitted
+        # (Review Round 2 NEW-3).
+        if job.status.value not in ("pending", "processing"):
+            continue
         preference = getattr(job, "sidecar_preference", None)
         outcome = admit_or_queue_job(
             db, job, exec_uuid=str(uuid.uuid4()), preferred_sidecar=preference
@@ -132,14 +137,21 @@ def reap_orphaned_steps(db: Session) -> int:
     )
     reaped = 0
     for step in orphaned:
-        db.execute(
+        # Atomic conditional reclamation (Review Round 2 NEW-2): the UPDATE
+        # re-checks the stale started_at AND the status so a newer claim
+        # (force takeover, another replica) can never be clobbered, and the
+        # rowcount gate prevents duplicate outbox rows from concurrent
+        # scheduler replicas.
+        result = db.execute(
             text(
                 "UPDATE job_steps SET status = 'pending', claim_token = NULL, "
                 "percent = 0, started_at = NULL, finished_at = NULL, error_message = NULL "
-                "WHERE id = :id AND status = 'running'"
+                "WHERE id = :id AND status = 'running' AND started_at < :cutoff"
             ),
-            {"id": step.id},
+            {"id": step.id, "cutoff": cutoff},
         )
+        if result.rowcount != 1:
+            continue  # another replica reclaimed it (or a newer claim exists)
         # Re-dispatch the stage via the durable outbox.
         from app.services.admission import enqueue_first_stage
 
@@ -179,6 +191,34 @@ def run_maintenance_cycle(db: Session) -> dict:
         summary["orphaned_steps"] = orphaned
     except Exception as exc:
         logger.error("orphaned-step reap failed: %s", exc)
+        db.rollback()
+
+    try:
+        # Recover outbox rows a crashed publisher left in 'publishing'
+        # (Review Round 2 N7): they become pending again for the sweep.
+        from datetime import UTC, datetime as _dt, timedelta as _td
+
+        if db.bind.dialect.name == "postgresql":
+            reclaimed = db.execute(
+                text(
+                    "UPDATE task_outbox SET state = 'pending' "
+                    "WHERE state = 'publishing' AND updated_at < now() - interval '5 minutes'"
+                )
+            )
+        else:
+            cutoff = _dt.now(UTC).replace(tzinfo=None) - _td(minutes=5)
+            reclaimed = db.execute(
+                text(
+                    "UPDATE task_outbox SET state = 'pending' "
+                    "WHERE state = 'publishing' AND updated_at < :cutoff"
+                ),
+                {"cutoff": cutoff},
+            )
+        if reclaimed.rowcount:
+            db.commit()
+            summary["outbox_reclaimed"] = reclaimed.rowcount
+    except Exception as exc:
+        logger.error("outbox publishing-reclaim failed: %s", exc)
         db.rollback()
 
     try:

@@ -151,7 +151,7 @@ def _mark_stage_delivered(db, job_id: int, stage: str) -> None:
             .filter(
                 TaskOutbox.job_id == job_id,
                 TaskOutbox.stage == stage,
-                TaskOutbox.state.in_(("pending", "published")),
+                TaskOutbox.state.in_(("pending", "published", "publishing")),
             )
             .order_by(TaskOutbox.id.desc())
             .first()
@@ -177,8 +177,10 @@ def _resolve_provider_for_slot(db, slot):
     """Build the LLM provider bound to the LEASED sidecar (Review Round 2 F6).
 
     Uses the registry endpoint of the leased sidecar plus the model the
-    sidecar actually serves (live telemetry), so the job runs on exactly the
-    capacity its lease authorizes — never the generic fleet fallback.
+    sidecar ACTUALLY serves (live telemetry). There is deliberately NO
+    declared-model fallback: if live telemetry is absent or serves nothing,
+    the caller treats it as no capacity (fail closed — Review Round 2
+    N3/N8).
     """
     from app.services.llm_providers import build_provider
     from app.services.sidecar import cached_sidecar_telemetry, get_sidecar
@@ -188,8 +190,17 @@ def _resolve_provider_for_slot(db, slot):
         logger.warning("leased sidecar %s missing from registry", slot.sidecar_id)
         return None, None
     telemetry = cached_sidecar_telemetry(slot.sidecar_id)
-    served = (telemetry.served_models or [None])[0] if telemetry else None
-    model = served or sidecar.declared_model
+    if telemetry is None or not telemetry.healthy or telemetry.stale:
+        logger.warning(
+            "leased sidecar %s has no fresh healthy telemetry; treating as no capacity",
+            slot.sidecar_id,
+        )
+        return None, None
+    served = telemetry.served_models or []
+    if not served:
+        logger.warning("leased sidecar %s serves no model; treating as no capacity", slot.sidecar_id)
+        return None, None
+    model = served[0]
     try:
         provider = build_provider(
             "vllm",
@@ -222,6 +233,19 @@ class SidecarCapacityExhausted(Exception):
     row, and retries with a bounded countdown instead of overcommitting the
     GPU or failing ambiguously (Review Round 2 F3/F6).
     """
+
+
+def _release_summarize_claim(db, job_id: int, exec_uuid: str) -> None:
+    """Reset the summarize step claim to pending under the fencing triple
+    so a capacity retry (fresh incarnation) can reclaim it (Review Round 2 N6)."""
+    try:
+        from app.services.job_steps import fail_step
+
+        fail_step(db, job_id, "summarize", exec_uuid, "queued on capacity")
+        db.commit()
+    except Exception as exc:
+        logger.warning("summarize claim release on capacity failed: %s", exc)
+        db.rollback()
 
 
 def _record_capacity_queue_reason(db, job) -> None:
@@ -724,6 +748,19 @@ def process_transcript(self, job_id: int):
                 job.error_message = f"Unexpected error: {str(e)[:500]}"
         except Exception:
             pass
+        # Retry-stall fix (Review Round 2 NEW-1): the transcribe claim was
+        # COMMITTED before the pipeline ran, so an ordinary transient failure
+        # must release the claim BEFORE self.retry() — otherwise the retried
+        # incarnation (new exec_uuid) is fenced out and the step stalls until
+        # the orphan reaper. Release exactly the claim we own.
+        try:
+            if transcribe_claim is not None:
+                from app.services.job_steps import fail_step
+
+                fail_step(db, job.id, "transcribe", exec_uuid, f"retrying: {str(e)[:300]}")
+                db.commit()
+        except Exception:
+            db.rollback()
         if self.request.retries >= self.max_retries:
             # Retries exhausted: this is a terminal failure — release the
             # active-job admission exactly once (Review Round 2 F5/N5).
@@ -953,29 +990,35 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
             if not summarize_claimed and force:
                 # Force takeover: the route fenced and revoked the previous
                 # task before dispatching, so taking over the RUNNING claim
-                # is authorized (Review Round 2 N1).
+                # is authorized (Review Round 2 N1). Rowcount-checked so a
+                # concurrent claimer cannot be clobbered; accepts both a
+                # RUNNING step and a COMPLETED step (force regeneration).
                 if db.bind.dialect.name == "postgresql":
-                    db.execute(
+                    taken = db.execute(
                         text(
-                            "UPDATE job_steps SET claim_token = :token, started_at = now(), "
-                            "attempt = attempt + 1, finished_at = NULL, error_message = NULL "
-                            "WHERE job_id = :job_id AND name = 'summarize' AND status = 'running'"
+                            "UPDATE job_steps SET status = 'running', claim_token = :token, "
+                            "started_at = now(), attempt = attempt + 1, finished_at = NULL, "
+                            "error_message = NULL "
+                            "WHERE job_id = :job_id AND name = 'summarize' "
+                            "AND status IN ('running', 'completed')"
                         ),
                         {"token": exec_uuid, "job_id": job.id},
                     )
                 else:
                     from datetime import UTC, datetime as _dt
 
-                    db.execute(
+                    taken = db.execute(
                         text(
-                            "UPDATE job_steps SET claim_token = :token, started_at = :now, "
-                            "attempt = attempt + 1, finished_at = NULL, error_message = NULL "
-                            "WHERE job_id = :job_id AND name = 'summarize' AND status = 'running'"
+                            "UPDATE job_steps SET status = 'running', claim_token = :token, "
+                            "started_at = :now, attempt = attempt + 1, finished_at = NULL, "
+                            "error_message = NULL "
+                            "WHERE job_id = :job_id AND name = 'summarize' "
+                            "AND status IN ('running', 'completed')"
                         ),
                         {"token": exec_uuid, "job_id": job.id, "now": _dt.now(UTC).replace(tzinfo=None)},
                     )
                 db.commit()
-                summarize_claimed = True
+                summarize_claimed = taken.rowcount == 1
 
         # Read the owner preference only for language selection. The concrete
         # endpoint is resolved after the transcript length is known so context
@@ -1015,6 +1058,9 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
             logger.error(
                 "Summarize: could not build provider for leased sidecar %s", slot.sidecar_id
             )
+            # Release the claim we took so the capacity retry can reclaim it
+            # (Review Round 2 N6).
+            _release_summarize_claim(db, job_id, exec_uuid)
             raise SidecarCapacityExhausted(job_id)
         provider_name = "vllm"
         _resolved_model = _model
@@ -1204,6 +1250,11 @@ def process_snapshots(self, job_id: int):
             return {"status": "skipped", "reason": "step is not retryable"}
         if not job.video_file_path or not Path(job.video_file_path).is_file():
             fail_step(db, job.id, "snapshots", exec_uuid, "No downloaded video is available")
+            # Terminal-without-result: mark the job failed and release the
+            # admission in the same commit (Review Round 2 N5).
+            job.status = ProcessingStatus.FAILED
+            job.error_message = "No downloaded video is available for snapshots"
+            _finish_admission_for_job(db, job_id, failed=True)
             db.commit()
             return {"error": "No downloaded video is available"}
 
@@ -1235,17 +1286,22 @@ def process_snapshots(self, job_id: int):
             exec_uuid,
             {"count": len(snapshots), "frames_analyzed": len(frames)},
         )
-        db.commit()
         from app.db.models import ProcessingMode, ProcessingStatus
         if job.processing_mode != ProcessingMode.SLIDE_AWARE.value:
             job.status = ProcessingStatus.COMPLETED
             _finish_admission_for_job(db, job_id)
-            db.commit()
+        db.commit()  # step + terminal state + admission release in one commit
         return {"status": "completed", "count": len(snapshots)}
     except Exception as exc:
         db.rollback()
         try:
             fail_step(db, job_id, "snapshots", exec_uuid, str(exc))
+            # Terminal failure: release the admission with the step failure.
+            job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+            if job and job.processing_mode != ProcessingMode.SLIDE_AWARE.value:
+                job.status = ProcessingStatus.FAILED
+                job.error_message = f"Snapshot extraction failed: {str(exc)[:500]}"
+                _finish_admission_for_job(db, job_id, failed=True)
             db.commit()
         except Exception:
             db.rollback()
@@ -1319,9 +1375,8 @@ def process_slides(self, job_id: int):
             _add_log(db, job_id, "No video file for slide detection", "error", "slide_detect")
             job.status = ProcessingStatus.COMPLETED
             job.slide_status = "skipped"
-            db.commit()
             _finish_admission_for_job(db, job_id)
-            db.commit()
+            db.commit()  # terminal + admission release in one commit (N5)
             return {"error": "No video file"}
 
         # WP2/WP3 (Review Round 2 F1/F3): external sidecar work REQUIRES a

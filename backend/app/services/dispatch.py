@@ -51,8 +51,13 @@ def publish_outbox(
     idempotency absorbs duplicate deliveries). When ``job_id`` is given the
     query filters BEFORE the limit so a specific job's row is always found
     even under backlog (Review Round 2 new finding).
+
+    Crash recovery (Review Round 2 N2/N7): ``publishing`` rows are claimed
+    in the same UPDATE that selects them, so a row left ``publishing`` by a
+    publisher that crashed mid-flight is picked up by the next sweep — it
+    is never stranded.
     """
-    query = db.query(TaskOutbox).filter(TaskOutbox.state.in_(("pending", "publishing")))
+    query = db.query(TaskOutbox).filter(TaskOutbox.state == "pending")
     if job_id is not None:
         query = query.filter(TaskOutbox.job_id == job_id)
     rows = query.order_by(TaskOutbox.created_at).limit(limit).all()

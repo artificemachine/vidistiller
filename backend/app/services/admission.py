@@ -325,6 +325,9 @@ def finish_job_admission(db: Session, job_id: int, *, failed: bool = False) -> b
     from app.db.models import AdmissionCounter
 
     target = AdmissionState.FAILED if failed else AdmissionState.FINISHED
+
+    # Transition 1: an ADMITTED job -> terminal; it incremented the counters,
+    # so the winner of this conditional UPDATE decrements them exactly once.
     if db.bind.dialect.name == "postgresql":
         result = db.execute(
             text(
@@ -342,33 +345,54 @@ def finish_job_admission(db: Session, job_id: int, *, failed: bool = False) -> b
             ),
             {"state": target.value, "job_id": job_id, "now": _utcnow()},
         )
-    if result.rowcount != 1:
-        # Not admitted (queued/never admitted/already finished): nothing to
-        # release — a queued job never incremented the counters.
-        return False
+    if result.rowcount == 1:
+        job = db.get(ProcessingJob, job_id)
+        user_id = job.user_id if job else 0
 
-    job = db.get(ProcessingJob, job_id)
-    user_id = job.user_id if job else 0
+        for key in (GLOBAL_COUNTER_KEY, user_counter_key(user_id)):
+            if db.bind.dialect.name == "postgresql":
+                db.execute(
+                    text(
+                        "UPDATE admission_counters SET active = active - 1, updated_at = now() "
+                        "WHERE key = :k AND active > 0"
+                    ),
+                    {"k": key},
+                )
+            else:
+                db.execute(
+                    text(
+                        "UPDATE admission_counters SET active = active - 1 "
+                        "WHERE key = :k AND active > 0"
+                    ),
+                    {"k": key},
+                )
+        _audit(db, "admission_finish", job_id=job_id)
+        return True
 
-    for key in (GLOBAL_COUNTER_KEY, user_counter_key(user_id)):
-        if db.bind.dialect.name == "postgresql":
-            db.execute(
-                text(
-                    "UPDATE admission_counters SET active = active - 1, updated_at = now() "
-                    "WHERE key = :k AND active > 0"
-                ),
-                {"k": key},
-            )
-        else:
-            db.execute(
-                text(
-                    "UPDATE admission_counters SET active = active - 1 "
-                    "WHERE key = :k AND active > 0"
-                ),
-                {"k": key},
-            )
-    _audit(db, "admission_finish", job_id=job_id)
-    return True
+    # Transition 2: a QUEUED job -> terminal. Queued jobs never incremented
+    # the counters, so nothing is decremented (cancellation of a queued job,
+    # Review Round 2 N5).
+    if db.bind.dialect.name == "postgresql":
+        result = db.execute(
+            text(
+                "UPDATE job_admissions SET state = :state, finished_at = now(), "
+                "updated_at = now() WHERE job_id = :job_id AND state = 'queued' "
+                "RETURNING job_id"
+            ),
+            {"state": target.value, "job_id": job_id},
+        )
+    else:
+        result = db.execute(
+            text(
+                "UPDATE job_admissions SET state = :state, finished_at = :now "
+                "WHERE job_id = :job_id AND state = 'queued'"
+            ),
+            {"state": target.value, "job_id": job_id, "now": _utcnow()},
+        )
+    if result.rowcount == 1:
+        _audit(db, "admission_finish_queued", job_id=job_id)
+        return True
+    return False
 
 
 def _enqueue_outbox(
