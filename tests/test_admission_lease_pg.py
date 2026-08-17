@@ -865,7 +865,11 @@ def test_claim_vs_terminalize_race(db_factory):
     t1 = threading.Thread(target=claimer)
     t2 = threading.Thread(target=terminalizer)
     t1.start(); t2.start()
-    t1.join(timeout=60); t2.join(timeout=60)
+    t1.join(timeout=60)
+    t2.join(timeout=60)
+    assert not t1.is_alive(), "claimer thread did not terminate"
+    assert not t2.is_alive(), "terminalizer thread did not terminate"
+    assert len(results) == 2, f"expected both threads to report, got {results}"
 
     errors = [r for r in results if "error" in r]
     assert not errors, f"thread errors: {errors}"

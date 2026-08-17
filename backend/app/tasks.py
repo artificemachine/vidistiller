@@ -320,6 +320,22 @@ def _terminalize_capacity_exhausted(db, job_id: int) -> bool:
     try:
         from app.db.models import JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
 
+        # P10-NEW-18: acquire the JOB-row lock FIRST, then inspect claims and
+        # terminalize, so our claim inspection happens under a fresh
+        # post-lock snapshot that cannot race a concurrently committing
+        # claim. The conditional NOT EXISTS UPDATE below remains as the
+        # atomic fail gate.
+        if db.bind.dialect.name == "postgresql":
+            job_row = db.execute(
+                text(
+                    "SELECT status FROM processing_jobs WHERE id = :job_id FOR UPDATE"
+                ),
+                {"job_id": job_id},
+            ).first()
+            if job_row is None:
+                return False
+            if job_row[0] not in ("pending", "processing"):
+                return False  # already terminal or gone
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if job is None:
             return False
@@ -608,6 +624,10 @@ def process_video_download(self, job_id: int):
         claimed = claim_step(db, job.id, "download", exec_uuid)
         if claimed is None:
             return {"job_id": job_id, "status": "skipped"}
+        # P10-NEW-20: commit the claim promptly so the job-row lock is not
+        # held across the network/file work below (which would block
+        # cancellation and terminalization for the download duration).
+        db.commit()
         data_dir = get_settings().storage.data_dir or str(
             Path(__file__).resolve().parent.parent / "data"
         )
@@ -819,6 +839,10 @@ def process_transcript(self, job_id: int):
             if steps_enabled
             else None
         )
+        if download_claim:
+            # P10-NEW-20: commit the claim so the job lock is not held
+            # across the download network/file work.
+            db.commit()
         if not steps_enabled or download_claim:
             _add_log(db, job_id, "Downloading video for snapshots...", "info", "video_download")
             try:
@@ -1208,6 +1232,13 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
                         job.id,
                     )
                     raise SidecarCapacityExhausted(job_id)
+            else:
+                # P10-NEW-20: commit the claim promptly so the job-row lock
+                # is NOT held across the LLM call (which would block
+                # cancellation, force minting and terminalization for the
+                # whole request). Generation/terminal state is revalidated
+                # before the final writes.
+                db.commit()
 
         # Read the owner preference only for language selection. The concrete
         # endpoint is resolved after the transcript length is known so context
@@ -1355,6 +1386,25 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
                 )
                 return {"status": "skipped", "reason": "superseded by a newer force request"}
         doc = llm.save_document(db, job.id, title, summary_content, "summary")
+
+        # P10-NEW-19: the generation fence must cover the FINAL status and
+        # step writes, not just the document insert. save_document commits
+        # internally (releasing the job lock), so revalidate once more under
+        # a fresh lock before marking summarization completed; if a newer
+        # force minted during the save, delete the just-written document and
+        # let the newer delivery win.
+        if force and force_generation is not None:
+            if not _force_generation_still_valid(db, job.id, force_generation):
+                logger.info(
+                    "Summarize: job %s force generation superseded after document save; discarding",
+                    job_id,
+                )
+                try:
+                    db.query(Document).filter(Document.id == doc.id).delete()
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                return {"status": "skipped", "reason": "superseded by a newer force request"}
 
         # Mark summarization as completed
         job.summarize_status = "completed"
