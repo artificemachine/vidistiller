@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,6 +36,75 @@ logger = logging.getLogger(__name__)
 
 PROBE_TIMEOUT_SECONDS = 3
 STALE_TELEMETRY_SECONDS = 30
+
+# Background telemetry cache (Review Round 2 F7): the inventory is refreshed
+# by the scheduler loop, never probed inside a request transaction.
+_telemetry_cache: dict[str, SidecarTelemetry] = {}
+_telemetry_lock = threading.Lock()
+_telemetry_loaded_at: float = 0.0
+
+
+def refresh_telemetry_cache(db: Session) -> None:
+    """Probe all enabled sidecars and replace the shared cache.
+
+    Called by the periodic scheduler (never inside a request handler), so
+    request paths read timestamped telemetry without holding a DB
+    transaction open across network probes.
+    """
+    global _telemetry_loaded_at
+    settings = get_settings().admission
+    rows = db.query(Sidecar).filter(Sidecar.enabled.is_(True)).all()
+
+    reserved_by_sidecar: dict[str, int] = {}
+    from app.db.models import SlotState
+
+    for slot in (
+        db.query(ResourceSlot)
+        .filter(ResourceSlot.state.in_((SlotState.LEASED, SlotState.EXPIRED)))
+        .all()
+    ):
+        reserved_by_sidecar[slot.sidecar_id] = (
+            reserved_by_sidecar.get(slot.sidecar_id, 0) + 1
+        )
+
+    fresh: dict[str, SidecarTelemetry] = {}
+    for sidecar in rows:
+        telemetry = _probe_sidecar(sidecar)
+        telemetry.reserved_slots = reserved_by_sidecar.get(sidecar.registered_id, 0)
+        telemetry.total_slots = settings.slots_per_sidecar
+        fresh[sidecar.registered_id] = telemetry
+    with _telemetry_lock:
+        _telemetry_cache.clear()
+        _telemetry_cache.update(fresh)
+        _telemetry_loaded_at = time.time()
+
+
+def get_sidecar_telemetry_status(registered_id: str) -> str:
+    """Return the cached health status of a sidecar: 'ok' | 'unknown' |
+    'unhealthy' | 'stale' | 'no_capacity'.
+
+    Used by admission for the fail-closed preference check. Unknown means
+    the cache has never loaded (scheduler not yet run) — treated as 'ok'
+    for the preference gate only if the registry row exists, but the task
+    incarnation still requires a live slot lease before external work.
+    """
+    with _telemetry_lock:
+        telemetry = _telemetry_cache.get(registered_id)
+    if telemetry is None:
+        return "unknown"
+    if not telemetry.healthy:
+        return "unhealthy"
+    if telemetry.stale:
+        return "stale"
+    if telemetry.available_slots <= 0:
+        return "no_capacity"
+    return "ok"
+
+
+def cached_sidecar_telemetry(registered_id: str) -> Optional[SidecarTelemetry]:
+    """Return the cached telemetry row, or None when never loaded."""
+    with _telemetry_lock:
+        return _telemetry_cache.get(registered_id)
 
 
 @dataclass
@@ -197,7 +267,13 @@ def _first_metric_value(line: str) -> int:
 
 
 def inventory(db: Session) -> list[SidecarTelemetry]:
-    """Live inventory of all enabled sidecars with reserved slot counts."""
+    """Live inventory of all enabled sidecars from the background cache.
+
+    Request paths call this without probing (Review Round 2 F7): the
+    scheduler refreshes the cache; stale telemetry fails closed for new
+    allocations. Reserved-slot counts are re-read cheaply from the DB here
+    (one indexed query, no network).
+    """
     settings = get_settings().admission
     rows = db.query(Sidecar).filter(Sidecar.enabled.is_(True)).all()
 
@@ -214,12 +290,57 @@ def inventory(db: Session) -> list[SidecarTelemetry]:
         )
 
     result: list[SidecarTelemetry] = []
+    with _telemetry_lock:
+        cache_snapshot = dict(_telemetry_cache)
     for sidecar in rows:
-        telemetry = _probe_sidecar(sidecar)
+        telemetry = cache_snapshot.get(sidecar.registered_id)
+        if telemetry is None:
+            telemetry = SidecarTelemetry(
+                registered_id=sidecar.registered_id,
+                label=sidecar.label,
+                base_url=sidecar.base_url,
+                declared_model=sidecar.declared_model,
+                capabilities=list(sidecar.capabilities or []),
+                healthy=False,
+                observed_at=0.0,  # never observed -> stale -> fail closed
+            )
         telemetry.reserved_slots = reserved_by_sidecar.get(sidecar.registered_id, 0)
         telemetry.total_slots = settings.slots_per_sidecar
         result.append(telemetry)
     return result
+
+
+def reconcile_slots(db: Session) -> int:
+    """Provision ResourceSlot rows for enabled sidecars (Review Round 2 F3).
+
+    Ensures each enabled sidecar has exactly ``SIDECAR_SLOTS`` slot rows.
+    Existing rows (including leased/expired) are never deleted or mutated
+    here; only missing rows are created. Returns the count created.
+    """
+    settings = get_settings().admission
+    rows = db.query(Sidecar).filter(Sidecar.enabled.is_(True)).all()
+    created = 0
+    for sidecar in rows:
+        existing = (
+            db.query(ResourceSlot.slot_index)
+            .filter(ResourceSlot.sidecar_id == sidecar.registered_id)
+            .all()
+        )
+        existing_indices = {idx for (idx,) in existing}
+        for slot_index in range(settings.slots_per_sidecar):
+            if slot_index not in existing_indices:
+                db.add(
+                    ResourceSlot(
+                        sidecar_id=sidecar.registered_id,
+                        slot_index=slot_index,
+                        enabled=True,
+                    )
+                )
+                created += 1
+    if created:
+        db.commit()
+        logger.info("reconciled %d sidecar slot row(s)", created)
+    return created
 
 
 def routed_sidecar(

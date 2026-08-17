@@ -146,29 +146,26 @@ def test_eta_lower_when_more_progress(test_db):
 def test_eta_backtest_error_metrics(test_db):
     """Backtest: for each held-out completed job, the true remaining time must
     fall inside [low, high] or the median-based error be bounded. Metrics are
-    defined BEFORE computing: MAE <= 40% of true, P90 APE <= 90%."""
-    _seed_history(test_db, mode="standard")
-    # Hold out the most recent standard job as the test target.
-    held = _history_job(
-        test_db, "standard",
-        {"download": 45, "transcribe": 20, "snapshots": 120, "summarize": 300},
-        offset_days=0,
-    )
-    # Rebuild history WITHOUT the held-out job's data (temporal holdout).
-    from app.db.models import JobStep as _JS
-
-    test_db.query(_JS).filter(_JS.job_id == held.id).delete()
-    test_db.delete(held)
-    test_db.commit()
-
-    # Simulate the held job at 25% through summarize: remaining ≈ 225s.
+    defined BEFORE computing: MAE <= 40% of true, P90 APE <= 90%. The
+    holdout is temporal and the sample is sized so the estimate can never
+    legitimately be cold (Review Round 2 F8 — no skipping)."""
+    # Seed enough history (>= MIN_HISTORY_SAMPLES) in the SAME mode as the
+    # evaluated job, with known stage durations.
+    for i in range(8):
+        _history_job(
+            test_db, "slide_aware",
+            {"download": 45, "transcribe": 20, "slides": 600, "summarize": 300},
+            offset_days=i + 2,
+        )
+    # The evaluated job is slide_aware at 25% through summarize.
     job = _job_with_steps(ProcessingStatus.PROCESSING, slides_percent=100)
     job.steps[4].percent = 25  # summarize
     job.steps[4].status = JobStepStatus.RUNNING
 
     est = estimate_eta(test_db, job)
-    if est.confidence == "cold":
-        pytest.skip("backtest sample insufficient in this run")
-    true_remaining = 225.0
+    assert est.confidence != "cold", "backtest sample must be sufficient"
+    true_remaining = 225.0  # 75% of the 300s summarize stage
     ape = abs(est.eta_low_seconds - true_remaining) / true_remaining
     assert ape <= 0.9, f"P90 APE exceeded: {ape:.2f} (low={est.eta_low_seconds})"
+    # The true remaining time must lie inside the reported range.
+    assert est.eta_low_seconds <= true_remaining <= est.eta_high_seconds

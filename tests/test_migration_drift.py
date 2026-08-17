@@ -165,6 +165,13 @@ def test_downgrade_reupgrade_rehearsal(migrated_engine):
         )
         conn.execute(
             text(
+                "INSERT INTO sidecars (registered_id, label, base_url, capabilities) "
+                "VALUES ('primary', 'Primary', 'http://test.invalid:8000', "
+                "'[\"text\"]'::jsonb)"
+            )
+        )
+        conn.execute(
+            text(
                 "INSERT INTO resource_slots (sidecar_id, slot_index, enabled, state, generation) "
                 "VALUES ('primary', 0, true, 'leased', 3)"
             )
@@ -205,6 +212,13 @@ def test_downgrade_reupgrade_rehearsal(migrated_engine):
         conn.execute(
             text(
                 "INSERT INTO admission_counters (key, active, \"limit\") VALUES ('global', 1, 4)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO sidecars (registered_id, label, base_url, capabilities) "
+                "VALUES ('primary', 'Primary', 'http://test.invalid:8000', "
+                "'[\"text\"]'::jsonb)"
             )
         )
         conn.execute(

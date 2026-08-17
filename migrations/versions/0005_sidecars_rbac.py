@@ -47,6 +47,16 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("registered_id", name="uq_sidecars_registered_id"),
     )
+    # FK from resource_slots (0004) to the registry — created here once the
+    # sidecars table exists (Review Round 2 F13).
+    op.create_foreign_key(
+        "fk_resource_slots_sidecar_id",
+        "resource_slots",
+        "sidecars",
+        ["sidecar_id"],
+        ["registered_id"],
+        ondelete="RESTRICT",
+    )
 
     op.add_column(
         "processing_jobs",
@@ -65,8 +75,10 @@ def upgrade() -> None:
         sa.Column("role", sa.String(length=32), nullable=False),
         sa.Column("granted_by", sa.String(length=128), nullable=True),
         sa.Column("granted_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column("grant_reason", sa.String(length=512), nullable=True),
         sa.Column("revoked_by", sa.String(length=128), nullable=True),
         sa.Column("revoked_at", sa.DateTime(), nullable=True),
+        sa.Column("revoke_reason", sa.String(length=512), nullable=True),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("user_id", "role", name="uq_user_roles_user_role"),
@@ -76,6 +88,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_constraint("fk_resource_slots_sidecar_id", "resource_slots", type_="foreignkey")
     op.drop_index("ix_user_roles_role", table_name="user_roles")
     op.drop_index("ix_user_roles_user_id", table_name="user_roles")
     op.drop_table("user_roles")

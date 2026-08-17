@@ -74,6 +74,17 @@ def _get_job_for_user(
     return job
 
 
+def _finish_job_admission_for_route(db: Session, job_id: int, *, failed: bool = False) -> None:
+    """Route-level admission release (cancel/delete paths), Review Round 2 F5."""
+    from app.services.admission import finish_job_admission
+
+    try:
+        finish_job_admission(db, job_id, failed=failed)
+    except Exception as exc:
+        logger.warning("admission finish failed for job %s: %s", job_id, exc)
+        db.rollback()
+
+
 def _find_duplicate_job(
     db: Session, user_id: int, video_url: str, source_type, video_id: str
 ) -> ProcessingJob | None:
@@ -317,6 +328,10 @@ def list_jobs(
         data = JobStatusResponse.model_validate(job)
         if job.videos:
             data.video_title = job.videos[0].title
+        # WP2/WP5: admission state, queue position, progress, ETA for the owner.
+        from app.services.job_payload import enrich_job_payload
+
+        enrich_job_payload(db, job, data)
         results.append(data)
     return results
 
@@ -496,6 +511,11 @@ def get_job(
 
     response = JobResponse.model_validate(job)
 
+    # WP2/WP5: admission state, queue position, progress, ETA for the owner.
+    from app.services.job_payload import enrich_job_payload
+
+    enrich_job_payload(db, job, response)
+
     _data_dir = get_settings().storage.data_dir or str(Path(__file__).resolve().parent.parent.parent / "data")
     data_root = Path(_data_dir)
 
@@ -549,7 +569,11 @@ def get_job_status(
     - 404: Job not found
     """
     job = _get_job_for_user(db, job_id, current_user)
-    return JobStatusResponse.model_validate(job)
+    status = JobStatusResponse.model_validate(job)
+    from app.services.job_payload import enrich_job_payload
+
+    enrich_job_payload(db, job, status)
+    return status
 
 
 # ==============================================================================
@@ -1083,16 +1107,24 @@ def cancel_job(
             "Only pending or processing jobs can be cancelled."
         )
 
-    # Revoke the running Celery task
-    if job.celery_task_id:
-        celery_app.control.revoke(job.celery_task_id, terminate=True, signal="SIGTERM")
-
+    # Fence in the DB FIRST, then revoke the task (Review Round 2 F1/F5):
+    # once the fence is committed, the task's own terminal handling sees
+    # CANCELLED, finishes the admission exactly once and releases the slot;
+    # the revoke merely terminates the in-flight OS process. Reversing the
+    # order let the task race past the status check.
+    running_task_id = job.celery_task_id
     job.status = ProcessingStatus.CANCELLED
     job.error_message = "Cancelled by user"
     job.celery_task_id = None
     db.commit()
-    db.refresh(job)
+    _finish_job_admission_for_route(db, job.id, failed=True)
+    db.commit()
 
+    # Revoke the running Celery task (after the DB fence committed).
+    if running_task_id:
+        celery_app.control.revoke(running_task_id, terminate=True, signal="SIGTERM")
+
+    db.refresh(job)
     return JobStatusResponse.model_validate(job)
 
 
@@ -1114,6 +1146,10 @@ def delete_job(
     """
     Delete a processing job and cascade-delete all related data.
 
+    Active (processing/pending) jobs are rejected: deleting them would orphan
+    the admission counter and the leased sidecar slot (Review Round 2 F5).
+    The caller must cancel first, which fences and releases atomically.
+
     **Path parameters:**
     - `job_id`: UUID of the processing job to delete
 
@@ -1122,8 +1158,19 @@ def delete_job(
     **Status codes:**
     - 204: Job deleted successfully
     - 404: Job not found
+    - 422: Active job cannot be deleted (cancel it first)
     """
     job = _get_job_for_user(db, job_id, current_user)
+
+    if job.status in (ProcessingStatus.PROCESSING, ProcessingStatus.PENDING):
+        raise ValidationException(
+            "Cannot delete an active job. Cancel it first (POST /jobs/{id}/cancel)."
+        )
+
+    # Belt-and-braces admission release for terminal-but-unfinished rows
+    # (finish is exactly-once).
+    _finish_job_admission_for_route(db, job.id)
+    db.commit()
 
     try:
         db.delete(job)

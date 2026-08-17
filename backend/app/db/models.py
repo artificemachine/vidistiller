@@ -598,7 +598,7 @@ class ResourceSlot(Base):
     __tablename__ = "resource_slots"
 
     id: int = Column(Integer, primary_key=True)
-    sidecar_id: str = Column(String(64), nullable=False)
+    sidecar_id: str = Column(String(64), ForeignKey("sidecars.registered_id", ondelete="RESTRICT"), nullable=False)
     slot_index: int = Column(Integer, nullable=False)
     enabled: bool = Column(Boolean, nullable=False, default=True, server_default="true")
     state: SlotState = Column(
@@ -616,6 +616,7 @@ class ResourceSlot(Base):
     updated_at: datetime = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
     job = relationship("ProcessingJob", back_populates="slots")
+    sidecar = relationship("Sidecar", foreign_keys=[sidecar_id])
     events = relationship("LeaseEvent", back_populates="slot", order_by="LeaseEvent.id", cascade="all, delete-orphan")
 
     __table_args__ = (
@@ -734,6 +735,8 @@ class UserRole(Base):
     granted_at: datetime = Column(DateTime, server_default=func.now(), nullable=False)
     revoked_by: Optional[str] = Column(String(128), nullable=True)
     revoked_at: Optional[datetime] = Column(DateTime, nullable=True)
+    grant_reason: Optional[str] = Column(String(512), nullable=True)
+    revoke_reason: Optional[str] = Column(String(512), nullable=True)
 
     user = relationship("User", back_populates="roles")
 

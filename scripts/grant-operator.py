@@ -52,13 +52,26 @@ def _grant(db, user_id: int, actor: str, reason: str | None) -> bool:
     if row is not None and row.revoked_at is None:
         logger.info("user %s already has an active %s grant (row %s)", user_id, ROLE, row.id)
         return False
-    db.execute(
-        text(
-            "INSERT INTO user_roles (user_id, role, granted_by, granted_at, revoked_at) "
-            "VALUES (:uid, :role, :actor, :now, NULL)"
-        ),
-        {"uid": user_id, "role": ROLE, "actor": actor, "now": now},
-    )
+    if row is not None:
+        # Regrant after revocation: reactivate the same row (the unique
+        # constraint is (user_id, role), so a second INSERT would violate it).
+        # Audit history is preserved by recording the regrant actor/time.
+        db.execute(
+            text(
+                "UPDATE user_roles SET granted_by = :actor, granted_at = :now, "
+                "revoked_by = NULL, revoked_at = NULL, "
+                "grant_reason = :reason WHERE id = :id"
+            ),
+            {"id": row.id, "actor": actor, "now": now, "reason": reason},
+        )
+    else:
+        db.execute(
+            text(
+                "INSERT INTO user_roles (user_id, role, granted_by, granted_at, "
+                "grant_reason, revoked_at) VALUES (:uid, :role, :actor, :now, :reason, NULL)"
+            ),
+            {"uid": user_id, "role": ROLE, "actor": actor, "now": now, "reason": reason},
+        )
     db.commit()
     logger.info("granted %s to user %s by %s (reason: %s)", ROLE, user_id, actor, reason or "-")
     return True
@@ -68,10 +81,11 @@ def _revoke(db, user_id: int, actor: str, reason: str | None) -> bool:
     now = datetime.now(UTC).replace(tzinfo=None)
     result = db.execute(
         text(
-            "UPDATE user_roles SET revoked_at = :now, revoked_by = :actor "
+            "UPDATE user_roles SET revoked_at = :now, revoked_by = :actor, "
+            "revoke_reason = :reason "
             "WHERE user_id = :uid AND role = :role AND revoked_at IS NULL"
         ),
-        {"uid": user_id, "role": ROLE, "actor": actor, "now": now},
+        {"uid": user_id, "role": ROLE, "actor": actor, "now": now, "reason": reason},
     )
     db.commit()
     if result.rowcount:

@@ -11,6 +11,8 @@ import re
 import threading
 from math import ceil
 
+from sqlalchemy import text
+
 from celery import Celery
 from app.core.config import TRANSCRIPT_CONFIDENCE_CAPTIONS, TRANSCRIPT_CONFIDENCE_WHISPER, get_settings
 
@@ -129,26 +131,6 @@ def _mark_stage_delivered(db, job_id: int, stage: str) -> None:
         db.rollback()
 
 
-def _resolve_sidecar_for_job(db, job) -> tuple:
-    """Resolve the sidecar for a job: preference first, then routed capacity.
-
-    Returns (telemetry|None, capabilities). None when no sidecar is
-    compatible/available — the caller decides between queueing visibly and
-    running without a lease (sequential fallback).
-    """
-    from app.services.sidecar import inventory, routed_sidecar
-
-    preference = getattr(job, "sidecar_preference", None)
-    if preference and preference != "auto":
-        return None, ()
-    telemetry_rows = inventory(db)
-    cap = ("text",)
-    chosen = routed_sidecar(db, telemetry_rows, preference=preference, capabilities=cap)
-    if chosen is None and preference is None:
-        chosen = routed_sidecar(db, telemetry_rows, capabilities=cap)
-    return chosen, cap
-
-
 def _lease_slot_for_job(db, job, exec_uuid: str):
     """Acquire a sidecar slot for a job under its fencing token (WP2)."""
     from app.services.lease import acquire_slot
@@ -157,6 +139,35 @@ def _lease_slot_for_job(db, job, exec_uuid: str):
     if preference and preference != "auto":
         return acquire_slot(db, job, exec_uuid=exec_uuid, preferred_sidecar=preference)
     return acquire_slot(db, job, exec_uuid=exec_uuid)
+
+
+def _resolve_provider_for_slot(db, slot):
+    """Build the LLM provider bound to the LEASED sidecar (Review Round 2 F6).
+
+    Uses the registry endpoint of the leased sidecar plus the model the
+    sidecar actually serves (live telemetry), so the job runs on exactly the
+    capacity its lease authorizes — never the generic fleet fallback.
+    """
+    from app.services.llm_providers import build_provider
+    from app.services.sidecar import cached_sidecar_telemetry, get_sidecar
+
+    sidecar = get_sidecar(db, slot.sidecar_id)
+    if sidecar is None:
+        logger.warning("leased sidecar %s missing from registry", slot.sidecar_id)
+        return None, None
+    telemetry = cached_sidecar_telemetry(slot.sidecar_id)
+    served = (telemetry.served_models or [None])[0] if telemetry else None
+    model = served or sidecar.declared_model
+    try:
+        provider = build_provider(
+            "vllm",
+            api_key=None,
+            ollama_base_url=sidecar.base_url,
+        )
+    except Exception as exc:
+        logger.warning("could not build provider for leased sidecar %s: %s", slot.sidecar_id, exc)
+        return None, None
+    return provider, model
 
 
 def _release_slot_if_held(db, slot, exec_uuid: str) -> None:
@@ -170,6 +181,15 @@ def _release_slot_if_held(db, slot, exec_uuid: str) -> None:
     except Exception as exc:
         logger.warning("slot release failed for slot %s: %s", slot.id, exc)
         db.rollback()
+
+
+class SidecarCapacityExhausted(Exception):
+    """Raised when no sidecar slot is available for external LLM work.
+
+    The task catches this, records a visible queue reason on the admission
+    row, and retries with a bounded countdown instead of overcommitting the
+    GPU or failing ambiguously (Review Round 2 F3/F6).
+    """
 
 
 # ==============================================================================
@@ -374,12 +394,13 @@ def process_video_download(self, job_id: int):
     from app.services.job_steps import claim_step, complete_step, fail_step
     from app.services.video import VideoService
 
+    exec_uuid = _mint_exec_uuid()
     db = SessionLocal()
     try:
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if job is None or not job.video_url:
             return {"job_id": job_id, "status": "skipped"}
-        claimed = claim_step(db, job.id, "download", self.request.id)
+        claimed = claim_step(db, job.id, "download", exec_uuid)
         if claimed is None:
             return {"job_id": job_id, "status": "skipped"}
         data_dir = get_settings().storage.data_dir or str(
@@ -391,11 +412,11 @@ def process_video_download(self, job_id: int):
                 job.video_url, output_path=output_path, quality="720p"
             )
         except Exception as exc:
-            fail_step(db, job.id, "download", self.request.id, str(exc))
+            fail_step(db, job.id, "download", exec_uuid, str(exc))
             db.commit()
             raise self.retry(exc=exc, countdown=30)
         job.video_file_path = video_path
-        complete_step(db, job.id, "download", self.request.id, {"path": Path(video_path).name})
+        complete_step(db, job.id, "download", exec_uuid, {"path": Path(video_path).name})
         dependent_step = (
             "slides"
             if job.processing_mode == ProcessingMode.SLIDE_AWARE.value
@@ -438,6 +459,11 @@ def process_transcript(self, job_id: int):
     from app.services.job_steps import claim_step, complete_step, fail_step
     from app.services.video import VideoService
 
+    # Per-incarnation execution UUID (Review Round 2 F1): step claims are
+    # keyed on THIS token, never on the Celery request.id — a redelivered
+    # message retains request.id but gets a fresh exec_uuid, so it cannot
+    # re-claim a step the previous incarnation still owns.
+    exec_uuid = _mint_exec_uuid()
     db = SessionLocal()
     try:
         # 1. Load job
@@ -465,6 +491,7 @@ def process_transcript(self, job_id: int):
         # overwrites celery_task_id and restarts the whole pipeline from
         # scratch -- the exact bug found live in process_slides on
         # 2026-08-12 (see incident_log.md), which had no such guard either.
+        # The exec_uuid claims below additionally fence the step level.
         if job.celery_task_id and job.celery_task_id != self.request.id:
             logger.info(
                 "Job %s already processing under task %s, skipping duplicate delivery %s",
@@ -478,6 +505,8 @@ def process_transcript(self, job_id: int):
             job.status = ProcessingStatus.FAILED
             job.error_message = "No video URL provided"
             db.commit()
+            _finish_admission_for_job(db, job_id, failed=True)
+            db.commit()
             return {"error": "No video URL"}
 
         # 2. Set status to PROCESSING, store Celery task ID for cancellation
@@ -490,7 +519,7 @@ def process_transcript(self, job_id: int):
         video_service = VideoService()
         steps_enabled = bool(job.steps)
         transcribe_claim = (
-            claim_step(db, job.id, "transcribe", self.request.id)
+            claim_step(db, job.id, "transcribe", exec_uuid)
             if steps_enabled
             else None
         )
@@ -523,7 +552,7 @@ def process_transcript(self, job_id: int):
             job.status = ProcessingStatus.FAILED
             job.error_message = "No transcript could be generated"
             if transcribe_claim:
-                fail_step(db, job.id, "transcribe", self.request.id, "No transcript could be generated")
+                fail_step(db, job.id, "transcribe", exec_uuid, "No transcript could be generated")
             db.commit()
             return {"error": "Empty transcript"}
 
@@ -549,13 +578,13 @@ def process_transcript(self, job_id: int):
                 db,
                 job.id,
                 "transcribe",
-                self.request.id,
+                exec_uuid,
                 {"source": source, "language": detected_language, "characters": len(transcript_text)},
             )
 
         # 7. Download video for snapshot capture (non-fatal)
         download_claim = (
-            claim_step(db, job.id, "download", self.request.id)
+            claim_step(db, job.id, "download", exec_uuid)
             if steps_enabled
             else None
         )
@@ -570,11 +599,11 @@ def process_transcript(self, job_id: int):
                 )
                 job.video_file_path = video_path
                 if download_claim:
-                    complete_step(db, job.id, "download", self.request.id, {"path": _Path(video_path).name})
+                    complete_step(db, job.id, "download", exec_uuid, {"path": _Path(video_path).name})
                 logger.info(f"Video downloaded for job {job_id}: {video_path}")
             except Exception as e:
                 if download_claim:
-                    fail_step(db, job.id, "download", self.request.id, str(e))
+                    fail_step(db, job.id, "download", exec_uuid, str(e))
                 _add_log(db, job_id, f"Video download failed (non-fatal): {e}", "warning", "video_download")
                 logger.warning(f"Video download failed (non-fatal): {e}")
 
@@ -615,10 +644,12 @@ def process_transcript(self, job_id: int):
                 job.status = ProcessingStatus.FAILED
                 job.error_message = f"Unexpected error: {str(e)[:500]}"
                 db.commit()
-                _finish_admission_for_job(db, job_id, failed=True)
-                db.commit()
         except Exception:
             pass
+        # Do NOT finish admission on an intermediate retry: the job is still
+        # active (Review Round 2 F5). Only the final exhausted retry releases
+        # the active-job slot, and that happens in the route-level terminal
+        # handling (see cancel/delete paths) or via the reconciliation sweep.
         raise self.retry(exc=e, countdown=30)
     finally:
         db.close()
@@ -736,6 +767,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
     from app.db.models import ProcessingJob, Document
     from app.services.llm import LLMService, CancelledException
 
+    exec_uuid = _mint_exec_uuid()
     db = SessionLocal()
     summarize_claimed = False
     try:
@@ -751,7 +783,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
             from app.services.job_steps import claim_step
 
             summarize_claimed = claim_step(
-                db, job.id, "summarize", self.request.id
+                db, job.id, "summarize", exec_uuid
             ) is not None
             if not summarize_claimed and not force:
                 return {"status": "skipped", "reason": "summarize step is not retryable"}
@@ -791,7 +823,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
             job.celery_task_id = None
             if summarize_claimed:
                 from app.services.job_steps import fail_step
-                fail_step(db, job.id, "summarize", self.request.id, "No transcript available")
+                fail_step(db, job.id, "summarize", exec_uuid, "No transcript available")
             db.commit()
             _add_log(db, job_id, "No transcript available for summarization", "error", "summarize")
             return {"error": "No transcript"}
@@ -906,7 +938,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         if summarize_claimed:
             from app.services.job_steps import complete_step
             complete_step(
-                db, job.id, "summarize", self.request.id,
+                db, job.id, "summarize", exec_uuid,
                 {"document_id": doc.id, "characters": len(summary_content)},
             )
         db.commit()
@@ -924,7 +956,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
                 job.celery_task_id = None
                 if summarize_claimed:
                     from app.services.job_steps import fail_step
-                    fail_step(db, job.id, "summarize", self.request.id, "Cancelled")
+                    fail_step(db, job.id, "summarize", exec_uuid, "Cancelled")
                 db.commit()
         except Exception:
             pass
@@ -954,7 +986,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
                     job.celery_task_id = None
                     if summarize_claimed:
                         from app.services.job_steps import fail_step
-                        fail_step(db, job.id, "summarize", self.request.id, str(e))
+                        fail_step(db, job.id, "summarize", exec_uuid, str(e))
                     db.commit()
         except Exception:
             pass
@@ -978,16 +1010,17 @@ def process_snapshots(self, job_id: int):
     from app.services.job_steps import claim_step, complete_step, fail_step
     from app.services.snapshot import SnapshotService
 
+    exec_uuid = _mint_exec_uuid()
     db = SessionLocal()
     try:
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if job is None:
             return {"error": f"Job {job_id} not found"}
-        claimed = claim_step(db, job.id, "snapshots", self.request.id)
+        claimed = claim_step(db, job.id, "snapshots", exec_uuid)
         if claimed is None:
             return {"status": "skipped", "reason": "step is not retryable"}
         if not job.video_file_path or not Path(job.video_file_path).is_file():
-            fail_step(db, job.id, "snapshots", self.request.id, "No downloaded video is available")
+            fail_step(db, job.id, "snapshots", exec_uuid, "No downloaded video is available")
             db.commit()
             return {"error": "No downloaded video is available"}
 
@@ -1017,7 +1050,7 @@ def process_snapshots(self, job_id: int):
             db,
             job.id,
             "snapshots",
-            self.request.id,
+            exec_uuid,
             {"count": len(snapshots), "frames_analyzed": len(frames)},
         )
         db.commit()
@@ -1031,7 +1064,7 @@ def process_snapshots(self, job_id: int):
     except Exception as exc:
         db.rollback()
         try:
-            fail_step(db, job_id, "snapshots", self.request.id, str(exc))
+            fail_step(db, job_id, "snapshots", exec_uuid, str(exc))
             db.commit()
         except Exception:
             db.rollback()
@@ -1068,10 +1101,19 @@ def process_slides(self, job_id: int):
             logger.error(f"Slide task: Job {job_id} not found")
             return {"error": f"Job {job_id} not found"}
 
+        # Per-incarnation execution UUID (Review Round 2 F1): the step claim,
+        # the sidecar lease and all completion/release calls share it. A
+        # redelivered message (same request.id) gets a fresh exec_uuid and
+        # therefore cannot re-claim the step or the lease.
+        exec_uuid = _mint_exec_uuid()
+        slot = None
+        heartbeat_stop = threading.Event()
+        heartbeat_thread = None
+
         if _has_persisted_steps(job):
             from app.services.job_steps import claim_step
 
-            slide_claimed = claim_step(db, job.id, "slides", self.request.id) is not None
+            slide_claimed = claim_step(db, job.id, "slides", exec_uuid) is not None
             if not slide_claimed:
                 return {"status": "skipped", "reason": "slides step is not retryable"}
 
@@ -1105,7 +1147,7 @@ def process_slides(self, job_id: int):
             job.slide_status = "skipped"
             if slide_claimed:
                 from app.services.job_steps import fail_step
-                fail_step(db, job.id, "slides", self.request.id, "No video file")
+                fail_step(db, job.id, "slides", exec_uuid, "No video file")
             db.commit()
             _finish_admission_for_job(db, job_id)
             db.commit()
@@ -1118,28 +1160,58 @@ def process_slides(self, job_id: int):
         _add_log(db, job_id, "Starting slide detection pipeline...", "info", "slide_detect")
         _mark_stage_delivered(db, job_id, "slides")
 
-        def cancel_check() -> bool:
-            return _is_slide_cancelled(db, job_id)
+        # WP2/WP3 (Review Round 2 F3/F6): external sidecar work REQUIRES a
+        # slot lease acquired by THIS incarnation under its exec_uuid. No
+        # slot -> the job waits visibly (admission reason recorded) and the
+        # task retries with a bounded countdown; it never runs unleased.
+        slot = _lease_slot_for_job(db, job, exec_uuid)
+        if slot is None:
+            from app.db.models import JobAdmission
 
-        provider, llm_model = _resolve_job_llm(db, job)
+            if db.bind.dialect.name == "postgresql":
+                db.execute(
+                    text(
+                        "UPDATE job_admissions SET queue_reason = :reason, "
+                        "updated_at = now() WHERE job_id = :job_id AND state = 'admitted'"
+                    ),
+                    {
+                        "reason": "no sidecar slot available (queued on capacity)",
+                        "job_id": job.id,
+                    },
+                )
+            else:
+                from datetime import UTC, datetime as _dt
+
+                db.execute(
+                    text(
+                        "UPDATE job_admissions SET queue_reason = :reason "
+                        "WHERE job_id = :job_id AND state = 'admitted'"
+                    ),
+                    {
+                        "reason": "no sidecar slot available (queued on capacity)",
+                        "job_id": job.id,
+                    },
+                )
+            db.commit()
+            logger.info(
+                "Slide task: job %s has no sidecar slot; retrying on capacity", job_id
+            )
+            raise SidecarCapacityExhausted(job_id)
+        _add_log(
+            db, job_id,
+            f"Acquired sidecar slot {slot.sidecar_id}#{slot.slot_index} (gen {slot.generation})",
+            "info", "slide_lease",
+        )
+
+        def cancel_check() -> bool:
+            return _is_slide_cancelled(db, job_id) or lease_lost.is_set()
+
+        # Bind the LLM provider to the LEASED sidecar (registry endpoint +
+        # live served model), not the generic fleet resolver — the selected
+        # registry sidecar is the one the lease authorizes (Review Round 2 F6).
+        provider, llm_model = _resolve_provider_for_slot(db, slot)
         if provider is None:
             _add_log(db, job_id, "No LLM provider available; slide disambiguation will be skipped", "warning", "slide_detect")
-
-        # WP2: acquire a sidecar slot under a fresh per-incarnation fencing
-        # UUID, heartbeat it independently of the blocking pipeline, and
-        # release exactly once at the end. A lost lease is logged but never
-        # kills in-flight work (Review Round 1 Finding 5); the reaper's
-        # quarantine window prevents overcommit.
-        exec_uuid = _mint_exec_uuid()
-        slot = _lease_slot_for_job(db, job, exec_uuid)
-        if slot is not None:
-            _add_log(
-                db, job_id,
-                f"Acquired sidecar slot {slot.sidecar_id}#{slot.slot_index} (gen {slot.generation})",
-                "info", "slide_lease",
-            )
-
-        heartbeat_stop = threading.Event()
 
         def _heartbeat_loop() -> None:
             from app.db.session import SessionLocal as _SL
@@ -1156,20 +1228,20 @@ def process_slides(self, job_id: int):
                         hb_db.commit()
                         if not ok:
                             logger.error(
-                                "Slot %s heartbeat rejected (stale fence); work continues conservatively",
+                                "Slot %s heartbeat rejected (stale fence); stopping further sidecar work",
                                 slot.id,
                             )
+                            lease_lost.set()
                     finally:
                         hb_db.close()
                 except Exception as exc:
                     logger.warning("slot heartbeat failed: %s", exc)
 
-        heartbeat_thread = None
-        if slot is not None:
-            heartbeat_thread = threading.Thread(
-                target=_heartbeat_loop, name=f"lease-hb-{job_id}", daemon=True
-            )
-            heartbeat_thread.start()
+        lease_lost = threading.Event()
+        heartbeat_thread = threading.Thread(
+            target=_heartbeat_loop, name=f"lease-hb-{job_id}", daemon=True
+        )
+        heartbeat_thread.start()
 
         def _finish(slide_status: str) -> None:
             """Mark the job COMPLETED with the given slide_status and clear the task ID."""
@@ -1181,9 +1253,9 @@ def process_slides(self, job_id: int):
                 if slide_claimed:
                     from app.services.job_steps import complete_step, fail_step
                     if slide_status == "completed":
-                        complete_step(db, j.id, "slides", self.request.id)
+                        complete_step(db, j.id, "slides", exec_uuid)
                     else:
-                        fail_step(db, j.id, "slides", self.request.id, slide_status)
+                        fail_step(db, j.id, "slides", exec_uuid, slide_status)
                 db.commit()
                 _finish_admission_for_job(db, j.id)
                 db.commit()
@@ -1196,6 +1268,14 @@ def process_slides(self, job_id: int):
         logger.info(f"Slide detection completed for job {job_id}")
 
         return {"status": "completed"}
+
+    except SidecarCapacityExhausted:
+        # No slot available: the job stays admitted (counters held), the
+        # admission row shows the capacity reason, and the task retries with
+        # a bounded countdown — never overcommitting, never failing the job
+        # ambiguously (Review Round 2 F3/F6).
+        logger.info("Slide task: job %s queued on sidecar capacity", job_id)
+        raise self.retry(exc=SidecarCapacityExhausted(str(job_id)), countdown=60)
 
     except CancelledException:
         logger.info(f"Slide task cancelled for job {job_id}")

@@ -62,29 +62,6 @@ def _failure_category(job: ProcessingJob) -> Optional[str]:
     return "other"
 
 
-def _step_progress(job: ProcessingJob) -> Optional[int]:
-    """Overall job progress as a monotonic 0..100 derived from step percents."""
-    if not job.steps:
-        return None
-    if job.status == ProcessingStatus.COMPLETED:
-        return 100
-    weights = {
-        "download": 10,
-        "transcribe": 20,
-        "snapshots": 15,
-        "slides": 30,
-        "summarize": 20,
-        "export": 5,
-    }
-    total = sum(weights.get(step.name, 10) for step in job.steps)
-    if total == 0:
-        return None
-    weighted = sum(
-        (step.percent or 0) * weights.get(step.name, 10) for step in job.steps
-    )
-    return max(0, min(100, weighted // total))
-
-
 @router.get("/jobs", response_model=list[OperatorJobRow])
 def list_operator_jobs(
     status_filter: Optional[str] = Query(None),
@@ -107,7 +84,6 @@ def list_operator_jobs(
             joinedload(ProcessingJob.user),
         )
         .order_by(ProcessingJob.created_at.desc())
-        .limit(limit)
     )
     if status_filter:
         try:
@@ -115,7 +91,9 @@ def list_operator_jobs(
                 ProcessingJob.status == ProcessingStatus[status_filter.upper()]
             )
         except KeyError:
-            raise ValueError(f"invalid status filter: {status_filter}")
+            from app.exceptions import ValidationException
+            raise ValidationException(f"invalid status filter: {status_filter}")
+    query = query.limit(limit)  # filter BEFORE limit (Review Round 2 F15)
 
     # Sidecar assignment from the active lease.
     leased = {
@@ -124,6 +102,8 @@ def list_operator_jobs(
         .filter(ResourceSlot.state == SlotState.LEASED)
         .all()
     }
+
+    from app.services.job_payload import enrich_job_payload
 
     rows: list[OperatorJobRow] = []
     for job in query.all():
@@ -140,6 +120,8 @@ def list_operator_jobs(
                 .count()
                 + 1
             )
+        payload: dict = {}
+        enrich_job_payload(db, job, payload, include_eta=True)
         rows.append(
             OperatorJobRow(
                 job_id=job.job_id,
@@ -147,15 +129,18 @@ def list_operator_jobs(
                 owner_username=job.user.username if job.user else None,
                 status=job.status.value,
                 error_message=_failure_category(job),
-                admission_state=admission.state.value if admission else "unknown",
-                queue_reason=admission.queue_reason if admission else None,
+                admission_state=payload.get("admission_state") or "unknown",
+                queue_reason=payload.get("queue_reason"),
                 queue_position=queue_position,
                 sidecar_id=slot.sidecar_id if slot else None,
                 model=slot.sidecar_id if slot else None,
                 elapsed_seconds=_elapsed_seconds(job, now),
-                progress=_step_progress(job),
+                progress=payload.get("progress"),
                 processing_mode=job.processing_mode,
                 created_at=job.created_at,
+                eta_low_seconds=payload.get("eta_low_seconds"),
+                eta_high_seconds=payload.get("eta_high_seconds"),
+                eta_confidence=payload.get("eta_confidence"),
             )
         )
     return rows

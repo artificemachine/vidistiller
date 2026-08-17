@@ -451,6 +451,20 @@ class JobStepResponse(BaseSchema):
     metrics: dict = Field(default_factory=dict, description="Non-secret step metrics")
 
 
+class ProgressEtaResponse(BaseSchema):
+    """Calibrated progress + ETA for a job (WP5, Review Round 2 F8).
+
+    ``progress`` is the monotonic 0..100 weighted value; ``eta_*`` is an
+    estimated range with a confidence label (high/medium/low/cold) and the
+    basis of the estimate. Cold/low estimates are never falsely precise.
+    """
+    progress: Optional[int] = Field(None, ge=0, le=100, description="Overall monotonic progress 0..100")
+    eta_low_seconds: Optional[float] = Field(None, description="ETA lower bound (seconds remaining)")
+    eta_high_seconds: Optional[float] = Field(None, description="ETA upper bound (seconds remaining)")
+    eta_confidence: Optional[str] = Field(None, description="high|medium|low|cold")
+    eta_basis: Optional[str] = Field(None, description="Calibration basis (e.g. '6 historical slide_aware jobs')")
+
+
 class JobStatusResponse(BaseSchema):
     """Lightweight job status response for polling."""
     job_id: str = Field(..., description="Unique job identifier (UUID)")
@@ -466,6 +480,16 @@ class JobStatusResponse(BaseSchema):
     created_at: datetime = Field(..., description="Job creation timestamp")
     updated_at: datetime = Field(..., description="Last status update timestamp")
     steps: List[JobStepResponse] = Field(default_factory=list, description="Persistent processing steps")
+    # WP2/WP5: visible admission state and calibrated progress/ETA.
+    admission_state: Optional[str] = Field(None, description="queued/admitted/finished/failed")
+    queue_reason: Optional[str] = Field(None, description="Why the job is queued, when queued")
+    queue_position: Optional[int] = Field(None, description="1-based queue position when queued")
+    sidecar_preference: Optional[str] = Field(None, description="Requested sidecar registered id, when set")
+    progress: Optional[int] = Field(None, ge=0, le=100, description="Overall monotonic progress 0..100")
+    eta_low_seconds: Optional[float] = Field(None, description="ETA lower bound (seconds remaining)")
+    eta_high_seconds: Optional[float] = Field(None, description="ETA upper bound (seconds remaining)")
+    eta_confidence: Optional[str] = Field(None, description="high|medium|low|cold")
+    eta_basis: Optional[str] = Field(None, description="Calibration basis")
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -481,7 +505,12 @@ class JobStatusResponse(BaseSchema):
                 "video_title": "Sample Tutorial Video",
                 "user_id": 1,
                 "created_at": "2024-01-20T14:30:00",
-                "updated_at": "2024-01-20T14:35:00"
+                "updated_at": "2024-01-20T14:35:00",
+                "admission_state": "admitted",
+                "progress": 42,
+                "eta_low_seconds": 210.0,
+                "eta_high_seconds": 380.0,
+                "eta_confidence": "medium",
             }
         }
     )
@@ -844,6 +873,9 @@ class OperatorJobRow(BaseSchema):
     model: Optional[str] = Field(None, description="Assigned model/sidecar label")
     elapsed_seconds: Optional[float] = Field(None, description="Elapsed time (or total for terminal jobs)")
     progress: Optional[int] = Field(None, description="Overall monotonic progress 0..100")
+    eta_low_seconds: Optional[float] = Field(None, description="ETA lower bound (seconds remaining)")
+    eta_high_seconds: Optional[float] = Field(None, description="ETA upper bound (seconds remaining)")
+    eta_confidence: Optional[str] = Field(None, description="high|medium|low|cold")
     processing_mode: Optional[str] = Field(None, description="standard or slide_aware")
     created_at: Optional[datetime] = Field(None, description="Job creation time")
 

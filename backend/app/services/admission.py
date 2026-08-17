@@ -147,15 +147,35 @@ def admit_or_queue_job(
     """Atomically admit a job or queue it with a visible reason.
 
     Must be called inside a caller-managed transaction (the route or task
-    commits). Locks counters in deterministic global→user order; acquires a
-    sidecar slot when the job is admitted; writes the admission row and a
-    pending outbox dispatch. On limits, the job is queued with the reason —
-    it is never overcommitted nor failed ambiguously.
+    commits). Locks counters in deterministic global→user order; checks an
+    explicit sidecar preference against live telemetry (fail closed: an
+    unavailable preferred sidecar queues the job visibly); writes the
+    admission row and a concrete first-stage outbox dispatch. On limits, the
+    job is queued with the reason — it is never overcommitted nor failed
+    ambiguously. Sidecar slots themselves are leased by the task incarnation
+    at the point of external work (Review Round 2 F2/F3).
     """
-    from app.services.lease import acquire_slot
-
     settings = get_settings().admission
     exec_uuid = exec_uuid or str(uuid.uuid4())
+
+    # 0. Fail-closed explicit preference check against live telemetry: an
+    # unavailable/full preferred sidecar queues the job with a visible
+    # reason instead of silently running elsewhere (WP3 / Review Round 2 F6).
+    if preferred_sidecar:
+        from app.services.sidecar import get_sidecar_telemetry_status
+
+        status = get_sidecar_telemetry_status(preferred_sidecar)
+        if status in ("unhealthy", "stale", "no_capacity"):
+            _write_admission(
+                db,
+                job.id,
+                AdmissionState.QUEUED,
+                f"preferred sidecar {preferred_sidecar} {status}",
+            )
+            return AdmissionOutcome(
+                state="queued",
+                queue_reason=f"preferred sidecar {preferred_sidecar} {status}",
+            )
 
     # 1. Lock counters in deterministic order (global first, then user).
     global_counter = _ensure_counter(db, GLOBAL_COUNTER_KEY, settings.global_active_limit)
@@ -193,32 +213,21 @@ def admit_or_queue_job(
             state="queued", queue_reason="per-user active-job limit reached"
         )
 
-    # 3. Admit: bump counters, acquire a slot for the chosen sidecar.
+        # 3. Admit: bump counters, acquire a slot for the chosen sidecar.
     global_counter.active += 1
     user_counter.active += 1
     _write_admission(db, job.id, AdmissionState.ADMITTED)
 
-    slot = acquire_slot(
-        db, job, exec_uuid=exec_uuid, preferred_sidecar=preferred_sidecar
-    )
-    if slot is None:
-        # No sidecar capacity yet — still admitted (counters held) but the
-        # dispatch will wait on the slot sweep. This is the bounded case:
-        # the job is visibly admitted and waits on capacity, never queued
-        # behind the counter limits while holding a slot.
-        _enqueue_outbox(db, job.id, "dispatch", exec_uuid)
-        return AdmissionOutcome(
-            state="admitted",
-            sidecar_id=None,
-            slot_id=None,
-        )
-
-    _enqueue_outbox(db, job.id, "dispatch", exec_uuid)
+    # The concrete first-stage outbox row is written here (in the same
+    # transaction). Capacity for the LLM stages is leased later by the task
+    # incarnation itself (Review Round 2 F2/F3) — admission decides the
+    # active-job limits, not the sidecar slot, so a no-slot admit still
+    # dispatches and the worker leases at the point of external work.
+    enqueue_first_stage(db, job.id, exec_uuid)
     return AdmissionOutcome(
         state="admitted",
-        sidecar_id=slot.sidecar_id,
-        slot_id=slot.id,
-        slot_generation=slot.generation,
+        sidecar_id=None,
+        slot_id=None,
     )
 
 
@@ -275,18 +284,31 @@ def sync_admission_limits(db: Session) -> None:
     db.commit()
 
 
-def finish_job_admission(db: Session, job_id: int, *, failed: bool = False) -> None:
+def finish_job_admission(db: Session, job_id: int, *, failed: bool = False) -> bool:
     """Mark a job's admission finished/failed and decrement its counters.
 
-    Called exactly once per job from the terminal task path. Counter
-    decrements are guarded by the admission state so a duplicate call cannot
-    double-release (Review Round 1 Finding 5).
+    Exactly-once (Review Round 2 F4): the admission row is transitioned with
+    a conditional UPDATE (``WHERE state='admitted'``); only the winner of
+    that transition decrements the counters, so a duplicate call or a
+    concurrent duplicate delivery can never double-release. Returns True
+    when this call performed the release.
     """
-    admission = db.get(JobAdmission, job_id)
-    if admission is None:
-        return
-    if admission.state in (AdmissionState.FINISHED, AdmissionState.FAILED):
-        return  # already released
+    from app.db.models import AdmissionCounter
+
+    target = AdmissionState.FAILED if failed else AdmissionState.FINISHED
+    result = db.execute(
+        text(
+            "UPDATE job_admissions SET state = :state, finished_at = now(), "
+            "updated_at = now() WHERE job_id = :job_id AND state = 'admitted' "
+            "RETURNING job_id"
+        ),
+        {"state": target.value, "job_id": job_id},
+    )
+    if result.rowcount != 1:
+        # Not admitted (queued/never admitted/already finished): nothing to
+        # release — a queued job never incremented the counters.
+        return False
+
     job = db.get(ProcessingJob, job_id)
     user_id = job.user_id if job else 0
 
@@ -307,13 +329,8 @@ def finish_job_admission(db: Session, job_id: int, *, failed: bool = False) -> N
                 ),
                 {"k": key},
             )
-
-    _write_admission(
-        db,
-        job_id,
-        AdmissionState.FAILED if failed else AdmissionState.FINISHED,
-    )
     _audit(db, "admission_finish", job_id=job_id)
+    return True
 
 
 def _enqueue_outbox(
@@ -333,6 +350,18 @@ def _enqueue_outbox(
     db.add(row)
     db.flush()
     return row
+
+
+def enqueue_first_stage(
+    db: Session, job_id: int, exec_uuid: str, stage: str = "transcript"
+) -> TaskOutbox:
+    """Write the concrete first-stage outbox row (WP2, Review Round 2 F2).
+
+    The outbox holds the actual Celery stage (``transcript``, ``download``,
+    …) — never an abstract ``dispatch`` marker — so the publish bridge can
+    map it directly to a task.
+    """
+    return _enqueue_outbox(db, job_id, stage, exec_uuid)
 
 
 def mark_outbox_published(db: Session, outbox_id: int) -> None:

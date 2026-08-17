@@ -58,7 +58,7 @@ def db_factory():
 
 
 def _seed(db, global_limit: int = 1, per_user_limit: int = 1, slots: int = 1):
-    from app.db.models import AdmissionCounter, ProcessingJob, ResourceSlot, User
+    from app.db.models import AdmissionCounter, ProcessingJob, ResourceSlot, Sidecar, User
     from app.services.auth import AuthService
 
     user = User(
@@ -69,6 +69,17 @@ def _seed(db, global_limit: int = 1, per_user_limit: int = 1, slots: int = 1):
     )
     db.add(user)
     db.flush()
+    # Registry row required by the resource_slots FK (Review Round 2 F13).
+    if db.query(Sidecar).filter(Sidecar.registered_id == "primary").first() is None:
+        db.add(
+            Sidecar(
+                registered_id="primary",
+                label="Primary",
+                base_url="http://test.invalid:8000",
+                capabilities=["text"],
+            )
+        )
+        db.flush()
     existing_slots = (
         db.query(ResourceSlot)
         .filter(ResourceSlot.sidecar_id == "primary")
@@ -197,28 +208,41 @@ def test_worker_loss_lease_is_not_reusable_until_quarantine(db_factory):
     job = _mkjob(db, user_id)
     outcome = admit_or_queue_job(db, job, exec_uuid="exec-1")
     db.commit()
-    assert outcome.slot_id is not None
+    # Admission no longer leases slots (Review Round 2 F3): the task
+    # incarnation leases at the point of external work.
+    assert outcome.slot_id is None
+
+    # Task incarnation leases under its own exec_uuid.
+    from app.services.lease import acquire_slot
+
+    slot = acquire_slot(db, job, exec_uuid="task-exec-1")
+    db.commit()
+    assert slot is not None
+    slot_id = slot.id
+    generation = slot.generation
 
     # Simulate worker loss: no heartbeats, TTL elapses.
     db.execute(
         text("UPDATE resource_slots SET expires_at = now() - interval '1 second' WHERE id = :id"),
-        {"id": outcome.slot_id},
+        {"id": slot_id},
     )
     db.commit()
     assert reap_expired_slots(db) == 1
     db.commit()
-    slot = db.get(ResourceSlot, outcome.slot_id)
+    slot = db.get(ResourceSlot, slot_id)
     assert slot.state == SlotState.EXPIRED
 
-    # A second job cannot take the slot during quarantine.
+    # A second incarnation cannot take the slot during quarantine.
     job2 = _mkjob(db, user_id)
     outcome2 = admit_or_queue_job(db, job2, exec_uuid="exec-2")
     db.commit()
-    assert outcome2.slot_id is None, "quarantined slot must not be reusable"
+    slot2 = acquire_slot(db, job2, exec_uuid="task-exec-2")
+    db.commit()
+    assert slot2 is None, "quarantined slot must not be reusable"
 
     # The dead worker's heartbeat/release are rejected (stale fence).
-    assert heartbeat_slot(db, outcome.slot_id, "exec-1", outcome.slot_generation) is False
-    assert release_slot(db, outcome.slot_id, "exec-1", outcome.slot_generation) is False
+    assert heartbeat_slot(db, slot_id, "task-exec-1", generation) is False
+    assert release_slot(db, slot_id, "task-exec-1", generation) is False
     db.rollback()
 
     # Release job1's admission so a later job can be admitted.
@@ -228,7 +252,7 @@ def test_worker_loss_lease_is_not_reusable_until_quarantine(db_factory):
     # After the quarantine window, the slot is reusable.
     db.execute(
         text("UPDATE resource_slots SET updated_at = now() - interval '1 hour' WHERE id = :id"),
-        {"id": outcome.slot_id},
+        {"id": slot_id},
     )
     db.commit()
     assert reset_quarantined_slots(db) == 1
@@ -236,7 +260,10 @@ def test_worker_loss_lease_is_not_reusable_until_quarantine(db_factory):
     job3 = _mkjob(db, user_id)
     outcome3 = admit_or_queue_job(db, job3, exec_uuid="exec-3")
     db.commit()
-    assert outcome3.slot_id == outcome.slot_id, "slot reusable after quarantine"
+    slot3 = acquire_slot(db, job3, exec_uuid="task-exec-3")
+    db.commit()
+    assert slot3 is not None and slot3.id == slot_id, "slot reusable after quarantine"
+    assert slot3.generation == generation + 1
     finish_job_admission(db, job.id)
     finish_job_admission(db, job3.id)
     db.commit()
@@ -247,21 +274,24 @@ def test_lease_expiry_race_heartbeat_vs_reaper(db_factory):
     """A stale generation can never heartbeat a reaped/reassigned slot."""
     from app.db.models import ResourceSlot, SlotState
     from app.services.admission import admit_or_queue_job, finish_job_admission
-    from app.services.lease import heartbeat_slot, release_slot
+    from app.services.lease import acquire_slot, heartbeat_slot, release_slot
 
     db = db_factory()
     user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
     job = _mkjob(db, user_id)
-    outcome = admit_or_queue_job(db, job, exec_uuid="exec-race")
+    admit_or_queue_job(db, job, exec_uuid="exec-race")
     db.commit()
-    assert outcome.slot_id is not None
-    generation = outcome.slot_generation
+    slot = acquire_slot(db, job, exec_uuid="exec-race")
+    db.commit()
+    assert slot is not None
+    slot_id = slot.id
+    generation = slot.generation
 
     # Old worker (exec-race, gen=generation) heartbeats after the slot was
     # reaped+reset by a new lease: rejected.
     db.execute(
         text("UPDATE resource_slots SET expires_at = now() - interval '1 second' WHERE id = :id"),
-        {"id": outcome.slot_id},
+        {"id": slot_id},
     )
     db.commit()
     from app.services.lease import reap_expired_slots, reset_quarantined_slots
@@ -269,24 +299,26 @@ def test_lease_expiry_race_heartbeat_vs_reaper(db_factory):
     assert reap_expired_slots(db) == 1
     db.execute(
         text("UPDATE resource_slots SET updated_at = now() - interval '1 hour' WHERE id = :id"),
-        {"id": outcome.slot_id},
+        {"id": slot_id},
     )
     db.commit()
     assert reset_quarantined_slots(db) == 1
     db.commit()
 
     job2 = _mkjob(db, user_id)
-    outcome2 = admit_or_queue_job(db, job2, exec_uuid="exec-new")
+    admit_or_queue_job(db, job2, exec_uuid="exec-new")
     db.commit()
-    assert outcome2.slot_id == outcome.slot_id
-    assert outcome2.slot_generation == generation + 1
+    slot2 = acquire_slot(db, job2, exec_uuid="exec-new")
+    db.commit()
+    assert slot2 is not None and slot2.id == slot_id
+    assert slot2.generation == generation + 1
 
     # Stale worker fence: rejected against the new generation.
-    assert heartbeat_slot(db, outcome.slot_id, "exec-race", generation) is False
-    assert release_slot(db, outcome.slot_id, "exec-race", generation) is False
+    assert heartbeat_slot(db, slot_id, "exec-race", generation) is False
+    assert release_slot(db, slot_id, "exec-race", generation) is False
     # New worker: accepted.
-    assert heartbeat_slot(db, outcome.slot_id, "exec-new", outcome2.slot_generation) is True
-    assert release_slot(db, outcome.slot_id, "exec-new", outcome2.slot_generation) is True
+    assert heartbeat_slot(db, slot_id, "exec-new", slot2.generation) is True
+    assert release_slot(db, slot_id, "exec-new", slot2.generation) is True
     db.commit()
     finish_job_admission(db, job.id)
     finish_job_admission(db, job2.id)
@@ -305,15 +337,17 @@ def test_queued_job_recovery_outbox_sweep(db_factory):
     job = _mkjob(db, user_id)
     outcome = admit_or_queue_job(db, job, exec_uuid="exec-outbox")
     db.commit()  # committed; dispatch never ran (crash in the gap)
+    assert outcome.state == "admitted"
 
     pending = pending_outbox_rows(db, limit=10)
     assert len(pending) == 1
     row = pending[0]
-    assert row.stage == "dispatch"
+    # The outbox row carries the CONCRETE first stage (Review Round 2 F2),
+    # not an abstract dispatch marker.
+    assert row.stage == "transcript"
     assert row.state == "pending"
 
-    # The sweep marks it published (task dispatch itself is mocked here by
-    # asserting the outbox contract; real dispatch is covered in CI).
+    # The sweep publishes it via the real stage mapping.
     from app.services.dispatch import publish_outbox
     import app.services.dispatch as dispatch_mod
 
@@ -337,7 +371,45 @@ def test_queued_job_recovery_outbox_sweep(db_factory):
     finally:
         dispatch_mod._task_for_stage = original
     assert count == 1
-    assert published_tasks == [("dispatch", job.id)]
+    assert published_tasks == [("transcript", job.id)]
     refreshed = db.get(TaskOutbox, row.id)
     assert refreshed.state == "published"
+    db.close()
+
+
+def test_queue_promotion_publishes_after_capacity_frees(db_factory):
+    """A job queued on the global limit is promoted by the scheduler once a
+    running job finishes (Review Round 2 F2)."""
+    from app.db.models import TaskOutbox
+    from app.services.admission import admit_or_queue_job, finish_job_admission, pending_outbox_rows
+    from app.services.scheduler import promote_queued_jobs
+
+    db = db_factory()
+    user_id = _seed(db, global_limit=1, per_user_limit=10, slots=1)
+    job1 = _mkjob(db, user_id)
+    outcome1 = admit_or_queue_job(db, job1, exec_uuid="exec-1")
+    db.commit()
+    assert outcome1.state == "admitted"
+
+    job2 = _mkjob(db, user_id)
+    outcome2 = admit_or_queue_job(db, job2, exec_uuid="exec-2")
+    db.commit()
+    assert outcome2.state == "queued"
+
+    # No capacity yet: promotion promotes nothing.
+    assert promote_queued_jobs(db) == 0
+
+    # Finish job1 -> capacity frees -> promotion admits job2 and writes a
+    # concrete transcript outbox row.
+    finish_job_admission(db, job1.id)
+    db.commit()
+    assert promote_queued_jobs(db) == 1
+    rows = pending_outbox_rows(db, limit=10)
+    stages = [r.stage for r in rows]
+    assert "transcript" in stages
+    admission2 = db.execute(
+        text("SELECT state FROM job_admissions WHERE job_id = :id"),
+        {"id": job2.id},
+    ).scalar()
+    assert admission2 == "admitted"
     db.close()

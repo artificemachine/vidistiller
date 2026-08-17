@@ -75,9 +75,11 @@ def _historical_stage_durations(
 
     Only steps that actually ran (completed or failed with started/finished
     timestamps) are included; the stage set is matched by mode so a
-    slide_aware job calibrates against slide_aware history only.
+    slide_aware job calibrates against slide_aware history only. When a
+    sidecar is known, history is filtered to jobs that used the same
+    sidecar preference (Review Round 2 F8).
     """
-    rows = (
+    query = (
         db.query(ProcessingJob)
         .join(JobStep)
         .filter(
@@ -87,9 +89,10 @@ def _historical_stage_durations(
             JobStep.finished_at.isnot(None),
         )
         .order_by(ProcessingJob.created_at.desc())
-        .limit(limit)
-        .all()
     )
+    if sidecar:
+        query = query.filter(ProcessingJob.sidecar_preference == sidecar)
+    rows = query.limit(limit).all()
     result = []
     for job in rows:
         durations: dict[str, float] = {}

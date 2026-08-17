@@ -11,6 +11,7 @@ Initializes the FastAPI application with:
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+import asyncio
 import logging
 import os
 import sys
@@ -119,8 +120,8 @@ async def lifespan(app: FastAPI):
         from app.db.session import SessionLocal
         from app.services.admission import sync_admission_limits
         from app.services.dispatch import sweep_outbox
-        from app.services.lease import reap_expired_slots, reset_quarantined_slots
-        from app.services.sidecar import seed_sidecars
+        from app.services.scheduler import scheduler_loop
+        from app.services.sidecar import reconcile_slots, refresh_telemetry_cache, seed_sidecars
 
         db = SessionLocal()
         try:
@@ -128,21 +129,30 @@ async def lifespan(app: FastAPI):
             published = sweep_outbox(db)
             if published:
                 logger.info("✅ Outbox sweep published %d pending dispatch(es)", published)
-            reaped = reap_expired_slots(db)
-            if reaped:
-                db.commit()
-            reset = reset_quarantined_slots(db)
-            if reset:
-                db.commit()
             seeded = seed_sidecars(db)
             if seeded:
                 logger.info("✅ Seeded %d sidecar(s) from operator config", seeded)
+            created = reconcile_slots(db)
+            if created:
+                logger.info("✅ Provisioned %d sidecar slot row(s)", created)
+            refresh_telemetry_cache(db)
         finally:
             db.close()
     except Exception as exc:
         logger.error("⚠️ Startup maintenance sweep failed (non-fatal): %s", exc)
 
+    # WP2: periodic scheduler (queue promotion, outbox sweep, lease reaper,
+    # telemetry refresh). Runs until shutdown.
+    scheduler_stop = asyncio.Event()
+    scheduler_task = asyncio.create_task(scheduler_loop(scheduler_stop))
+
     yield
+
+    scheduler_stop.set()
+    try:
+        await asyncio.wait_for(scheduler_task, timeout=10)
+    except asyncio.TimeoutError:
+        scheduler_task.cancel()
 
 
 app = FastAPI(

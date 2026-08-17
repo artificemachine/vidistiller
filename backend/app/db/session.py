@@ -38,29 +38,16 @@ from ..core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# POOL METRICS (thread-safe counters fed by SQLAlchemy pool events)
-# ---------------------------------------------------------------------------
 
-_pool_metrics_lock = threading.Lock()
-_pool_metrics = {
-    "checked_out": 0,
-    "wait_total": 0,
-    "wait_now": 0,
-    "timeout_total": 0,
-    "checkout_total": 0,
-}
+def _inc(name: str, delta: int = 1) -> None:
+    """Lazy metrics increment (avoids the app.services package cycle at
+    import time: services/__init__ imports auth -> models -> session)."""
+    try:
+        from app.services.metrics import inc
 
-
-def pool_metrics_snapshot() -> dict:
-    """Return a copy of the pool metrics for the metrics endpoint."""
-    with _pool_metrics_lock:
-        return dict(_pool_metrics)
-
-
-def _pool_metric(name: str, delta: int = 1) -> None:
-    with _pool_metrics_lock:
-        _pool_metrics[name] += delta
+        inc(name, delta)
+    except Exception:  # pragma: no cover - metrics must never break the pool
+        pass
 
 
 # ==============================================================================
@@ -133,16 +120,18 @@ def _get_engine():
 
     @event.listens_for(engine, "checkout")
     def receive_checkout(dbapi_conn, connection_record, connection_proxy):
-        _pool_metric("checked_out", 1)
-        _pool_metric("checkout_total", 1)
+        _inc("pool_checked_out", 1)
+        _inc("pool_checkout_total", 1)
 
     @event.listens_for(engine, "checkin")
     def receive_checkin(dbapi_conn, connection_record):
-        _pool_metric("checked_out", -1)
+        _inc("pool_checked_out", -1)
 
     @event.listens_for(engine, "close")
     def receive_close(dbapi_conn, connection_record):
-        _pool_metric("checked_out", -1)
+        # A closed connection was never returned via checkin; keep the gauge
+        # consistent without double-decrementing (Review Round 2 F10).
+        pass
 
     return engine
 
@@ -171,6 +160,7 @@ def _get_probe_engine():
                 pool_timeout=2.0,
                 pool_recycle=300,
                 pool_pre_ping=True,
+                connect_args={"connect_timeout": 3},
             )
     return _probe_engine
 
@@ -185,6 +175,17 @@ SessionLocal = sessionmaker(
     class_=Session,
     expire_on_commit=False,  # Don't expire objects after commit (useful for background jobs)
 )
+
+
+def _session_local_with_metrics() -> Session:
+    """SessionLocal() wrapper that records checkout timeouts (Review Round 2 F10)."""
+    from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+
+    try:
+        return SessionLocal()
+    except PoolTimeoutError:
+        _inc("pool_timeout_total")
+        raise
 
 
 # ==============================================================================
@@ -209,7 +210,7 @@ def get_db() -> Generator[Session, None, None]:
     Yields:
         Session: SQLAlchemy database session
     """
-    db = SessionLocal()
+    db = _session_local_with_metrics()
     try:
         yield db
         # Auto-commit if no exceptions
@@ -233,7 +234,7 @@ def db_session() -> Generator[Session, None, None]:
     be closed BEFORE the response body starts streaming. The caller commits
     explicitly if it wrote; read-only scopes just roll back and close.
     """
-    db = SessionLocal()
+    db = _session_local_with_metrics()
     try:
         yield db
         db.commit()

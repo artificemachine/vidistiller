@@ -241,7 +241,8 @@ def test_batch_provider_failure_falls_back_sequentially():
 def test_inventory_identity_comes_from_live_probe(test_db, seeded_registry):
     """The inventory model list reflects the served model, not the declared
     one; a sidecar whose probe fails is unhealthy (fail closed for new
-    allocations)."""
+    allocations). The cache is populated through the scheduler path
+    (refresh_telemetry_cache) exactly as production does."""
     from app.services import sidecar as sidecar_mod
     from app.services.sidecar import inventory
 
@@ -268,6 +269,7 @@ def test_inventory_identity_comes_from_live_probe(test_db, seeded_registry):
         )
 
     with patch.object(sidecar_mod, "_probe_sidecar", side_effect=_fake_probe):
+        sidecar_mod.refresh_telemetry_cache(test_db)
         telemetry = inventory(test_db)
     by_id = {t.registered_id: t for t in telemetry}
     assert by_id["primary"].served_models == ["qwen3.8-27b"]

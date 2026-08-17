@@ -183,14 +183,25 @@ def test_200_concurrent_media_responses_return_sessions_to_baseline(
 
     results = []
     errors = []
+    bodies_open = threading.Event()
+    bodies_released = threading.Event()
+    open_count = {"n": 0}
+    open_lock = threading.Lock()
 
     def worker():
         try:
             resp = requests.get(url, headers=headers, timeout=30, stream=True)
-            # Read the body slowly in chunks so response lifetime overlaps.
-            for _chunk in resp.iter_content(chunk_size=1024):
-                pass
             results.append(resp.status_code)
+            # WP1 acceptance (Review Round 2 F11): hold the response body
+            # OPEN (read slowly) while the main thread inspects the DB — the
+            # original bug pinned a session for the whole body lifetime.
+            with open_lock:
+                open_count["n"] += 1
+            if open_count["n"] == 200:
+                bodies_open.set()
+            bodies_released.wait(timeout=30)
+            for chunk in resp.iter_content(chunk_size=256):
+                time.sleep(0.001)  # slow reader: body lifetime overlaps
         except Exception as exc:  # pragma: no cover - failure evidence
             errors.append(repr(exc))
 
@@ -198,9 +209,30 @@ def test_200_concurrent_media_responses_return_sessions_to_baseline(
     started = time.monotonic()
     for t in threads:
         t.start()
+    assert bodies_open.wait(timeout=60), "bodies did not all open"
+
+    # MID-FLIGHT: every body is open but unread — this is the exact window
+    # where the old implementation held 200 idle-in-transaction sessions.
+    mid = _idle_in_transaction_count()
+    assert mid <= baseline + 5, (
+        f"idle-in-tx while 200 bodies open: {mid} (baseline {baseline}) — "
+        "media session still held open during streaming"
+    )
+
+    # Auth remains responsive while the load is streaming.
+    login_start = time.monotonic()
+    resp = requests.post(
+        f"http://127.0.0.1:{port}/api/auth/login",
+        json={"username": "media_tester", "password": "MediaPass123"},
+        timeout=10,
+    )
+    login_latency = time.monotonic() - login_start
+    assert resp.status_code == 200
+    assert login_latency < 5.0, f"login latency {login_latency:.2f}s during load"
+
+    bodies_released.set()
     for t in threads:
         t.join(timeout=60)
-
     elapsed = time.monotonic() - started
     assert not errors, f"errors: {errors[:5]}"
     assert len(results) == 200
@@ -210,15 +242,34 @@ def test_200_concurrent_media_responses_return_sessions_to_baseline(
     time.sleep(2)
     after = _idle_in_transaction_count()
     assert after <= baseline, f"idle-in-tx after: {after} vs baseline {baseline}"
-
-    # Auth path must remain responsive during the load (bounded latency).
-    login_start = time.monotonic()
-    resp = requests.post(
-        f"http://127.0.0.1:{port}/api/auth/login",
-        json={"username": "media_tester", "password": "MediaPass123"},
-        timeout=10,
-    )
-    login_latency = time.monotonic() - login_start
-    assert resp.status_code == 200
-    assert login_latency < 5.0, f"login latency {login_latency:.2f}s"
     assert elapsed < 120, f"total media load {elapsed:.1f}s"
+
+
+def test_media_range_and_vary_headers(media_env, auth_token):
+    """Range requests and cache isolation headers survive the session-close
+    rework (Review Round 2 F11)."""
+    port = media_env["port"]
+    headers = {"Authorization": f"Bearer {auth_token}"}
+    url = f"http://127.0.0.1:{port}/static/snapshots/aaaa-bbbb-cccc/frame_0001.jpg"
+
+    resp = requests.get(url, headers=headers, timeout=10)
+    assert resp.status_code == 200
+    vary = resp.headers.get("Vary", "")
+    assert "Cookie" in vary and "Authorization" in vary
+    assert "private" in resp.headers.get("Cache-Control", "")
+    assert "Accept-Ranges" in resp.headers
+
+    # Byte range -> 206 + Content-Range.
+    resp = requests.get(url, headers={**headers, "Range": "bytes=0-1023"}, timeout=10)
+    assert resp.status_code == 206
+    assert resp.headers.get("Content-Range", "").startswith("bytes 0-1023/")
+    assert len(resp.content) == 1024
+
+    # Suffix range.
+    resp = requests.get(url, headers={**headers, "Range": "bytes=-100"}, timeout=10)
+    assert resp.status_code == 206
+    assert len(resp.content) == 100
+
+    # Invalid range -> 416.
+    resp = requests.get(url, headers={**headers, "Range": "bytes=999999999-"}, timeout=10)
+    assert resp.status_code == 416
