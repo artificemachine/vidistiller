@@ -67,8 +67,21 @@ def promote_queued_jobs(db: Session, limit: int = 10) -> int:
     ]
     promoted = 0
     for job_id in queued_ids:
-        # Lock THIS queued row; skip rows another scheduler already holds.
         if db.bind.dialect.name == "postgresql":
+            # Consistent lock order JOB -> ADMISSION (Review Round 2 NEW-8):
+            # cancellation locks the job row first in its terminal
+            # transaction, so locking the job row here serializes with it
+            # and a cancelled job can never be admitted concurrently.
+            job_locked = db.execute(
+                text(
+                    "SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"
+                ),
+                {"job_id": job_id},
+            ).first()
+            if job_locked is None:
+                continue
+            # Only then claim the queued admission row; skip if another
+            # scheduler already promoted it.
             locked = db.execute(
                 text(
                     "SELECT job_id FROM job_admissions WHERE job_id = :job_id "
@@ -77,16 +90,8 @@ def promote_queued_jobs(db: Session, limit: int = 10) -> int:
                 {"job_id": job_id},
             ).first()
             if locked is None:
-                continue  # promoted by another scheduler or no longer queued
-            # Consistent lock order job -> admission (Review Round 2 NEW-8):
-            # lock the JOB row so a concurrent cancellation (which updates the
-            # job row in its terminal transaction) serializes with us.
-            db.execute(
-                text(
-                    "SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"
-                ),
-                {"job_id": job_id},
-            )
+                db.rollback()
+                continue
         job = db.get(ProcessingJob, job_id)
         if job is None:
             continue
@@ -152,6 +157,19 @@ def reap_orphaned_steps(db: Session) -> int:
         # or a concurrently terminalized job can never be clobbered; the
         # rowcount gate prevents duplicate outbox rows from concurrent
         # scheduler replicas.
+        if db.bind.dialect.name == "postgresql":
+            # Serialize with cancellation: take the job row lock FIRST
+            # (cancellation updates the job row in its terminal transaction),
+            # then re-check the job is still processing.
+            job_locked = db.execute(
+                text(
+                    "SELECT id FROM processing_jobs WHERE id = :job_id "
+                    "AND status = 'processing' FOR UPDATE"
+                ),
+                {"job_id": step.job_id},
+            ).first()
+            if job_locked is None:
+                continue  # job terminalized concurrently
         result = db.execute(
             text(
                 "UPDATE job_steps SET status = 'pending', claim_token = NULL, "

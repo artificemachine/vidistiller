@@ -63,7 +63,9 @@ celery_app = Celery(
 # still-running delivery is not redelivered while active; the task-level
 # time limits bound the worst case. Late-ack + prefetch 1 and the existing
 # claim-step idempotency protections are preserved.
-_broker_visibility_seconds = int(os.getenv("CELERY_VISIBILITY_TIMEOUT", "900"))
+# Must EXCEED the hard task limit (7200) plus grace so an active long
+# delivery is never redelivered while running (Review Round 2 P7-NEW-10).
+_broker_visibility_seconds = int(os.getenv("CELERY_VISIBILITY_TIMEOUT", "7800"))
 
 celery_app.conf.update(
     task_serializer="json",
@@ -285,12 +287,33 @@ def _terminalize_capacity_exhausted(db, job_id: int) -> None:
     Celery retries are finite; after the last capacity retry the job must not
     stay admitted/processing with counters held forever. Mark it failed with
     a visible capacity reason and release the admission exactly once.
+
+    Duplicate-redelivery guard (Review Round 2 P7-NEW-10): if another
+    incarnation currently owns a running step of this job, this delivery is
+    a duplicate of live work, NOT a genuine capacity shortage — do nothing
+    and let the owning incarnation finish.
     """
     try:
-        from app.db.models import ProcessingJob, ProcessingStatus
+        from app.db.models import JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
 
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
-        if job is not None and job.status in (
+        if job is None:
+            return
+        # Guard: any step running under a claim we do NOT own means another
+        # incarnation is actively processing — never terminalize it.
+        running_steps = (
+            db.query(JobStep)
+            .filter(JobStep.job_id == job_id, JobStep.status == JobStepStatus.RUNNING)
+            .all()
+        )
+        for step in running_steps:
+            if step.claim_token is not None:
+                logger.warning(
+                    "capacity exhaustion for job %s skipped: step %s is owned by another incarnation",
+                    job_id, step.name,
+                )
+                return
+        if job.status in (
             ProcessingStatus.PENDING, ProcessingStatus.PROCESSING,
         ):
             job.status = ProcessingStatus.FAILED
@@ -513,6 +536,13 @@ def process_video_download(self, job_id: int):
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if job is None or not job.video_url:
             return {"job_id": job_id, "status": "skipped"}
+        # Terminal guard (Review Round 2 NEW-9): never resurrect cancelled or
+        # failed jobs via redriven download work. COMPLETED jobs are allowed
+        # through: the restore-drill flow deliberately retries a failed
+        # download step on a completed job to resume its pending dependent
+        # step (see the dependent-step re-dispatch below).
+        if job.status in (ProcessingStatus.CANCELLED, ProcessingStatus.FAILED):
+            return {"job_id": job_id, "status": "skipped", "reason": "job is terminal"}
         claimed = claim_step(db, job.id, "download", exec_uuid)
         if claimed is None:
             return {"job_id": job_id, "status": "skipped"}
@@ -946,6 +976,18 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
             logger.info("Summarize: job %s already completed, skipping", job_id)
             return {"status": "skipped", "reason": "already completed"}
 
+        # Force-generation fence (Review Round 2 NEW-7): a forced delivery
+        # carries the generation minted by the force route; if the job's
+        # generation has since moved on (a newer force won), this delivery is
+        # stale and must not mutate any state.
+        if force and force_generation is not None:
+            if (job.force_generation or 0) != force_generation:
+                logger.info(
+                    "Summarize: job %s force generation %s is stale (current %s); skipping",
+                    job_id, force_generation, job.force_generation,
+                )
+                return {"status": "skipped", "reason": "superseded by a newer force request"}
+
         # Store Celery task ID for cancellation
         job.celery_task_id = self.request.id
         job.summarize_status = "processing"
@@ -1028,7 +1070,13 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
                 gen_guard = ""
                 gen_params: dict = {"token": exec_uuid, "job_id": job.id}
                 if force_generation is not None:
-                    gen_guard = "AND force_generation = :gen"
+                    # The generation lives on processing_jobs, not job_steps
+                    # (Review Round 2 NEW-7): use a correlated subquery.
+                    gen_guard = (
+                        "AND EXISTS (SELECT 1 FROM processing_jobs pj "
+                        "WHERE pj.id = job_steps.job_id "
+                        "AND pj.force_generation = :gen)"
+                    )
                     gen_params["gen"] = force_generation
                 if db.bind.dialect.name == "postgresql":
                     taken = db.execute(
@@ -1228,9 +1276,23 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
     except SidecarCapacityExhausted:
         logger.info("Summarize: job %s queued on sidecar capacity", job_id)
         if self.request.retries >= self.max_retries:
-            # Retries exhausted: terminalize and release admission instead of
-            # leaving the job admitted forever (Review Round 2 NEW-6).
+            # Retries exhausted: stage-aware terminalization (Review Round 2
+            # NEW-6). For a summarize running on an already-completed
+            # conversion, fail only the summarize stage; for a still-
+            # processing conversion, fail the whole job. The duplicate-
+            # redelivery guard inside _terminalize_capacity_exhausted
+            # prevents harming another incarnation's live work.
             _terminalize_capacity_exhausted(db, job_id)
+            try:
+                from app.db.models import ProcessingJob, ProcessingStatus
+
+                job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+                if job is not None and job.status == ProcessingStatus.COMPLETED:
+                    job.summarize_status = "failed"
+                    job.celery_task_id = None
+                    db.commit()
+            except Exception:
+                db.rollback()
             return {"error": "No sidecar capacity available after retries"}
         raise self.retry(exc=SidecarCapacityExhausted(str(job_id)), countdown=60)
 
@@ -1300,7 +1362,7 @@ def process_snapshots(self, job_id: int):
             return {"error": f"Job {job_id} not found"}
         # Terminal guard (Review Round 2 NEW-9): a job terminalized between
         # dispatch and execution must not be resurrected by redriven work.
-        if job.status in (ProcessingStatus.COMPLETED, ProcessingStatus.CANCELLED):
+        if job.status in (ProcessingStatus.COMPLETED, ProcessingStatus.CANCELLED, ProcessingStatus.FAILED):
             return {"status": "skipped", "reason": "job is terminal"}
         claimed = claim_step(db, job.id, "snapshots", exec_uuid)
         if claimed is None:
@@ -1418,9 +1480,9 @@ def process_slides(self, job_id: int):
                 job_id, job.celery_task_id, self.request.id,
             )
             return {"status": "skipped", "reason": "another delivery is active"}
-        if job.status == ProcessingStatus.COMPLETED:
-            logger.info(f"Slide task: job {job_id} already completed, skipping")
-            return {"status": "skipped", "reason": "already completed"}
+        if job.status in (ProcessingStatus.COMPLETED, ProcessingStatus.CANCELLED, ProcessingStatus.FAILED):
+            logger.info(f"Slide task: job {job_id} already terminal ({job.status.value}), skipping")
+            return {"status": "skipped", "reason": "job is terminal"}
 
         if job.processing_mode != ProcessingMode.SLIDE_AWARE.value:
             logger.warning(f"Slide task: Job {job_id} is not in slide_aware mode")

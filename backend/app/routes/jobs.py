@@ -1016,17 +1016,15 @@ def summarize_transcript(
         running_task_id = job.celery_task_id
         job.celery_task_id = None
         job.summarize_status = "processing"
-        # Monotonic force generation (Review Round 2 NEW-7): the forced task
-        # requires this generation for its takeover, so a concurrent force
-        # request bumps it and fences the older forced task out.
-        job.force_generation = (job.force_generation or 0) + 1
-        force_generation = job.force_generation
+        # Atomic monotonic force generation (Review Round 2 NEW-7): minted
+        # with an UPDATE...RETURNING so concurrent force requests get
+        # distinct generations and the older forced task is fenced out.
+        force_generation = _mint_force_generation(db, job.id)
         db.commit()
         if running_task_id:
             celery_app.control.revoke(running_task_id, terminate=True, signal="SIGTERM")
     else:
-        job.force_generation = (job.force_generation or 0) + 1
-        force_generation = job.force_generation
+        force_generation = _mint_force_generation(db, job.id)
         db.commit()
 
     # Dispatch background summarization task (task sets celery_task_id itself)
@@ -1145,10 +1143,34 @@ def cancel_job(
 
 def _dispatch_summarize_retry(db: Session, job) -> None:
     """Retry summarization with a fresh force generation (Review Round 2 NEW-7)."""
-    job.force_generation = (job.force_generation or 0) + 1
-    gen = job.force_generation
+    gen = _mint_force_generation(db, job.id)
     db.commit()
     summarize_transcript_task.delay(job.id, True, gen)
+
+
+def _mint_force_generation(db: Session, job_id: int) -> int:
+    """Atomically bump processing_jobs.force_generation and return the new
+    value (Review Round 2 NEW-7): concurrent force requests always receive
+    distinct generations."""
+    if db.bind.dialect.name == "postgresql":
+        row = db.execute(
+            text(
+                "UPDATE processing_jobs SET force_generation = force_generation + 1 "
+                "WHERE id = :job_id RETURNING force_generation"
+            ),
+            {"job_id": job_id},
+        ).first()
+        return int(row[0]) if row else 0
+    from datetime import UTC, datetime as _dt
+
+    from app.db.models import ProcessingJob
+
+    job = db.get(ProcessingJob, job_id)
+    if job is None:
+        return 0
+    job.force_generation = (job.force_generation or 0) + 1
+    db.flush()
+    return job.force_generation
 
 
 @router.delete(

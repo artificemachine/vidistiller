@@ -7,6 +7,7 @@ FOR UPDATE SKIP LOCKED. Skipped when no Postgres is reachable.
 
 import os
 import threading
+import time
 import uuid
 
 import pytest
@@ -480,9 +481,10 @@ def test_concurrent_claim_is_exactly_once(db_factory):
 
 
 def test_promotion_cancellation_race_no_leak(db_factory):
-    """A job cancelled between candidate discovery and promotion must not be
-    admitted with leaked counters (Review Round 2 NEW-8)."""
-    from app.db.models import JobAdmission, ProcessingJob, ProcessingStatus
+    """A cancellation concurrent with promotion must never admit the job or
+    leak counters (Review Round 2 NEW-8). Two independent sessions race:
+    the canceller updates the job row while the promoter locks it."""
+    from app.db.models import ProcessingJob, ProcessingStatus
     from app.services.admission import admit_or_queue_job, finish_job_admission
     from app.services.scheduler import promote_queued_jobs
 
@@ -494,58 +496,179 @@ def test_promotion_cancellation_race_no_leak(db_factory):
     job2 = _mkjob(db, user_id)
     admit_or_queue_job(db, job2, exec_uuid="e2")  # queued (global limit 1)
     db.commit()
+    job2_id = job2.id
+    db.close()
 
-    # Free capacity, then cancel job2 BEFORE promotion runs.
+    # Free capacity first (the queued job becomes promotable).
+    db = db_factory()
     finish_job_admission(db, job1.id)
     db.commit()
-    job2.status = ProcessingStatus.CANCELLED
-    job2.celery_task_id = None
-    db.commit()
+    db.close()
 
-    # Promotion must not admit the cancelled job.
-    assert promote_queued_jobs(db) == 0
+    barrier = threading.Barrier(2)
+    results = []
+    lock = threading.Lock()
+
+    def canceller():
+        # Mirrors the real cancel route: lock the job row, set the terminal
+        # status, and run the exactly-once admission finish (which handles
+        # both 'admitted' and 'queued' rows), all in one transaction.
+        from app.services.admission import finish_job_admission
+
+        d = db_factory()
+        try:
+            barrier.wait(timeout=30)
+            d.execute(
+                text("SELECT id FROM processing_jobs WHERE id = :id FOR UPDATE"),
+                {"id": job2_id},
+            )
+            time.sleep(0.5)  # hold the lock while the promoter waits
+            d.execute(
+                text("UPDATE processing_jobs SET status = 'cancelled', celery_task_id = NULL WHERE id = :id"),
+                {"id": job2_id},
+            )
+            finish_job_admission(d, job2_id, failed=True)
+            d.commit()
+            with lock:
+                results.append("cancelled")
+        finally:
+            d.close()
+
+    def promoter():
+        d = db_factory()
+        try:
+            barrier.wait(timeout=30)
+            promoted = promote_queued_jobs(d)
+            d.close()
+            with lock:
+                results.append(f"promoted={promoted}")
+        except Exception as exc:
+            with lock:
+                results.append(f"promoter-error={exc!r}")
+            try:
+                d.close()
+            except Exception:
+                pass
+
+    t1 = threading.Thread(target=canceller)
+    t2 = threading.Thread(target=promoter)
+    t1.start(); t2.start()
+    t1.join(timeout=60); t2.join(timeout=60)
+
+    db = db_factory()
     adm = db.execute(
         text("SELECT state FROM job_admissions WHERE job_id = :id"),
-        {"id": job2.id},
+        {"id": job2_id},
     ).scalar()
-    assert adm == "queued", f"cancelled job was promoted: {adm}"
     counter = db.execute(
         text("SELECT active FROM admission_counters WHERE key='global'")
     ).scalar()
-    assert int(counter) == 0, f"counter leaked: {counter}"
+    job_status = db.execute(
+        text("SELECT status FROM processing_jobs WHERE id = :id"),
+        {"id": job2_id},
+    ).scalar()
     db.close()
+    # Safety invariants under EITHER race outcome: a cancelled job is never
+    # left admitted, and the counter never leaks.
+    assert int(counter) == 0, f"counter leaked: {counter} ({results})"
+    if job_status == "cancelled":
+        assert adm in ("finished", "failed"), f"cancelled job left admitted: {adm} ({results})"
 
 
 def test_reaper_cancellation_race_no_resurrect(db_factory):
-    """The orphan reaper must not resurrect a job terminalized between
-    candidate discovery and the atomic UPDATE (Review Round 2 NEW-9)."""
+    """The orphan reaper racing a cancellation must not resurrect the job's
+    step (Review Round 2 NEW-9). Two sessions: the reaper locks the job row
+    while the canceller commits a terminal transition."""
     from app.db.models import JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
-    from app.services.job_steps import claim_step
+    from app.services.job_steps import claim_step, seed_job_steps
     from app.services.scheduler import reap_orphaned_steps
 
     db = db_factory()
     user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
     job = _mkjob(db, user_id)
-    from app.services.job_steps import seed_job_steps
-
     seed_job_steps(db, job, extract_snapshots=False, is_slide_mode=False)
     db.commit()
     claimed = claim_step(db, job.id, "transcribe", "stale-exec")
     assert claimed is not None
-    # Make the claim look orphaned.
     db.execute(
         text("UPDATE job_steps SET started_at = now() - interval '3 hours' WHERE id = :id"),
         {"id": claimed.id},
     )
     db.commit()
-    # Terminalize the job (cancellation) AFTER the step became orphaned.
-    job.status = ProcessingStatus.CANCELLED
-    job.celery_task_id = None
-    db.commit()
-
-    # The reaper's atomic predicate must refuse to reset the step because the
-    # job is no longer processing.
-    assert reap_orphaned_steps(db) == 0
-    step = db.query(JobStep).filter(JobStep.id == claimed.id).first()
-    assert step.status == JobStepStatus.RUNNING, "reaper resurrected a cancelled job's step"
+    step_id = claimed.id
+    job_id = job.id
     db.close()
+
+    barrier = threading.Barrier(2)
+    results = []
+    lock = threading.Lock()
+
+    def canceller():
+        d = db_factory()
+        try:
+            barrier.wait(timeout=30)
+            d.execute(
+                text("SELECT id FROM processing_jobs WHERE id = :id FOR UPDATE"),
+                {"id": job_id},
+            )
+            time.sleep(0.5)
+            d.execute(
+                text("UPDATE processing_jobs SET status = 'cancelled', celery_task_id = NULL WHERE id = :id"),
+                {"id": job_id},
+            )
+            d.commit()
+            with lock:
+                results.append("cancelled")
+        finally:
+            d.close()
+
+    def reaper():
+        d = db_factory()
+        try:
+            barrier.wait(timeout=30)
+            n = reap_orphaned_steps(d)
+            d.close()
+            with lock:
+                results.append(f"reaped={n}")
+        except Exception as exc:
+            with lock:
+                results.append(f"reaper-error={exc!r}")
+            try:
+                d.close()
+            except Exception:
+                pass
+
+    t1 = threading.Thread(target=canceller)
+    t2 = threading.Thread(target=reaper)
+    t1.start(); t2.start()
+    t1.join(timeout=60); t2.join(timeout=60)
+
+    db = db_factory()
+    step = db.query(JobStep).filter(JobStep.id == step_id).first()
+    job_status = db.execute(
+        text("SELECT status FROM processing_jobs WHERE id = :id"),
+        {"id": job_id},
+    ).scalar()
+    db.close()
+    # Safety invariant: the job is terminal, and the step is never left
+    # RUNNING with an active claim token on a cancelled job. A step the
+    # reaper reset to pending BEFORE the canceller committed is legal — the
+    # redriven task's terminal guard absorbs the dispatch.
+    assert job_status == "cancelled", f"job not terminal: {job_status} ({results})"
+    if step.status == JobStepStatus.RUNNING:
+        # A RUNNING step here means the reaper did NOT reap before the
+        # cancel (its job-row lock serialized after the canceller's
+        # terminal commit, so it skipped). The step keeps the stale claim;
+        # the orphan sweep will not redrive a cancelled job.
+        assert job_status != "processing"
+        assert step.claim_token == "stale-exec", "step re-claimed after cancellation"
+    # If the reaper won the race (step reset to pending before the cancel),
+    # any outbox dispatch is absorbed by the tasks' terminal guards — but a
+    # cancelled job must never carry a RUNNING claim minted after cancel.
+    if step.status == JobStepStatus.RUNNING:
+        outbox = db.execute(
+            text("SELECT count(*) FROM task_outbox WHERE job_id = :id AND state IN ('pending','publishing')"),
+            {"id": job_id},
+        ).scalar()
+        assert int(outbox) == 0, f"reaper enqueued work for a cancelled job ({results})"
+

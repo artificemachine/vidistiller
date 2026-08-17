@@ -138,7 +138,7 @@ class TestProcessSlidesStalenessGuard:
 
         result, MockServiceCls = self._run(mock_job)
 
-        assert result == {"status": "skipped", "reason": "already completed"}
+        assert result == {"status": "skipped", "reason": "job is terminal"}
         MockServiceCls.return_value.run_full_pipeline.assert_not_called()
 
     def test_proceeds_when_no_prior_claim(self):
