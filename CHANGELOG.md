@@ -721,3 +721,9 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - ops(backups): schedule a weekly isolated NAS restore drill that selects the newest signed verified bundle and revalidates immutable, Cosign-verified restore images.
+
+### Security
+- security(ci): add CodeQL static analysis for Python and TypeScript, running on push, pull request, and a weekly schedule. Actions are SHA-pinned and the workflow declares least-privilege permissions explicitly.
+
+### Fixed
+- test(media-stress): pin REDIS_URL for the spawned Uvicorn subprocess. The fixture forwarded DATABASE_URL but not REDIS_URL, so the server fell back to .env, whose REDIS_URL uses the compose-internal hostname and does not resolve from the host. The rate limiter then failed closed and every login returned 400 "Rate limiting is temporarily unavailable", surfacing as an opaque fixture error. Both host-facing test defaults now use 127.0.0.1 rather than localhost, since macOS resolves localhost to ::1 first while the container runtime publishes IPv4 only.

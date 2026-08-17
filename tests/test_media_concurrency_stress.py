@@ -27,8 +27,12 @@ from sqlalchemy.exc import OperationalError
 
 DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    "postgresql://tutorial_user:tutorial_password@localhost:5432/tutorial_db",
+    "postgresql://tutorial_user:tutorial_password@127.0.0.1:5432/tutorial_db",
 )
+# 127.0.0.1 rather than localhost: on macOS localhost resolves to ::1 first,
+# while the container runtime publishes the port on IPv4 only, so "localhost"
+# reaches nothing.
+REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://127.0.0.1:6379/0")
 API_PORT = int(os.environ.get("TEST_MEDIA_API_PORT", "8899"))
 
 
@@ -109,6 +113,13 @@ def media_env(tmp_path_factory):
     # Launch a real Uvicorn process on a private port with the test DB.
     env = dict(os.environ)
     env["DATABASE_URL"] = DATABASE_URL
+    # REDIS_URL must be pinned alongside DATABASE_URL. Without it the spawned
+    # server falls back to .env, whose REDIS_URL uses the compose-internal
+    # hostname and does not resolve from the host. The rate limiter then fails
+    # closed and every request to /api/auth/login returns 400
+    # "Rate limiting is temporarily unavailable", which surfaces as a fixture
+    # error rather than an obvious connectivity problem.
+    env["REDIS_URL"] = REDIS_URL
     env["DATA_DIR"] = str(data_dir)
     env["ENVIRONMENT"] = "testing"
     env["JWT_SECRET_KEY"] = "TestSecretKey123!@#abcDEF_development_onlyx"
