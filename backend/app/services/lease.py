@@ -75,49 +75,54 @@ def acquire_slot(
 ) -> Optional[ResourceSlot]:
     """Acquire one free slot for a job inside the admission transaction.
 
-    Returns the acquired slot or None when no slot is free (the caller
-    keeps the job admitted and dispatch waits for the sweep).
+    Capacity truth (Review Round 2 N4): only slots of ENABLED sidecars whose
+    cached telemetry is healthy, fresh (non-stale), and serving at least one
+    model are eligible. A preferred sidecar that is unavailable returns
+    None (the caller queues visibly) rather than falling through to another
+    lane. Returns the acquired slot or None when no compatible slot is free.
     """
     settings = get_settings().admission
+    from app.services.sidecar import cached_sidecar_telemetry, get_sidecar
 
-    if preferred_sidecar:
-        q = (
-            db.query(ResourceSlot)
-            .filter(
-                ResourceSlot.sidecar_id == preferred_sidecar,
-                ResourceSlot.enabled.is_(True),
-                ResourceSlot.state == SlotState.FREE,
-            )
-            .order_by(ResourceSlot.slot_index)
+    def _eligible(sidecar_id: str) -> bool:
+        sidecar = get_sidecar(db, sidecar_id)
+        if sidecar is None or not sidecar.enabled:
+            return False
+        telemetry = cached_sidecar_telemetry(sidecar_id)
+        if telemetry is None:
+            return False  # never probed -> fail closed for new allocations
+        if not telemetry.healthy or telemetry.stale:
+            return False
+        if not telemetry.served_models:
+            return False  # no live model -> no capacity
+        return True
+
+    candidates = (
+        db.query(ResourceSlot)
+        .filter(
+            ResourceSlot.enabled.is_(True),
+            ResourceSlot.state == SlotState.FREE,
         )
-        if db.bind.dialect.name == "postgresql":
-            q = q.with_for_update(skip_locked=True)
-        slot = q.first()
-    else:
-        q = (
-            db.query(ResourceSlot)
-            .filter(
-                ResourceSlot.enabled.is_(True),
-                ResourceSlot.state == SlotState.FREE,
-            )
-            .order_by(ResourceSlot.sidecar_id, ResourceSlot.slot_index)
-        )
-        if db.bind.dialect.name == "postgresql":
-            q = q.with_for_update(skip_locked=True)
-        slot = q.first()
+        .order_by(ResourceSlot.sidecar_id, ResourceSlot.slot_index)
+    )
+    if db.bind.dialect.name == "postgresql":
+        candidates = candidates.with_for_update(skip_locked=True)
 
-    if slot is None:
-        return None
-
-    slot.state = SlotState.LEASED
-    slot.job_id = job.id
-    slot.claim_exec_uuid = exec_uuid
-    slot.generation += 1
-    slot.heartbeat_at = _db_now(db)
-    slot.expires_at = slot.heartbeat_at + timedelta(seconds=settings.lease_ttl_seconds)
-    db.flush()
-    _audit(db, slot, "acquire", f"ttl={settings.lease_ttl_seconds}s")
-    return slot
+    for slot in candidates.all():
+        if preferred_sidecar and slot.sidecar_id != preferred_sidecar:
+            continue
+        if not _eligible(slot.sidecar_id):
+            continue
+        slot.state = SlotState.LEASED
+        slot.job_id = job.id
+        slot.claim_exec_uuid = exec_uuid
+        slot.generation += 1
+        slot.heartbeat_at = _db_now(db)
+        slot.expires_at = slot.heartbeat_at + timedelta(seconds=settings.lease_ttl_seconds)
+        db.flush()
+        _audit(db, slot, "acquire", f"ttl={settings.lease_ttl_seconds}s")
+        return slot
+    return None
 
 
 def heartbeat_slot(

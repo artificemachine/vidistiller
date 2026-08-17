@@ -80,6 +80,22 @@ def _seed(db, global_limit: int = 1, per_user_limit: int = 1, slots: int = 1):
             )
         )
         db.flush()
+    # Telemetry cache so acquire_slot's capacity gate passes (N4).
+    import time as _time
+
+    from app.services.sidecar import SidecarTelemetry, _telemetry_cache, _telemetry_lock
+
+    with _telemetry_lock:
+        _telemetry_cache["primary"] = SidecarTelemetry(
+            registered_id="primary",
+            label="Primary",
+            base_url="http://test.invalid:8000",
+            declared_model="test-model",
+            capabilities=["text"],
+            healthy=True,
+            served_models=["test-model"],
+            observed_at=_time.time(),
+        )
     existing_slots = (
         db.query(ResourceSlot)
         .filter(ResourceSlot.sidecar_id == "primary")
@@ -413,3 +429,51 @@ def test_queue_promotion_publishes_after_capacity_frees(db_factory):
     ).scalar()
     assert admission2 == "admitted"
     db.close()
+
+
+def test_concurrent_claim_is_exactly_once(db_factory):
+    """Two independent sessions racing to claim the same PENDING step: exactly
+    one wins (Review Round 2 N1 — atomic conditional claim)."""
+    from app.db.models import JobStep
+    from app.services.job_steps import claim_step, seed_job_steps
+
+    db = db_factory()
+    user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
+    job = _mkjob(db, user_id)
+    seed_job_steps(db, job, extract_snapshots=False, is_slide_mode=False)
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    winners = []
+    lock = threading.Lock()
+
+    def contender(token):
+        d = db_factory()
+        try:
+            claimed = claim_step(d, job_id, "transcribe", token)
+            d.commit()
+            with lock:
+                winners.append(token if claimed is not None else None)
+        finally:
+            d.close()
+
+    threads = [
+        threading.Thread(target=contender, args=(f"tok-{i}",)) for i in range(8)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+
+    won = [w for w in winners if w is not None]
+    assert len(won) == 1, f"expected exactly one claim winner, got {won}"
+    assert winners.count(None) == 7
+
+    d = db_factory()
+    step = d.query(JobStep).filter(
+        JobStep.job_id == job_id, JobStep.name == "transcribe"
+    ).first()
+    assert step.attempt == 1
+    assert step.claim_token == won[0]
+    d.close()

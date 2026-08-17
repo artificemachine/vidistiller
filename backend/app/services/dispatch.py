@@ -52,7 +52,7 @@ def publish_outbox(
     query filters BEFORE the limit so a specific job's row is always found
     even under backlog (Review Round 2 new finding).
     """
-    query = db.query(TaskOutbox).filter(TaskOutbox.state == "pending")
+    query = db.query(TaskOutbox).filter(TaskOutbox.state.in_(("pending", "publishing")))
     if job_id is not None:
         query = query.filter(TaskOutbox.job_id == job_id)
     rows = query.order_by(TaskOutbox.created_at).limit(limit).all()

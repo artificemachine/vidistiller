@@ -277,22 +277,39 @@ def sync_admission_limits(db: Session) -> None:
     settings = get_settings().admission
     # Global.
     global_counter = _ensure_counter(db, GLOBAL_COUNTER_KEY, settings.global_active_limit)
-    db.execute(
-        text(
-            "UPDATE admission_counters SET \"limit\" = :l, updated_at = now() "
-            "WHERE key = :k"
-        ),
-        {"k": GLOBAL_COUNTER_KEY, "l": settings.global_active_limit},
-    )
-    # Every existing per-user counter row (user:<id>) gets the configured
-    # per-user limit; new users are seeded on first admission.
-    db.execute(
-        text(
-            "UPDATE admission_counters SET \"limit\" = :l, updated_at = now() "
-            "WHERE key LIKE 'user:%'"
-        ),
-        {"l": settings.per_user_active_limit},
-    )
+    if db.bind.dialect.name == "postgresql":
+        db.execute(
+            text(
+                "UPDATE admission_counters SET \"limit\" = :l, updated_at = now() "
+                "WHERE key = :k"
+            ),
+            {"k": GLOBAL_COUNTER_KEY, "l": settings.global_active_limit},
+        )
+        # Every existing per-user counter row (user:<id>) gets the configured
+        # per-user limit; new users are seeded on first admission.
+        db.execute(
+            text(
+                "UPDATE admission_counters SET \"limit\" = :l, updated_at = now() "
+                "WHERE key LIKE 'user:%'"
+            ),
+            {"l": settings.per_user_active_limit},
+        )
+    else:
+        # SQLite (dev/tests): no now() (Review Round 2 N9).
+        db.execute(
+            text(
+                "UPDATE admission_counters SET \"limit\" = :l "
+                "WHERE key = :k"
+            ),
+            {"k": GLOBAL_COUNTER_KEY, "l": settings.global_active_limit},
+        )
+        db.execute(
+            text(
+                "UPDATE admission_counters SET \"limit\" = :l "
+                "WHERE key LIKE 'user:%'"
+            ),
+            {"l": settings.per_user_active_limit},
+        )
     db.commit()
 
 
@@ -308,14 +325,23 @@ def finish_job_admission(db: Session, job_id: int, *, failed: bool = False) -> b
     from app.db.models import AdmissionCounter
 
     target = AdmissionState.FAILED if failed else AdmissionState.FINISHED
-    result = db.execute(
-        text(
-            "UPDATE job_admissions SET state = :state, finished_at = now(), "
-            "updated_at = now() WHERE job_id = :job_id AND state = 'admitted' "
-            "RETURNING job_id"
-        ),
-        {"state": target.value, "job_id": job_id},
-    )
+    if db.bind.dialect.name == "postgresql":
+        result = db.execute(
+            text(
+                "UPDATE job_admissions SET state = :state, finished_at = now(), "
+                "updated_at = now() WHERE job_id = :job_id AND state = 'admitted' "
+                "RETURNING job_id"
+            ),
+            {"state": target.value, "job_id": job_id},
+        )
+    else:
+        result = db.execute(
+            text(
+                "UPDATE job_admissions SET state = :state, finished_at = :now "
+                "WHERE job_id = :job_id AND state = 'admitted'"
+            ),
+            {"state": target.value, "job_id": job_id, "now": _utcnow()},
+        )
     if result.rowcount != 1:
         # Not admitted (queued/never admitted/already finished): nothing to
         # release — a queued job never incremented the counters.
@@ -387,7 +413,7 @@ def mark_outbox_published(db: Session, outbox_id: int) -> None:
 def mark_outbox_delivered(db: Session, outbox_id: int) -> None:
     db.execute(
         update(TaskOutbox)
-        .where(TaskOutbox.id == outbox_id, TaskOutbox.state == "published")
+        .where(TaskOutbox.id == outbox_id, TaskOutbox.state.in_(("published", "publishing")))
         .values(state="delivered", delivered_at=_utcnow())
     )
 

@@ -567,7 +567,6 @@ def process_transcript(self, job_id: int):
             _add_log(db, job_id, "No video URL provided", "error", "init")
             job.status = ProcessingStatus.FAILED
             job.error_message = "No video URL provided"
-            db.commit()
             _finish_admission_for_job(db, job_id, failed=True)
             db.commit()
             return {"error": "No video URL"}
@@ -578,16 +577,24 @@ def process_transcript(self, job_id: int):
         db.commit()
         _add_log(db, job_id, f"Job started: {video_url}", "info", "init")
         logger.info(f"Processing transcript for job {job_id}: {video_url}")
+        _mark_stage_delivered(db, job_id, "transcript")
 
         video_service = VideoService()
         steps_enabled = bool(job.steps)
-        transcribe_claim = (
-            claim_step(db, job.id, "transcribe", exec_uuid)
-            if steps_enabled
-            else None
-        )
-        if steps_enabled and transcribe_claim is None:
-            return {"job_id": job_id, "status": "skipped", "reason": "transcribe step is not retryable"}
+        transcribe_claim = None
+        if _has_persisted_steps(job):
+            from app.services.job_steps import claim_step
+
+            transcribe_claim = (
+                claim_step(db, job.id, "transcribe", exec_uuid)
+                if steps_enabled
+                else None
+            )
+            if steps_enabled and transcribe_claim is None:
+                return {"job_id": job_id, "status": "skipped", "reason": "transcribe step is not retryable"}
+            # Durable claim: commit so a worker kill leaves a RUNNING claim
+            # that fences the redelivery (Review Round 2 F12).
+            db.commit()
 
         # Fault-injection barrier (tests only): when VIDISTILLER_TEST_BARRIER
         # is set, the worker records the claim and blocks until the barrier
@@ -622,7 +629,6 @@ def process_transcript(self, job_id: int):
             job.error_message = "No transcript could be generated"
             if transcribe_claim:
                 fail_step(db, job.id, "transcribe", exec_uuid, "No transcript could be generated")
-            db.commit()
             _finish_admission_for_job(db, job_id, failed=True)
             db.commit()
             return {"error": "Empty transcript"}
@@ -696,10 +702,10 @@ def process_transcript(self, job_id: int):
                 process_snapshots.delay(job_id)
                 return {"status": "snapshot_processing", "source": source, "length": len(transcript_text)}
 
-        # 10. Mark job as completed, clear Celery task ID
+        # 10. Mark job as completed, clear Celery task ID. Terminal state and
+        # admission release commit together (Review Round 2 N5).
         job.status = ProcessingStatus.COMPLETED
         job.celery_task_id = None
-        db.commit()
         _finish_admission_for_job(db, job_id)
         db.commit()
         _add_log(db, job_id, "Job completed successfully", "info", "complete")
@@ -716,14 +722,13 @@ def process_transcript(self, job_id: int):
             if job:
                 job.status = ProcessingStatus.FAILED
                 job.error_message = f"Unexpected error: {str(e)[:500]}"
-                db.commit()
         except Exception:
             pass
         if self.request.retries >= self.max_retries:
             # Retries exhausted: this is a terminal failure — release the
-            # active-job admission exactly once (Review Round 2 F5).
+            # active-job admission exactly once (Review Round 2 F5/N5).
             _finish_admission_for_job(db, job_id, failed=True)
-            db.commit()
+        db.commit()
         raise self.retry(exc=e, countdown=30)
     finally:
         db.close()
@@ -827,7 +832,7 @@ def _resolve_job_llm(db, job, task=None, required_context_tokens: int = 0):
 # SUMMARIZE TRANSCRIPT TASK
 # ==============================================================================
 
-@celery_app.task(bind=True, name="summarize_transcript", max_retries=0)
+@celery_app.task(bind=True, name="summarize_transcript", max_retries=3)
 def summarize_transcript_task(self, job_id: int, force: bool = False):
     """
     Summarize a job's transcript in the background via LLM.
@@ -856,15 +861,6 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
             logger.error(f"Summarize: Job {job_id} not found")
             return {"error": f"Job {job_id} not found"}
 
-        if _has_persisted_steps(job):
-            from app.services.job_steps import claim_step
-
-            summarize_claimed = claim_step(
-                db, job.id, "summarize", exec_uuid
-            ) is not None
-            if not summarize_claimed and not force:
-                return {"status": "skipped", "reason": "summarize step is not retryable"}
-
         # Staleness guard against concurrent deliveries: Celery can hold two
         # executions of the same task (or a fresh task and a redelivered one)
         # for the same job — long runs exceed Redis' visibility timeout, and
@@ -891,8 +887,8 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         _add_log(db, job_id, "Starting LLM summarization...", "info", "summarize")
         _mark_stage_delivered(db, job_id, "summarize")
 
-        # WP2/WP3 (Review Round 2 F3/F6): summarization performs external LLM
-        # work and therefore REQUIRES a sidecar slot lease under this
+        # WP2/WP3 (Review Round 2 F3/F6/N3): summarization performs external
+        # LLM work and therefore REQUIRES a sidecar slot lease under this
         # incarnation's exec_uuid. No slot -> visible capacity reason and a
         # bounded retry, never unleased sidecar work.
         slot = _lease_slot_for_job(db, job, exec_uuid)
@@ -908,6 +904,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
             "info", "summarize_lease",
         )
 
+        lease_lost = threading.Event()
         heartbeat_stop = threading.Event()
 
         def _heartbeat_loop() -> None:
@@ -928,6 +925,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
                                 "Slot %s heartbeat rejected (stale fence); stopping further sidecar work",
                                 slot.id,
                             )
+                            lease_lost.set()
                             heartbeat_stop.set()
                     finally:
                         hb_db.close()
@@ -938,6 +936,46 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
             target=_heartbeat_loop, name=f"summ-hb-{job_id}", daemon=True
         )
         heartbeat_thread.start()
+
+        # Step claim comes AFTER the lease so a no-capacity retry never holds
+        # a claim owned by a dead incarnation (Review Round 2 F1/N1).
+        if _has_persisted_steps(job):
+            from app.services.job_steps import claim_step
+
+            summarize_claimed = claim_step(
+                db, job.id, "summarize", exec_uuid
+            ) is not None
+            if not summarize_claimed and not force:
+                # Lost the claim to another incarnation; release the lease.
+                _release_slot_if_held(db, slot, exec_uuid)
+                db.commit()
+                return {"status": "skipped", "reason": "summarize step is not retryable"}
+            if not summarize_claimed and force:
+                # Force takeover: the route fenced and revoked the previous
+                # task before dispatching, so taking over the RUNNING claim
+                # is authorized (Review Round 2 N1).
+                if db.bind.dialect.name == "postgresql":
+                    db.execute(
+                        text(
+                            "UPDATE job_steps SET claim_token = :token, started_at = now(), "
+                            "attempt = attempt + 1, finished_at = NULL, error_message = NULL "
+                            "WHERE job_id = :job_id AND name = 'summarize' AND status = 'running'"
+                        ),
+                        {"token": exec_uuid, "job_id": job.id},
+                    )
+                else:
+                    from datetime import UTC, datetime as _dt
+
+                    db.execute(
+                        text(
+                            "UPDATE job_steps SET claim_token = :token, started_at = :now, "
+                            "attempt = attempt + 1, finished_at = NULL, error_message = NULL "
+                            "WHERE job_id = :job_id AND name = 'summarize' AND status = 'running'"
+                        ),
+                        {"token": exec_uuid, "job_id": job.id, "now": _dt.now(UTC).replace(tzinfo=None)},
+                    )
+                db.commit()
+                summarize_claimed = True
 
         # Read the owner preference only for language selection. The concrete
         # endpoint is resolved after the transcript length is known so context
@@ -963,25 +1001,25 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         from app.services.llm_fleet import LLMTask
         from app.services.llm_providers import build_provider
 
-        # WP3 (Review Round 2 F6): bind the provider to the LEASED sidecar's
-        # registry endpoint + live served model, not the generic resolver.
+        # WP3 (Review Round 2 F6/N3): bind EVERY provider built here to the
+        # LEASED sidecar's registry endpoint + live served model. The slot's
+        # sidecar is the capacity we hold; there is no generic fallback.
+        from app.services.sidecar import get_sidecar
+
+        leased_sidecar = get_sidecar(db, slot.sidecar_id)
+        if leased_sidecar is None:  # registry row removed mid-flight: abort
+            logger.error("Summarize: leased sidecar %s missing from registry", slot.sidecar_id)
+            raise SidecarCapacityExhausted(job_id)
         provider, _model = _resolve_provider_for_slot(db, slot)
-        if provider is not None:
-            provider_name = "vllm"
-            _resolved_model = _model
-            ollama_url = slot and None or None
-            api_key = None
-        else:
-            resolved = _resolve_job_llm_config(
-                db,
-                job,
-                LLMTask.LONG_ANALYSIS,
-                required_context_tokens_for_transcript(transcript_text),
+        if provider is None:
+            logger.error(
+                "Summarize: could not build provider for leased sidecar %s", slot.sidecar_id
             )
-            provider_name = resolved.provider_name
-            _resolved_model = resolved.model
-            ollama_url = resolved.base_url
-            api_key = resolved.api_key
+            raise SidecarCapacityExhausted(job_id)
+        provider_name = "vllm"
+        _resolved_model = _model
+        ollama_url = leased_sidecar.base_url
+        api_key = None
 
         # Build snapshot image URLs
         _data_dir = get_settings().storage.data_dir or str(Path(__file__).resolve().parent.parent / "data")
@@ -1029,15 +1067,10 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         vision_model = None
         if snapshot_dicts:
             try:
-                vision_resolved = _resolve_job_llm_config(
-                    db, job, LLMTask.SNAPSHOT_DESCRIPTION
-                )
-                vision_provider = build_provider(
-                    vision_resolved.provider_name,
-                    api_key=vision_resolved.api_key,
-                    ollama_base_url=vision_resolved.base_url or "http://localhost:11434",
-                )
-                vision_model = vision_resolved.model
+                # WP3 (Review Round 2 N3): vision work also runs on the
+                # leased sidecar — no separate unleased lane.
+                vision_provider = provider
+                vision_model = _resolved_model
             except Exception as exc:
                 _add_log(
                     db,
@@ -1047,7 +1080,8 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
                     "summarize",
                 )
 
-        # Generate summary via LLM with explicit text and vision routes.
+        # Generate summary via LLM with explicit text and vision routes, all
+        # bound to the LEASED sidecar (Review Round 2 N3).
         llm = LLMService(
             provider_name=provider_name,
             model_name=_resolved_model,
@@ -1061,7 +1095,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
             transcript_text, snapshot_dicts, language=language,
             title=title, video_url=job.video_url,
             source_type=job.source_type or "",
-            cancel_check=lambda: _is_cancelled(db, job_id),
+            cancel_check=lambda: _is_cancelled(db, job_id) or lease_lost.is_set(),
         )
 
         # Persist document
@@ -1097,6 +1131,10 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
             pass
         return {"status": "cancelled"}
 
+    except SidecarCapacityExhausted:
+        logger.info("Summarize: job %s queued on sidecar capacity", job_id)
+        raise self.retry(exc=SidecarCapacityExhausted(str(job_id)), countdown=60)
+
     except Exception as e:
         db.rollback()
         logger.error(f"Summarize task failed for job {job_id}: {e}")
@@ -1126,10 +1164,6 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         except Exception:
             pass
         return {"error": str(e)}
-
-    except SidecarCapacityExhausted:
-        logger.info("Summarize: job %s queued on sidecar capacity", job_id)
-        raise self.retry(exc=SidecarCapacityExhausted(str(job_id)), countdown=60)
 
     finally:
         if heartbeat_thread is not None:
@@ -1205,7 +1239,6 @@ def process_snapshots(self, job_id: int):
         from app.db.models import ProcessingMode, ProcessingStatus
         if job.processing_mode != ProcessingMode.SLIDE_AWARE.value:
             job.status = ProcessingStatus.COMPLETED
-            db.commit()
             _finish_admission_for_job(db, job_id)
             db.commit()
         return {"status": "completed", "count": len(snapshots)}
@@ -1382,7 +1415,6 @@ def process_slides(self, job_id: int):
                         complete_step(db, j.id, "slides", exec_uuid)
                     else:
                         fail_step(db, j.id, "slides", exec_uuid, slide_status)
-                db.commit()
                 _finish_admission_for_job(db, j.id)
                 db.commit()
 

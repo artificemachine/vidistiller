@@ -104,10 +104,20 @@ def list_operator_jobs(
     }
 
     from app.services.job_payload import enrich_job_payload
+    from app.services.sidecar import cached_sidecar_telemetry
 
     rows: list[OperatorJobRow] = []
     for job in query.all():
         slot = leased.get(job.id)
+        # Report the model actually served by the leased sidecar, not the
+        # sidecar identifier (Review Round 2 N8).
+        assigned_model: Optional[str] = None
+        if slot is not None:
+            telemetry = cached_sidecar_telemetry(slot.sidecar_id)
+            if telemetry and telemetry.served_models:
+                assigned_model = telemetry.served_models[0]
+            else:
+                assigned_model = slot.sidecar_id
         admission: JobAdmission | None = job.admission
         queue_position: Optional[int] = None
         if admission is not None and admission.state == AdmissionState.QUEUED:
@@ -133,7 +143,7 @@ def list_operator_jobs(
                 queue_reason=payload.get("queue_reason"),
                 queue_position=queue_position,
                 sidecar_id=slot.sidecar_id if slot else None,
-                model=slot.sidecar_id if slot else None,
+                model=assigned_model,
                 elapsed_seconds=_elapsed_seconds(job, now),
                 progress=payload.get("progress"),
                 processing_mode=job.processing_mode,

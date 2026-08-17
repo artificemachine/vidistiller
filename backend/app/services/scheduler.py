@@ -86,26 +86,81 @@ def promote_queued_jobs(db: Session, limit: int = 10) -> int:
             db, job, exec_uuid=str(uuid.uuid4()), preferred_sidecar=preference
         )
         if outcome.state == "admitted":
+            # Commit the admission + outbox row BEFORE publishing so a crash
+            # can never leave running Celery work whose promotion rolled
+            # back (Review Round 2 N2).
+            db.commit()
             promoted += 1
-            # Publish the new first-stage row in the same transaction.
             from app.services.dispatch import publish_outbox
 
             try:
-                published = publish_outbox(db, job_id=job.id)
-                if published:
-                    db.commit()
-                else:
-                    db.commit()
+                publish_outbox(db, job_id=job.id)
+                db.commit()
             except Exception as exc:
                 logger.warning("promotion publish failed for job %s: %s", job.id, exc)
                 db.rollback()
+        else:
+            # Still queued (e.g. preferred sidecar unavailable): persist the
+            # updated queue reason.
+            db.commit()
     return promoted
+
+
+def reap_orphaned_steps(db: Session) -> int:
+    """Reset RUNNING steps whose claim is orphaned (worker died) to PENDING
+    and enqueue a fresh outbox dispatch for the stage (Review Round 2 F1.2).
+
+    A redelivery that finds a fresh RUNNING claim is correctly fenced out and
+    acks; without this sweep nothing would ever retry the orphaned stage.
+    Returns the number of steps reaped.
+    """
+    from datetime import UTC, datetime as _dt, timedelta as _td
+
+    from app.db.models import JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
+    from app.services.job_steps import ORPHANED_CLAIM_TTL_SECONDS
+
+    cutoff = _dt.now(UTC).replace(tzinfo=None) - _td(seconds=ORPHANED_CLAIM_TTL_SECONDS)
+    orphaned = (
+        db.query(JobStep)
+        .join(ProcessingJob, ProcessingJob.id == JobStep.job_id)
+        .filter(
+            JobStep.status == JobStepStatus.RUNNING,
+            JobStep.started_at < cutoff,
+            ProcessingJob.status == ProcessingStatus.PROCESSING,
+        )
+        .all()
+    )
+    reaped = 0
+    for step in orphaned:
+        db.execute(
+            text(
+                "UPDATE job_steps SET status = 'pending', claim_token = NULL, "
+                "percent = 0, started_at = NULL, finished_at = NULL, error_message = NULL "
+                "WHERE id = :id AND status = 'running'"
+            ),
+            {"id": step.id},
+        )
+        # Re-dispatch the stage via the durable outbox.
+        from app.services.admission import enqueue_first_stage
+
+        enqueue_first_stage(
+            db, step.job_id, str(uuid.uuid4()), stage=step.name
+        )
+        reaped += 1
+        logger.warning(
+            "orphaned step %s (job %s) reset to pending and re-dispatched",
+            step.name, step.job_id,
+        )
+    if reaped:
+        db.commit()
+    return reaped
 
 
 def run_maintenance_cycle(db: Session) -> dict:
     """Run one full maintenance cycle; returns a summary dict."""
     from app.services.dispatch import sweep_outbox
     from app.services.lease import reap_expired_slots, reset_quarantined_slots
+    from app.services.scheduler import reap_orphaned_steps  # noqa: F401 (same module)
     from app.services.sidecar import reconcile_slots, refresh_telemetry_cache
 
     summary = {}
@@ -117,6 +172,13 @@ def run_maintenance_cycle(db: Session) -> dict:
         summary["reaped"] = reaped
     except Exception as exc:
         logger.error("lease reap failed: %s", exc)
+        db.rollback()
+
+    try:
+        orphaned = reap_orphaned_steps(db)
+        summary["orphaned_steps"] = orphaned
+    except Exception as exc:
+        logger.error("orphaned-step reap failed: %s", exc)
         db.rollback()
 
     try:

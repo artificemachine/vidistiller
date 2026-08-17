@@ -213,12 +213,11 @@ def test_late_ack_redelivery_cannot_duplicate_work(celery_env):
 
 
 def test_worker_process_redelivery_real(celery_env):
-    """End-to-end worker-loss: the real task claims and blocks at the
-    fault-injection barrier; the worker is SIGKILLed before ack; the
-    redelivered execution must NOT create a second concurrent claim — the
-    step is either still fenced (running claim) or reclaimed once after the
-    dead worker's transaction rolled back. Either way exactly one committed
-    attempt exists and no duplicate work is recorded (Review Round 2 F12)."""
+    """End-to-end worker-loss with a DURABLE claim: the real task claims
+    (committed), blocks at the barrier; the worker is SIGKILLed before ack;
+    the redelivered execution must be FENCED OUT — it must not re-claim the
+    step (attempt stays 1, claim token unchanged) and must not rewrite the
+    marker (Review Round 2 F12)."""
     import redis as _redis
 
     env = celery_env["env"]
@@ -232,14 +231,13 @@ def test_worker_process_redelivery_real(celery_env):
     client = _redis.from_url(REDIS_URL, decode_responses=True)
     client.flushdb()
 
-    # Worker 1: picks up the task, claims the step, blocks at the barrier.
     worker1 = _start_worker(env)
     try:
         time.sleep(3)
         result = process_transcript.delay(job_id)
         task_id = result.id
 
-        # Wait for the claim marker (the worker is now blocked mid-step).
+        # Wait for the durable claim marker (claim is COMMITTED in the DB).
         for _ in range(30):
             if marker.exists():
                 break
@@ -248,43 +246,37 @@ def test_worker_process_redelivery_real(celery_env):
         first_claim = marker.read_text()
         assert "claimed=True" in first_claim
 
-        # Kill worker 1 BEFORE it acks (late-ack: redelivery is guaranteed).
-        # SIGKILL simulates hard worker loss; warm SIGTERM would wait for the
-        # blocked task to finish.
+        # SIGKILL before ack (hard worker loss; the committed claim survives).
         worker1.kill()
         worker1.wait(timeout=10)
 
-        # Worker 2: start after the visibility window; it either reclaims the
-        # step (dead worker's claim rolled back) or is fenced out. Release
-        # the barrier once a fresh claim appears.
+        # Worker 2: redelivery after the visibility window. It must be fenced
+        # out by the durable RUNNING claim — the marker is NOT rewritten and
+        # the task completes as "skipped".
         time.sleep(10)
         worker2 = _start_worker(env)
         try:
             time.sleep(2)
-            for _ in range(40):
-                if marker.exists() and marker.read_text() != first_claim:
-                    break
-                time.sleep(1)
-            release.write_text("go")
-            # Let the redelivered execution reach a terminal state.
+            # Give the redelivery time to be picked up and fenced out.
             for _ in range(40):
                 meta = client.get(f"celery-task-meta-{task_id}") or ""
                 if '"status": "SUCCESS"' in meta or '"status": "FAILURE"' in meta:
                     break
                 time.sleep(1)
             meta = client.get(f"celery-task-meta-{task_id}") or ""
-            assert '"status": "SUCCESS"' in meta or '"status": "FAILURE"' in meta, (
-                f"redelivered task never reached a terminal state: {meta[:200]}"
+            assert '"status": "SUCCESS"' in meta, f"task did not succeed: {meta[:200]}"
+            # Fence proof: the marker was NOT rewritten by a second claim.
+            assert marker.read_text() == first_claim, (
+                "redelivered incarnation re-claimed the step (fencing violated)"
             )
         finally:
             worker2.terminate()
             worker2.wait(timeout=10)
 
-        # Exactly-once claim invariant: the step has AT MOST one committed
-        # attempt (the dead worker's claim rolled back with its transaction;
-        # if the redelivery reclaimed it, attempt == 1). A duplicate claim
-        # would show attempt >= 2 with two claims racing.
-        from app.db.models import JobStep, ProcessingJob
+        # The durable claim is untouched: attempt == 1, token unchanged,
+        # status still RUNNING (owned by the dead incarnation; the orphan
+        # reaper reclaims it after ORPHANED_CLAIM_TTL_SECONDS).
+        from app.db.models import JobStep
         from app.db.session import SessionLocal
 
         db = SessionLocal()
@@ -295,10 +287,7 @@ def test_worker_process_redelivery_real(celery_env):
                 .first()
             )
             assert step is not None
-            assert step.attempt == 1, (
-                f"redelivery created duplicate work: attempt={step.attempt}"
-            )
-            # The claim token in the DB belongs to exactly one incarnation.
+            assert step.attempt == 1, f"duplicate work: attempt={step.attempt}"
             assert step.claim_token is not None
         finally:
             db.close()

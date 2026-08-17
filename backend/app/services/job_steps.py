@@ -73,30 +73,22 @@ def _step(db: Session, job_id: int, name: str) -> JobStep | None:
 def claim_step(db: Session, job_id: int, name: str, claim_token: str) -> JobStep | None:
     """Atomically claim a pending, failed, cancelled, or orphaned step.
 
-    A RUNNING step is claimable when (a) the same incarnation already owns
-    it (same token — idempotent re-entry), or (b) the claim is orphaned:
-    ``started_at`` is older than ``ORPHANED_CLAIM_TTL_SECONDS``, meaning the
-    owning worker died (Review Round 2 F1). Otherwise None is returned.
+    The claim is ONE conditional UPDATE whose WHERE clause carries the full
+    eligibility predicate (Review Round 2 N1): the row must be pending/
+    failed/cancelled, OR running-and-orphaned (started_at older than
+    ``ORPHANED_CLAIM_TTL_SECONDS``). Because the UPDATE is atomic and
+    rowcount-checked, two concurrent claimers can never both succeed — the
+    loser's WHERE no longer matches after the winner transitions the row.
     """
     from datetime import UTC, datetime as _dt, timedelta as _td
 
     existing = _step(db, job_id, name)
     if existing is None or existing.status in TERMINAL_STATUSES:
         return None
-    if existing.status == JobStepStatus.RUNNING:
-        if existing.claim_token == claim_token:
-            return existing
-        started = existing.started_at
-        if started is not None:
-            age = (_dt.now(UTC).replace(tzinfo=None) - started).total_seconds()
-            if age > ORPHANED_CLAIM_TTL_SECONDS:
-                # Orphaned claim: allow reclamation (attempt bump below).
-                pass
-            else:
-                return None
-        else:
-            return None
+    if existing.status == JobStepStatus.RUNNING and existing.claim_token == claim_token:
+        return existing  # same incarnation re-entry
 
+    orphan_cutoff = _dt.now(UTC).replace(tzinfo=None) - _td(seconds=ORPHANED_CLAIM_TTL_SECONDS)
     statement = (
         update(JobStep)
         .where(
@@ -105,7 +97,6 @@ def claim_step(db: Session, job_id: int, name: str, claim_token: str) -> JobStep
                 JobStepStatus.PENDING,
                 JobStepStatus.FAILED,
                 JobStepStatus.CANCELLED,
-                JobStepStatus.RUNNING,  # orphaned reclamation path
             )),
         )
         .values(
@@ -119,7 +110,29 @@ def claim_step(db: Session, job_id: int, name: str, claim_token: str) -> JobStep
         .execution_options(synchronize_session="fetch")
     )
     if db.execute(statement).rowcount != 1:
-        return None
+        # Either another claimant won (status now RUNNING under a newer
+        # started_at), or the row is RUNNING under a live claim. The only
+        # remaining legal path is orphaned reclamation, which is itself a
+        # single atomic conditional UPDATE (Review Round 2 N1).
+        statement = (
+            update(JobStep)
+            .where(
+                JobStep.id == existing.id,
+                JobStep.status == JobStepStatus.RUNNING,
+                JobStep.started_at < orphan_cutoff,
+            )
+            .values(
+                status=JobStepStatus.RUNNING,
+                attempt=JobStep.attempt + 1,
+                claim_token=claim_token,
+                started_at=_utcnow(),
+                finished_at=None,
+                error_message=None,
+            )
+            .execution_options(synchronize_session="fetch")
+        )
+        if db.execute(statement).rowcount != 1:
+            return None
     db.flush()
     return _step(db, job_id, name)
 

@@ -52,9 +52,14 @@ class TestProcessSlidesExceptionRouting:
         """run_full_pipeline raising RuntimeError returns {"error": ...}, not {"status": "cancelled"}."""
         from app.db.models import ProcessingStatus, ProcessingMode
 
+        from app.db.models import ResourceSlot
+
+        fake_slot = ResourceSlot(sidecar_id="primary", slot_index=0, generation=1)
+
         with patch("app.db.session.SessionLocal") as MockSession, \
              patch("app.services.slide_detection.SlideDetectionService") as MockServiceCls, \
-             patch("app.tasks._resolve_job_llm", return_value=(MagicMock(), "model")), \
+             patch("app.tasks._resolve_provider_for_slot", return_value=(MagicMock(), "model")), \
+             patch("app.tasks._lease_slot_for_job", return_value=fake_slot), \
              patch("app.tasks._add_log"):
 
             mock_db = MagicMock()
@@ -85,11 +90,14 @@ class TestProcessSlidesStalenessGuard:
     """
 
     def _run(self, mock_job, request_id="task-current"):
-        from app.db.models import ProcessingMode
+        from app.db.models import ProcessingMode, ResourceSlot
+
+        fake_slot = ResourceSlot(sidecar_id="primary", slot_index=0, generation=1)
 
         with patch("app.db.session.SessionLocal") as MockSession, \
              patch("app.services.slide_detection.SlideDetectionService") as MockServiceCls, \
-             patch("app.tasks._resolve_job_llm", return_value=(MagicMock(), "model")), \
+             patch("app.tasks._resolve_provider_for_slot", return_value=(MagicMock(), "model")), \
+             patch("app.tasks._lease_slot_for_job", return_value=fake_slot), \
              patch("app.tasks._add_log"):
 
             mock_db = MagicMock()

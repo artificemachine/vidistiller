@@ -1010,13 +1010,15 @@ def summarize_transcript(
                 status_code=status.HTTP_202_ACCEPTED,
                 content={"message": "Summarization already in progress", "job_id": job_id},
             )
-        # force: kill the running task so only one generation proceeds.
-        # Also clear the stale celery_task_id so the newly dispatched task
-        # does not skip itself via the staleness guard (a dead task id from a
-        # lost/redelivered delivery would otherwise block force re-runs).
-        if job.celery_task_id:
-            celery_app.control.revoke(job.celery_task_id, terminate=True, signal="SIGTERM")
+        # force: fence in the DB FIRST (status + stale task id cleared), then
+        # revoke the running task so only one generation proceeds
+        # (Review Round 2 N1/F1: fence-before-revoke).
+        running_task_id = job.celery_task_id
         job.celery_task_id = None
+        job.summarize_status = "processing"
+        db.commit()
+        if running_task_id:
+            celery_app.control.revoke(running_task_id, terminate=True, signal="SIGTERM")
 
     # Dispatch background summarization task (task sets celery_task_id itself)
     summarize_transcript_task.delay(job.id, force)
@@ -1109,16 +1111,14 @@ def cancel_job(
             "Only pending or processing jobs can be cancelled."
         )
 
-    # Fence in the DB FIRST, then revoke the task (Review Round 2 F1/F5):
-    # once the fence is committed, the task's own terminal handling sees
-    # CANCELLED, finishes the admission exactly once and releases the slot;
-    # the revoke merely terminates the in-flight OS process. Reversing the
-    # order let the task race past the status check.
+    # Fence in the DB FIRST, then revoke the task (Review Round 2 F1/F5/N5):
+    # the status transition and the admission release happen in ONE
+    # transaction so a crash cannot leak the active-job counter. The revoke
+    # merely terminates the in-flight OS process.
     running_task_id = job.celery_task_id
     job.status = ProcessingStatus.CANCELLED
     job.error_message = "Cancelled by user"
     job.celery_task_id = None
-    db.commit()
     _finish_job_admission_for_route(db, job.id, failed=True)
     db.commit()
 
