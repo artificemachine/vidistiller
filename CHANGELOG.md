@@ -721,3 +721,6 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - ops(backups): schedule a weekly isolated NAS restore drill that selects the newest signed verified bundle and revalidates immutable, Cosign-verified restore images.
+
+### Removed
+- docs(audits): remove docs/audits/ (12 files, 1483 lines) — dated self-audit reports (job-ready, portfolio-ready, golive, and their progress trackers) that accumulated across three assessment runs in July. Their headline findings are now stale rather than live: the sharp@0.34.5 CVE regression they flagged is patched (^0.35.0), docs/README.my.notes.md (the raw AI-transcript finding) is no longer tracked, the Alembic-vs-startup-create_all dual schema-management path they rated CRITICAL is resolved, and the unconditional /docs+/openapi.json exposure they carried forward across every re-run is gated in production as of this same change set. What remained was 155KB of redundant, overlapping snapshots of the same audit run, not curated documentation — kept nowhere else, but git history preserves the originals if ever needed. Also removes the now-unused `docs/audits/.*` gitleaks allowlist entry (added for a real redaction incident in this directory in July: personal emails and an operator IPv4 were once committed there); the entry has no remaining target.
