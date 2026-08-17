@@ -38,11 +38,161 @@ logger = logging.getLogger(__name__)
 PROBE_TIMEOUT_SECONDS = 3
 STALE_TELEMETRY_SECONDS = 30
 
+# Redis key prefix for the shared telemetry store (WP3-hotfix). The API
+# scheduler publishes snapshots here; EVERY process (API and Celery worker
+# alike) reads through the same store into its own process-local cache, so
+# worker processes see the same inventory the API probed without ever
+# probing sidecars themselves (no sidecar network I/O inside a worker's DB
+# transaction, Review Round 2 F7 preserved).
+TELEMETRY_REDIS_KEY_PREFIX = "vidistiller:sidecar-telemetry:"
+
 # Background telemetry cache (Review Round 2 F7): the inventory is refreshed
 # by the scheduler loop, never probed inside a request transaction.
+# WP3-hotfix: this is now a per-process READ-THROUGH cache over the shared
+# Redis store — the API scheduler writes it via refresh_telemetry_cache,
+# every process (including each Celery worker) lazily re-reads from Redis
+# when a local entry is missing or older than LOCAL_TELEMETRY_CACHE_TTL_SECONDS.
 _telemetry_cache: dict[str, SidecarTelemetry] = {}
 _telemetry_lock = threading.Lock()
 _telemetry_loaded_at: float = 0.0
+_telemetry_local_ts: dict[str, float] = {}  # monotonic per-entry load time
+
+# Lazily-created shared Redis client (decode_responses=True, bounded timeouts).
+_redis_client: Optional[object] = None
+_redis_lock = threading.Lock()
+
+
+def _get_redis() -> object:
+    """Return a bounded shared Redis client for the telemetry store."""
+    global _redis_client
+    if _redis_client is None:
+        with _redis_lock:
+            if _redis_client is None:
+                import redis as _redis
+
+                _redis_client = _redis.from_url(
+                    get_settings().cache.redis_url,
+                    decode_responses=True,
+                    socket_connect_timeout=2,
+                    socket_timeout=2,
+                )
+    return _redis_client
+
+
+def _telemetry_key(registered_id: str) -> str:
+    return f"{TELEMETRY_REDIS_KEY_PREFIX}{registered_id}"
+
+
+def _telemetry_to_dict(t: SidecarTelemetry) -> dict:
+    """Serialize a telemetry row for the shared store (fields only; the
+    ``stale``/``available_slots`` properties are recomputed on read)."""
+    return {
+        "registered_id": t.registered_id,
+        "label": t.label,
+        "base_url": t.base_url,
+        "declared_model": t.declared_model,
+        "capabilities": list(t.capabilities or []),
+        "healthy": t.healthy,
+        "served_models": list(t.served_models or []),
+        "running_requests": t.running_requests,
+        "waiting_requests": t.waiting_requests,
+        "vram_used_mib": t.vram_used_mib,
+        "vram_total_mib": t.vram_total_mib,
+        "cache_hit_rate": t.cache_hit_rate,
+        "reserved_slots": t.reserved_slots,
+        "total_slots": t.total_slots,
+        "observed_at": t.observed_at,
+    }
+
+
+def _telemetry_from_dict(payload: dict) -> Optional[SidecarTelemetry]:
+    """Deserialize a telemetry row from the shared store (fail closed on
+    malformed payloads: return None so callers treat it as no capacity)."""
+    try:
+        return SidecarTelemetry(
+            registered_id=str(payload.get("registered_id", "")),
+            label=str(payload.get("label", "")),
+            base_url=str(payload.get("base_url", "")),
+            declared_model=payload.get("declared_model"),
+            capabilities=list(payload.get("capabilities") or []),
+            healthy=bool(payload.get("healthy", False)),
+            served_models=list(payload.get("served_models") or []),
+            running_requests=int(payload.get("running_requests", 0)),
+            waiting_requests=int(payload.get("waiting_requests", 0)),
+            vram_used_mib=payload.get("vram_used_mib"),
+            vram_total_mib=payload.get("vram_total_mib"),
+            cache_hit_rate=payload.get("cache_hit_rate"),
+            reserved_slots=int(payload.get("reserved_slots", 0)),
+            total_slots=int(payload.get("total_slots", 0)),
+            observed_at=float(payload.get("observed_at", 0.0)),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _publish_telemetry(t: SidecarTelemetry) -> None:
+    """Publish one telemetry row to the shared Redis store (best-effort;
+    failure must never break the API scheduler sweep)."""
+    try:
+        ttl = get_settings().admission.telemetry_redis_ttl_seconds
+        _get_redis().setex(
+            _telemetry_key(t.registered_id), ttl, json.dumps(_telemetry_to_dict(t))
+        )
+    except Exception as exc:
+        logger.warning("telemetry publish failed for %s: %s", t.registered_id, exc)
+
+
+def _read_telemetry_from_redis(registered_id: str) -> Optional[SidecarTelemetry]:
+    """Read one telemetry row from the shared Redis store (bounded, fail
+    closed on any error). Returns None when absent/unreadable/unhealthy —
+    the caller's eligibility checks apply staleness/no-model rules."""
+    try:
+        raw = _get_redis().get(_telemetry_key(registered_id))
+        if not raw:
+            return None
+        payload = json.loads(raw)
+        return _telemetry_from_dict(payload)
+    except Exception as exc:
+        logger.warning("telemetry read failed for %s: %s", registered_id, exc)
+        return None
+
+
+def prefetch_sidecar_telemetry(db: Session) -> None:
+    """Warm this process's local cache from the shared Redis store for all
+    enabled sidecars. Called by capacity-critical paths BEFORE any DB row
+    lock is taken (Review Round 2 F7 invariant: no network I/O while
+    holding a DB transaction/row lock). Safe in every process: the API
+    scheduler refreshes local data directly; workers (and a fresh API after
+    restart) fill their local cache here.
+
+    A FRESH local copy is always kept (never clobbered by a Redis miss): in
+    the API process the scheduler just wrote it; in tests the fixture
+    injected it. Only stale/missing local entries are re-read from Redis,
+    and a Redis miss for those evicts them (fail closed).
+    """
+    ids = [rid for (rid,) in db.query(Sidecar.registered_id).filter(Sidecar.enabled.is_(True)).all()]
+    if not ids:
+        return
+    now = time.monotonic()
+    local_ttl = get_settings().admission.local_telemetry_cache_ttl_seconds
+    for rid in ids:
+        with _telemetry_lock:
+            entry = _telemetry_cache.get(rid)
+            loaded = _telemetry_local_ts.get(rid, 0.0)
+            fresh_local = entry is not None and (now - loaded) < local_ttl
+        if fresh_local:
+            continue  # fresh local copy — no Redis round trip, never evict
+        t = _read_telemetry_from_redis(rid)
+        if t is not None:
+            with _telemetry_lock:
+                _telemetry_cache[rid] = t
+                _telemetry_local_ts[rid] = time.monotonic()
+        else:
+            # Fail closed for this process: an absent/unreadable shared row
+            # must not leave a stale local copy serving as capacity.
+            with _telemetry_lock:
+                _telemetry_cache.pop(rid, None)
+                _telemetry_local_ts.pop(rid, None)
 
 
 def refresh_telemetry_cache(db: Session) -> None:
@@ -51,7 +201,9 @@ def refresh_telemetry_cache(db: Session) -> None:
     Called by the periodic scheduler (never inside a request handler). The
     registry/slot reads are committed (transaction closed) BEFORE any
     network probe so no DB connection is held across external I/O
-    (Review Round 2 F7).
+    (Review Round 2 F7). WP3-hotfix: after probing, the fresh snapshot is
+    PUBLISHED to the shared Redis store so every process (API and Celery
+    workers) reads the same inventory.
     """
     global _telemetry_loaded_at
     settings = get_settings().admission
@@ -80,6 +232,12 @@ def refresh_telemetry_cache(db: Session) -> None:
         _telemetry_cache.clear()
         _telemetry_cache.update(fresh)
         _telemetry_loaded_at = time.time()
+        now_mono = time.monotonic()
+        for rid in fresh:
+            _telemetry_local_ts[rid] = now_mono
+    # WP3-hotfix: publish the snapshot to the shared store (best-effort).
+    for telemetry in fresh.values():
+        _publish_telemetry(telemetry)
 
 
 def get_sidecar_telemetry_status(registered_id: str) -> str:
@@ -90,9 +248,11 @@ def get_sidecar_telemetry_status(registered_id: str) -> str:
     the cache has never loaded (scheduler not yet run) — treated as 'ok'
     for the preference gate only if the registry row exists, but the task
     incarnation still requires a live slot lease before external work.
+    WP3-hotfix: read-through, so a fresh process (API after restart, or any
+    worker) resolves against the shared Redis store instead of an empty
+    local cache.
     """
-    with _telemetry_lock:
-        telemetry = _telemetry_cache.get(registered_id)
+    telemetry = cached_sidecar_telemetry(registered_id)
     if telemetry is None:
         return "unknown"
     if not telemetry.healthy:
@@ -105,9 +265,28 @@ def get_sidecar_telemetry_status(registered_id: str) -> str:
 
 
 def cached_sidecar_telemetry(registered_id: str) -> Optional[SidecarTelemetry]:
-    """Return the cached telemetry row, or None when never loaded."""
+    """Return the telemetry row for a sidecar: fresh process-local copy
+    first, then the shared Redis store (WP3-hotfix). Fail closed: returns
+    None when the local copy is missing/stale and the shared store has
+    nothing readable."""
+    local_ttl = get_settings().admission.local_telemetry_cache_ttl_seconds
+    now = time.monotonic()
     with _telemetry_lock:
-        return _telemetry_cache.get(registered_id)
+        entry = _telemetry_cache.get(registered_id)
+        loaded = _telemetry_local_ts.get(registered_id, 0.0)
+        if entry is not None and (now - loaded) < local_ttl:
+            return entry
+    # Miss or stale local copy -> read through the shared store.
+    t = _read_telemetry_from_redis(registered_id)
+    if t is not None:
+        with _telemetry_lock:
+            _telemetry_cache[registered_id] = t
+            _telemetry_local_ts[registered_id] = time.monotonic()
+        return t
+    with _telemetry_lock:
+        _telemetry_cache.pop(registered_id, None)
+        _telemetry_local_ts.pop(registered_id, None)
+    return None
 
 
 @dataclass
@@ -270,10 +449,12 @@ def _first_metric_value(line: str) -> int:
 
 
 def inventory(db: Session) -> list[SidecarTelemetry]:
-    """Live inventory of all enabled sidecars from the background cache.
+    """Live inventory of all enabled sidecars from the shared telemetry
+    store (WP3-hotfix: read-through, so this is consistent across API and
+    worker processes).
 
     Request paths call this without probing (Review Round 2 F7): the
-    scheduler refreshes the cache; stale telemetry fails closed for new
+    scheduler refreshes the store; stale telemetry fails closed for new
     allocations. Reserved-slot counts are re-read cheaply from the DB here
     (one indexed query, no network).
     """
@@ -293,10 +474,8 @@ def inventory(db: Session) -> list[SidecarTelemetry]:
         )
 
     result: list[SidecarTelemetry] = []
-    with _telemetry_lock:
-        cache_snapshot = dict(_telemetry_cache)
     for sidecar in rows:
-        telemetry = cache_snapshot.get(sidecar.registered_id)
+        telemetry = cached_sidecar_telemetry(sidecar.registered_id)
         if telemetry is None:
             telemetry = SidecarTelemetry(
                 registered_id=sidecar.registered_id,

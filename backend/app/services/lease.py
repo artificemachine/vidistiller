@@ -82,7 +82,18 @@ def acquire_slot(
     lane. Returns the acquired slot or None when no compatible slot is free.
     """
     settings = get_settings().admission
-    from app.services.sidecar import cached_sidecar_telemetry, get_sidecar
+    from app.services.sidecar import (
+        cached_sidecar_telemetry,
+        get_sidecar,
+        prefetch_sidecar_telemetry,
+    )
+
+    # WP3-hotfix: warm this process's local cache from the shared Redis
+    # store BEFORE taking any row lock, so the eligibility loop below never
+    # performs network I/O while holding DB row locks (Review Round 2 F7
+    # invariant). In the Celery worker this is what makes telemetry visible
+    # at all — the API scheduler published it; the worker reads it through.
+    prefetch_sidecar_telemetry(db)
 
     def _eligible(sidecar_id: str) -> bool:
         sidecar = get_sidecar(db, sidecar_id)

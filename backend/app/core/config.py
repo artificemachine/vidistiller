@@ -470,6 +470,16 @@ class AdmissionSettings(BaseSettings):
     sweep_interval_seconds: int = Field(default=30, validation_alias="ADMISSION_SWEEP_INTERVAL_SECONDS")
     # Number of slots per sidecar (capacity lane).
     slots_per_sidecar: int = Field(default=1, validation_alias="SIDECAR_SLOTS")
+    # WP3-hotfix: sidecar telemetry is shared across the API and Celery
+    # worker processes through Redis (the API scheduler probes and publishes;
+    # every worker process reads through the shared store into its own local
+    # cache). TTL bounds how long a published snapshot survives in Redis after
+    # the API dies; the local cache TTL bounds how often a worker re-reads
+    # Redis (short, so a re-read is at most a few seconds stale vs the shared
+    # store). Staleness/fail-closed semantics are unchanged: any entry older
+    # than STALE_TELEMETRY_SECONDS is rejected at the eligibility checks.
+    telemetry_redis_ttl_seconds: int = Field(default=120, validation_alias="TELEMETRY_REDIS_TTL_SECONDS")
+    local_telemetry_cache_ttl_seconds: int = Field(default=5, validation_alias="LOCAL_TELEMETRY_CACHE_TTL_SECONDS")
 
     model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
 

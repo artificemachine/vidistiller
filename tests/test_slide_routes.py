@@ -130,7 +130,7 @@ from app.db.models import ProcessingJob, ProcessingStatus
 def _mk_slide_job(test_db, test_user, video_file_path="/tmp/fake.mp4"):
     """Create a minimal slide-aware ProcessingJob for task unit tests."""
     from app.db.models import ResourceSlot, Sidecar
-    from app.services.sidecar import SidecarTelemetry, _telemetry_cache, _telemetry_lock
+    from app.services.sidecar import SidecarTelemetry, _telemetry_cache, _telemetry_local_ts, _telemetry_lock
 
     if test_db.query(Sidecar).filter(Sidecar.registered_id == "primary").first() is None:
         test_db.add(
@@ -157,6 +157,9 @@ def _mk_slide_job(test_db, test_user, video_file_path="/tmp/fake.mp4"):
             served_models=["test-model"],
             observed_at=_time.time(),
         )
+        # Mark the injected entry as freshly loaded (WP3-hotfix local-ts
+        # bookkeeping) so the read-through cache serves it directly.
+        _telemetry_local_ts["primary"] = _time.monotonic()
     job = ProcessingJob(
         job_id=f"slide-test-{os.urandom(4).hex()}",
         status=ProcessingStatus.PENDING,

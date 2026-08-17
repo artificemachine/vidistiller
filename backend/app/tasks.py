@@ -193,7 +193,18 @@ def _resolve_provider_for_slot(db, slot):
     N3/N8).
     """
     from app.services.llm_providers import build_provider
-    from app.services.sidecar import cached_sidecar_telemetry, get_sidecar
+    from app.services.sidecar import (
+        cached_sidecar_telemetry,
+        get_sidecar,
+        prefetch_sidecar_telemetry,
+    )
+
+    # WP3-hotfix: warm this worker process's local telemetry cache from the
+    # shared Redis store before any DB read, so this function never performs
+    # network I/O while holding a DB transaction/row lock (Review Round 2 F7
+    # invariant) and so the leased sidecar's telemetry is visible across the
+    # process boundary.
+    prefetch_sidecar_telemetry(db)
 
     sidecar = get_sidecar(db, slot.sidecar_id)
     if sidecar is None:
