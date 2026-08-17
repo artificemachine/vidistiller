@@ -605,6 +605,11 @@ def test_malformed_telemetry_fails_closed(cross_process_env):
         {"vram_used_mib": "abc"},  # string for nullable int
         {"cache_hit_rate": "0.9"},  # string for nullable float
         {"vram_total_mib": True},  # bool for nullable int
+        {"cache_hit_rate": float("nan")},  # actual NaN float
+        {"cache_hit_rate": float("inf")},  # positive infinity
+        {"cache_hit_rate": float("-inf")},  # negative infinity
+        {"capabilities": None},  # capabilities REQUIRED, not null
+        {"capabilities": []},  # empty capabilities list
     ]
     for overrides in malformed:
         _publish_raw(_valid_payload(**overrides))

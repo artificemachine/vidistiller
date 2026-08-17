@@ -141,11 +141,14 @@ def _telemetry_from_dict(payload: dict) -> Optional[SidecarTelemetry]:
 
         if not math.isfinite(observed_at):  # NaN/Inf would evade staleness
             return None
-        if capabilities is not None and (
+        if capabilities is None:
+            return None  # capabilities is REQUIRED (strict fail-closed)
+        if (
             not isinstance(capabilities, list)
+            or not capabilities
             or not all(isinstance(c, str) and c for c in capabilities)
         ):
-            return None
+            return None  # empty list also rejected (vacuously-true all())
         return SidecarTelemetry(
             registered_id=registered_id,
             label=label,
@@ -196,7 +199,12 @@ def _strict_float(value, nullable: bool = False) -> Optional[float]:
         raise TypeError("missing required number")
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"expected number, got {type(value).__name__}")
-    return float(value)
+    result = float(value)
+    import math
+
+    if not math.isfinite(result):  # NaN/±Inf must never deserialize
+        raise ValueError("non-finite number")
+    return result
 
 
 def _publish_telemetry(t: SidecarTelemetry) -> None:
