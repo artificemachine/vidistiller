@@ -1093,11 +1093,13 @@ def cancel_job(
 
     # Allow cancelling an in-progress summarization on a completed job
     if job.summarize_status == "processing":
-        if job.celery_task_id:
-            celery_app.control.revoke(job.celery_task_id, terminate=True, signal="SIGTERM")
+        running_task_id = job.celery_task_id
+        # Fence in the DB first, then revoke (Review Round 2 F1).
         job.summarize_status = "failed"
         job.celery_task_id = None
         db.commit()
+        if running_task_id:
+            celery_app.control.revoke(running_task_id, terminate=True, signal="SIGTERM")
         db.refresh(job)
         return JobStatusResponse.model_validate(job)
 
@@ -1165,6 +1167,11 @@ def delete_job(
     if job.status in (ProcessingStatus.PROCESSING, ProcessingStatus.PENDING):
         raise ValidationException(
             "Cannot delete an active job. Cancel it first (POST /jobs/{id}/cancel)."
+        )
+    if job.summarize_status == "processing":
+        raise ValidationException(
+            "Cannot delete a job with an in-progress summarization. "
+            "Cancel it first (POST /jobs/{id}/cancel)."
         )
 
     # Belt-and-braces admission release for terminal-but-unfinished rows

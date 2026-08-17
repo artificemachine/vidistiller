@@ -23,6 +23,12 @@ TERMINAL_STATUSES = frozenset({
     JobStepStatus.SKIPPED,
 })
 
+# A RUNNING step whose claim is older than this is presumed orphaned (the
+# worker died without completing/acking — Review Round 2 F1). Redelivery can
+# then reclaim it instead of skipping forever. Must comfortably exceed the
+# longest task hard limit (CELERY_TASK_TIME_LIMIT, default 7200s).
+ORPHANED_CLAIM_TTL_SECONDS = 7200
+
 
 def _utcnow() -> datetime:
     """Return a UTC timestamp while retaining the project's naive DB columns."""
@@ -65,12 +71,31 @@ def _step(db: Session, job_id: int, name: str) -> JobStep | None:
 
 
 def claim_step(db: Session, job_id: int, name: str, claim_token: str) -> JobStep | None:
-    """Atomically claim a pending, failed, or cancelled step for one worker."""
+    """Atomically claim a pending, failed, cancelled, or orphaned step.
+
+    A RUNNING step is claimable when (a) the same incarnation already owns
+    it (same token — idempotent re-entry), or (b) the claim is orphaned:
+    ``started_at`` is older than ``ORPHANED_CLAIM_TTL_SECONDS``, meaning the
+    owning worker died (Review Round 2 F1). Otherwise None is returned.
+    """
+    from datetime import UTC, datetime as _dt, timedelta as _td
+
     existing = _step(db, job_id, name)
     if existing is None or existing.status in TERMINAL_STATUSES:
         return None
     if existing.status == JobStepStatus.RUNNING:
-        return existing if existing.claim_token == claim_token else None
+        if existing.claim_token == claim_token:
+            return existing
+        started = existing.started_at
+        if started is not None:
+            age = (_dt.now(UTC).replace(tzinfo=None) - started).total_seconds()
+            if age > ORPHANED_CLAIM_TTL_SECONDS:
+                # Orphaned claim: allow reclamation (attempt bump below).
+                pass
+            else:
+                return None
+        else:
+            return None
 
     statement = (
         update(JobStep)
@@ -80,6 +105,7 @@ def claim_step(db: Session, job_id: int, name: str, claim_token: str) -> JobStep
                 JobStepStatus.PENDING,
                 JobStepStatus.FAILED,
                 JobStepStatus.CANCELLED,
+                JobStepStatus.RUNNING,  # orphaned reclamation path
             )),
         )
         .values(

@@ -97,6 +97,38 @@ def _mint_exec_uuid() -> str:
     return str(_uuid.uuid4())
 
 
+def _test_barrier(db, job_id: int, stage: str, claimed: bool) -> None:
+    """Deterministic worker-kill barrier for the redelivery test (F12).
+
+    Enabled only when VIDISTILLER_TEST_BARRIER_DIR is set (test env). After
+    a step claim, the worker writes a marker file recording the claim and
+    blocks until the ``release`` file appears or BARRIER_TIMEOUT (default
+    120s) elapses. The test kills the worker while blocked, then starts a
+    fresh worker; the redelivered message must NOT re-run the step.
+    """
+    barrier_dir = os.environ.get("VIDISTILLER_TEST_BARRIER_DIR")
+    if not barrier_dir:
+        return
+    if not claimed:
+        # Fenced-out redelivery: never block — it must skip and finish.
+        return
+    import time as _time
+    from pathlib import Path as _Path
+
+    barrier = _Path(barrier_dir)
+    marker = barrier / f"claimed-{job_id}-{stage}"
+    release = barrier / f"release-{job_id}-{stage}"
+    with marker.open("w") as fh:
+        fh.write(f"claimed={claimed} at={_time.time()}\n")
+    timeout = float(os.environ.get("VIDISTILLER_TEST_BARRIER_TIMEOUT", "120"))
+    deadline = _time.time() + timeout
+    while not release.exists():
+        if _time.time() > deadline:
+            logger.warning("test barrier timed out for job %s stage %s", job_id, stage)
+            return
+        _time.sleep(0.2)
+
+
 def _finish_admission_for_job(db, job_id: int, *, failed: bool = False) -> None:
     """Release admission counters exactly once for a terminal job (WP2)."""
     try:
@@ -190,6 +222,37 @@ class SidecarCapacityExhausted(Exception):
     row, and retries with a bounded countdown instead of overcommitting the
     GPU or failing ambiguously (Review Round 2 F3/F6).
     """
+
+
+def _record_capacity_queue_reason(db, job) -> None:
+    """Record the visible queue reason on the admission row (Review Round 2 F6)."""
+    try:
+        if db.bind.dialect.name == "postgresql":
+            db.execute(
+                text(
+                    "UPDATE job_admissions SET queue_reason = :reason, "
+                    "updated_at = now() WHERE job_id = :job_id AND state = 'admitted'"
+                ),
+                {
+                    "reason": "no sidecar slot available (queued on capacity)",
+                    "job_id": job.id,
+                },
+            )
+        else:
+            db.execute(
+                text(
+                    "UPDATE job_admissions SET queue_reason = :reason "
+                    "WHERE job_id = :job_id AND state = 'admitted'"
+                ),
+                {
+                    "reason": "no sidecar slot available (queued on capacity)",
+                    "job_id": job.id,
+                },
+            )
+        db.commit()
+    except Exception as exc:
+        logger.warning("could not record capacity queue reason for job %s: %s", job.id, exc)
+        db.rollback()
 
 
 # ==============================================================================
@@ -526,6 +589,12 @@ def process_transcript(self, job_id: int):
         if steps_enabled and transcribe_claim is None:
             return {"job_id": job_id, "status": "skipped", "reason": "transcribe step is not retryable"}
 
+        # Fault-injection barrier (tests only): when VIDISTILLER_TEST_BARRIER
+        # is set, the worker records the claim and blocks until the barrier
+        # file appears or the timeout elapses. Lets the redelivery test kill
+        # the worker mid-execution deterministically (Review Round 2 F12).
+        _test_barrier(db, job_id, "transcribe", transcribe_claim is not None)
+
         # 3. Try platform-native captions first, then yt-dlp subtitles
         transcript_text = None
         source = "yt_dlp_captions"
@@ -553,6 +622,8 @@ def process_transcript(self, job_id: int):
             job.error_message = "No transcript could be generated"
             if transcribe_claim:
                 fail_step(db, job.id, "transcribe", exec_uuid, "No transcript could be generated")
+            db.commit()
+            _finish_admission_for_job(db, job_id, failed=True)
             db.commit()
             return {"error": "Empty transcript"}
 
@@ -629,6 +700,8 @@ def process_transcript(self, job_id: int):
         job.status = ProcessingStatus.COMPLETED
         job.celery_task_id = None
         db.commit()
+        _finish_admission_for_job(db, job_id)
+        db.commit()
         _add_log(db, job_id, "Job completed successfully", "info", "complete")
 
         logger.info(f"Job {job_id} completed: transcript saved ({len(transcript_text)} chars, source={source})")
@@ -646,10 +719,11 @@ def process_transcript(self, job_id: int):
                 db.commit()
         except Exception:
             pass
-        # Do NOT finish admission on an intermediate retry: the job is still
-        # active (Review Round 2 F5). Only the final exhausted retry releases
-        # the active-job slot, and that happens in the route-level terminal
-        # handling (see cancel/delete paths) or via the reconciliation sweep.
+        if self.request.retries >= self.max_retries:
+            # Retries exhausted: this is a terminal failure — release the
+            # active-job admission exactly once (Review Round 2 F5).
+            _finish_admission_for_job(db, job_id, failed=True)
+            db.commit()
         raise self.retry(exc=e, countdown=30)
     finally:
         db.close()
@@ -770,6 +844,9 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
     exec_uuid = _mint_exec_uuid()
     db = SessionLocal()
     summarize_claimed = False
+    slot = None
+    heartbeat_stop = None
+    heartbeat_thread = None
     try:
         from app.db.models import User
         from app.core.crypto import decrypt_field
@@ -812,6 +889,55 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         job.summarize_status = "processing"
         db.commit()
         _add_log(db, job_id, "Starting LLM summarization...", "info", "summarize")
+        _mark_stage_delivered(db, job_id, "summarize")
+
+        # WP2/WP3 (Review Round 2 F3/F6): summarization performs external LLM
+        # work and therefore REQUIRES a sidecar slot lease under this
+        # incarnation's exec_uuid. No slot -> visible capacity reason and a
+        # bounded retry, never unleased sidecar work.
+        slot = _lease_slot_for_job(db, job, exec_uuid)
+        if slot is None:
+            _record_capacity_queue_reason(db, job)
+            logger.info(
+                "Summarize: job %s has no sidecar slot; retrying on capacity", job_id
+            )
+            raise SidecarCapacityExhausted(job_id)
+        _add_log(
+            db, job_id,
+            f"Acquired sidecar slot {slot.sidecar_id}#{slot.slot_index} (gen {slot.generation})",
+            "info", "summarize_lease",
+        )
+
+        heartbeat_stop = threading.Event()
+
+        def _heartbeat_loop() -> None:
+            from app.db.session import SessionLocal as _SL
+            from app.services.lease import heartbeat_slot
+
+            interval = get_settings().admission.heartbeat_interval_seconds
+            while not heartbeat_stop.wait(interval):
+                try:
+                    hb_db = _SL()
+                    try:
+                        ok = heartbeat_slot(
+                            hb_db, slot.id, exec_uuid, slot.generation
+                        )
+                        hb_db.commit()
+                        if not ok:
+                            logger.error(
+                                "Slot %s heartbeat rejected (stale fence); stopping further sidecar work",
+                                slot.id,
+                            )
+                            heartbeat_stop.set()
+                    finally:
+                        hb_db.close()
+                except Exception as exc:
+                    logger.warning("slot heartbeat failed: %s", exc)
+
+        heartbeat_thread = threading.Thread(
+            target=_heartbeat_loop, name=f"summ-hb-{job_id}", daemon=True
+        )
+        heartbeat_thread.start()
 
         # Read the owner preference only for language selection. The concrete
         # endpoint is resolved after the transcript length is known so context
@@ -837,16 +963,25 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
         from app.services.llm_fleet import LLMTask
         from app.services.llm_providers import build_provider
 
-        resolved = _resolve_job_llm_config(
-            db,
-            job,
-            LLMTask.LONG_ANALYSIS,
-            required_context_tokens_for_transcript(transcript_text),
-        )
-        provider_name = resolved.provider_name
-        _resolved_model = resolved.model
-        ollama_url = resolved.base_url
-        api_key = resolved.api_key
+        # WP3 (Review Round 2 F6): bind the provider to the LEASED sidecar's
+        # registry endpoint + live served model, not the generic resolver.
+        provider, _model = _resolve_provider_for_slot(db, slot)
+        if provider is not None:
+            provider_name = "vllm"
+            _resolved_model = _model
+            ollama_url = slot and None or None
+            api_key = None
+        else:
+            resolved = _resolve_job_llm_config(
+                db,
+                job,
+                LLMTask.LONG_ANALYSIS,
+                required_context_tokens_for_transcript(transcript_text),
+            )
+            provider_name = resolved.provider_name
+            _resolved_model = resolved.model
+            ollama_url = resolved.base_url
+            api_key = resolved.api_key
 
         # Build snapshot image URLs
         _data_dir = get_settings().storage.data_dir or str(Path(__file__).resolve().parent.parent / "data")
@@ -992,7 +1127,21 @@ def summarize_transcript_task(self, job_id: int, force: bool = False):
             pass
         return {"error": str(e)}
 
+    except SidecarCapacityExhausted:
+        logger.info("Summarize: job %s queued on sidecar capacity", job_id)
+        raise self.retry(exc=SidecarCapacityExhausted(str(job_id)), countdown=60)
+
     finally:
+        if heartbeat_thread is not None:
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=5)
+        if slot is not None:
+            try:
+                _release_slot_if_held(db, slot, exec_uuid)
+                db.commit()
+            except Exception as exc:
+                logger.warning("summarize slot release failed: %s", exc)
+                db.rollback()
         db.close()
 
 
@@ -1027,7 +1176,6 @@ def process_snapshots(self, job_id: int):
         _data_dir = get_settings().storage.data_dir or str(
             Path(__file__).resolve().parent.parent / "data"
         )
-        exec_uuid = _mint_exec_uuid()
         _mark_stage_delivered(db, job_id, "snapshots")
 
         def _progress(percent: int) -> None:
@@ -1110,13 +1258,6 @@ def process_slides(self, job_id: int):
         heartbeat_stop = threading.Event()
         heartbeat_thread = None
 
-        if _has_persisted_steps(job):
-            from app.services.job_steps import claim_step
-
-            slide_claimed = claim_step(db, job.id, "slides", exec_uuid) is not None
-            if not slide_claimed:
-                return {"status": "skipped", "reason": "slides step is not retryable"}
-
         # Staleness guard against redelivered executions: slide detection
         # legitimately runs 30-45+ min (SSIM scan + LLM classification),
         # longer than Redis' default broker visibility timeout, so a still-
@@ -1145,13 +1286,35 @@ def process_slides(self, job_id: int):
             _add_log(db, job_id, "No video file for slide detection", "error", "slide_detect")
             job.status = ProcessingStatus.COMPLETED
             job.slide_status = "skipped"
-            if slide_claimed:
-                from app.services.job_steps import fail_step
-                fail_step(db, job.id, "slides", exec_uuid, "No video file")
             db.commit()
             _finish_admission_for_job(db, job_id)
             db.commit()
             return {"error": "No video file"}
+
+        # WP2/WP3 (Review Round 2 F1/F3): external sidecar work REQUIRES a
+        # slot lease acquired by THIS incarnation under its exec_uuid, and
+        # the step claim comes AFTER the lease so a no-capacity retry never
+        # leaves a RUNNING claim owned by a dead incarnation. No slot -> the
+        # job waits visibly (admission reason recorded) and the task retries
+        # with a bounded countdown; it never runs unleased.
+        slot = _lease_slot_for_job(db, job, exec_uuid)
+        if slot is None:
+            _record_capacity_queue_reason(db, job)
+            logger.info(
+                "Slide task: job %s has no sidecar slot; retrying on capacity", job_id
+            )
+            raise SidecarCapacityExhausted(job_id)
+
+        if _has_persisted_steps(job):
+            from app.services.job_steps import claim_step
+
+            slide_claimed = claim_step(db, job.id, "slides", exec_uuid) is not None
+            if not slide_claimed:
+                # Lost the claim to another incarnation; release the lease
+                # we just took so capacity is not held pointlessly.
+                _release_slot_if_held(db, slot, exec_uuid)
+                db.commit()
+                return {"status": "skipped", "reason": "slides step is not retryable"}
 
         # Mark as processing and store Celery task ID for cancellation
         job.status = ProcessingStatus.PROCESSING
@@ -1160,43 +1323,6 @@ def process_slides(self, job_id: int):
         _add_log(db, job_id, "Starting slide detection pipeline...", "info", "slide_detect")
         _mark_stage_delivered(db, job_id, "slides")
 
-        # WP2/WP3 (Review Round 2 F3/F6): external sidecar work REQUIRES a
-        # slot lease acquired by THIS incarnation under its exec_uuid. No
-        # slot -> the job waits visibly (admission reason recorded) and the
-        # task retries with a bounded countdown; it never runs unleased.
-        slot = _lease_slot_for_job(db, job, exec_uuid)
-        if slot is None:
-            from app.db.models import JobAdmission
-
-            if db.bind.dialect.name == "postgresql":
-                db.execute(
-                    text(
-                        "UPDATE job_admissions SET queue_reason = :reason, "
-                        "updated_at = now() WHERE job_id = :job_id AND state = 'admitted'"
-                    ),
-                    {
-                        "reason": "no sidecar slot available (queued on capacity)",
-                        "job_id": job.id,
-                    },
-                )
-            else:
-                from datetime import UTC, datetime as _dt
-
-                db.execute(
-                    text(
-                        "UPDATE job_admissions SET queue_reason = :reason "
-                        "WHERE job_id = :job_id AND state = 'admitted'"
-                    ),
-                    {
-                        "reason": "no sidecar slot available (queued on capacity)",
-                        "job_id": job.id,
-                    },
-                )
-            db.commit()
-            logger.info(
-                "Slide task: job %s has no sidecar slot; retrying on capacity", job_id
-            )
-            raise SidecarCapacityExhausted(job_id)
         _add_log(
             db, job_id,
             f"Acquired sidecar slot {slot.sidecar_id}#{slot.slot_index} (gen {slot.generation})",

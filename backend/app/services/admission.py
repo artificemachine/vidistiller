@@ -159,13 +159,17 @@ def admit_or_queue_job(
     exec_uuid = exec_uuid or str(uuid.uuid4())
 
     # 0. Fail-closed explicit preference check against live telemetry: an
-    # unavailable/full preferred sidecar queues the job with a visible
-    # reason instead of silently running elsewhere (WP3 / Review Round 2 F6).
+    # unavailable/full/unprobed preferred sidecar queues the job with a
+    # visible reason instead of silently running elsewhere (WP3 /
+    # Review Round 2 F6). Unknown (never probed) also fails closed: after
+    # the startup maintenance refresh, unknown means the sidecar is not
+    # confirmed capable — and an explicit preference must never silently
+    # fall through to a different lane.
     if preferred_sidecar:
         from app.services.sidecar import get_sidecar_telemetry_status
 
         status = get_sidecar_telemetry_status(preferred_sidecar)
-        if status in ("unhealthy", "stale", "no_capacity"):
+        if status in ("unhealthy", "stale", "no_capacity", "unknown"):
             _write_admission(
                 db,
                 job.id,
@@ -266,21 +270,29 @@ def sync_admission_limits(db: Session) -> None:
 
     The row is the runtime authority; this makes operator config changes
     effective for NEW limits without touching active counts. Called from
-    the API startup maintenance sweep.
+    the API startup maintenance sweep. Updates the global row AND every
+    existing per-user row so a limit change applies fleet-wide
+    (Review Round 2 new finding).
     """
     settings = get_settings().admission
-    for key, limit in (
-        (GLOBAL_COUNTER_KEY, settings.global_active_limit),
-        (user_counter_key(0), settings.per_user_active_limit),
-    ):
-        _ensure_counter(db, key, limit)
-        db.execute(
-            text(
-                "UPDATE admission_counters SET \"limit\" = :l, updated_at = now() "
-                "WHERE key = :k"
-            ),
-            {"k": key, "l": limit},
-        )
+    # Global.
+    global_counter = _ensure_counter(db, GLOBAL_COUNTER_KEY, settings.global_active_limit)
+    db.execute(
+        text(
+            "UPDATE admission_counters SET \"limit\" = :l, updated_at = now() "
+            "WHERE key = :k"
+        ),
+        {"k": GLOBAL_COUNTER_KEY, "l": settings.global_active_limit},
+    )
+    # Every existing per-user counter row (user:<id>) gets the configured
+    # per-user limit; new users are seeded on first admission.
+    db.execute(
+        text(
+            "UPDATE admission_counters SET \"limit\" = :l, updated_at = now() "
+            "WHERE key LIKE 'user:%'"
+        ),
+        {"l": settings.per_user_active_limit},
+    )
     db.commit()
 
 
@@ -367,7 +379,7 @@ def enqueue_first_stage(
 def mark_outbox_published(db: Session, outbox_id: int) -> None:
     db.execute(
         update(TaskOutbox)
-        .where(TaskOutbox.id == outbox_id, TaskOutbox.state == "pending")
+        .where(TaskOutbox.id == outbox_id, TaskOutbox.state.in_(("pending", "publishing")))
         .values(state="published", published_at=_utcnow())
     )
 
@@ -381,10 +393,11 @@ def mark_outbox_delivered(db: Session, outbox_id: int) -> None:
 
 
 def pending_outbox_rows(db: Session, limit: int = 50) -> list[TaskOutbox]:
-    """Return pending outbox rows oldest-first for the publish sweep."""
+    """Return pending (and publishing, i.e. claimed-but-unpublished) outbox
+    rows oldest-first for the publish sweep."""
     return (
         db.query(TaskOutbox)
-        .filter(TaskOutbox.state == "pending")
+        .filter(TaskOutbox.state.in_(("pending", "publishing")))
         .order_by(TaskOutbox.created_at)
         .limit(limit)
         .all()

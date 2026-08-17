@@ -90,7 +90,8 @@ def celery_env(tmp_path_factory):
     env["CELERY_TASK_TIME_LIMIT"] = "120"
     env["VIDISTILLER_TEST_BARRIER_DIR"] = str(barrier_dir)
 
-    # Seed user + job + one slot.
+    # Seed user + slot once; each test creates its own fresh job via the
+    # returned factory so tests never share step state (Review Round 2 F12).
     db = SessionLocal()
     user = User(
         username="celery_race",
@@ -109,24 +110,34 @@ def celery_env(tmp_path_factory):
         )
     )
     db.add(ResourceSlot(sidecar_id="primary", slot_index=0))
-    job = ProcessingJob(
-        job_id=str(uuid.uuid4()),
-        status="pending",
-        video_url="https://example.com/v",
-        user_id=user.id,
-        processing_mode="slide_aware",
-    )
-    db.add(job)
     db.commit()
-    db.refresh(job)
-    job_id = job.id
-    from app.services.job_steps import seed_job_steps
+    user_id = user.id
 
-    seed_job_steps(db, job, extract_snapshots=False, is_slide_mode=True)
-    db.commit()
+    def make_job() -> int:
+        """Create a fresh slide-aware job with seeded steps; returns job id."""
+        from app.services.job_steps import seed_job_steps
+
+        d = SessionLocal()
+        try:
+            job = ProcessingJob(
+                job_id=str(uuid.uuid4()),
+                status="pending",
+                video_url="https://example.com/v",
+                user_id=user_id,
+                processing_mode="slide_aware",
+            )
+            d.add(job)
+            d.commit()
+            d.refresh(job)
+            seed_job_steps(d, job, extract_snapshots=False, is_slide_mode=True)
+            d.commit()
+            return job.id
+        finally:
+            d.close()
+
     db.close()
 
-    yield {"env": env, "job_id": job_id, "barrier_dir": str(barrier_dir)}
+    yield {"env": env, "make_job": make_job, "barrier_dir": str(barrier_dir)}
 
     # Cleanup worker if still running.
     try:
@@ -144,14 +155,14 @@ def _start_worker(env):
             "-A",
             "app.tasks",
             "worker",
-            "--loglevel=WARNING",
+            "--loglevel=INFO",
             "--concurrency=1",
             "--pool=solo",
         ],
         cwd=str(Path(__file__).resolve().parents[1] / "backend"),
         env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=open("/tmp/celery-worker.log", "w"),
+        stderr=subprocess.STDOUT,
     )
     return proc
 
@@ -162,7 +173,7 @@ def test_late_ack_redelivery_cannot_duplicate_work(celery_env):
     from app.services.job_steps import claim_step
 
     env = celery_env["env"]
-    job_id = celery_env["job_id"]
+    job_id = celery_env["make_job"]()
     barrier_dir = Path(celery_env["barrier_dir"])
 
     # First incarnation claims the step and blocks at a barrier (simulating a
@@ -202,52 +213,97 @@ def test_late_ack_redelivery_cannot_duplicate_work(celery_env):
 
 
 def test_worker_process_redelivery_real(celery_env):
-    """End-to-end: submit the real task to Redis, kill the worker mid-run,
-    restart it, and observe the redelivery is absorbed (task completes once)."""
+    """End-to-end worker-loss: the real task claims and blocks at the
+    fault-injection barrier; the worker is SIGKILLed before ack; the
+    redelivered execution must NOT create a second concurrent claim — the
+    step is either still fenced (running claim) or reclaimed once after the
+    dead worker's transaction rolled back. Either way exactly one committed
+    attempt exists and no duplicate work is recorded (Review Round 2 F12)."""
     import redis as _redis
 
     env = celery_env["env"]
-    job_id = celery_env["job_id"]
+    job_id = celery_env["make_job"]()
     barrier_dir = Path(celery_env["barrier_dir"])
-    start_barrier = barrier_dir / "started"
-    release_barrier = barrier_dir / "release"
+    marker = barrier_dir / f"claimed-{job_id}-transcribe"
+    release = barrier_dir / f"release-{job_id}-transcribe"
 
-    # Instrument: the real process_transcript task reads VIDISTILLER_TEST_
-    # BARRIER_DIR and blocks between transcribe claim and completion.
-    # (The task itself is not modified; we test fencing at the claim layer
-    # directly in the other test. Here we verify the worker survives a kill
-    # and the broker redelivers without corruption.)
     from app.tasks import process_transcript
 
     client = _redis.from_url(REDIS_URL, decode_responses=True)
     client.flushdb()
 
-    # Launch worker.
-    worker = _start_worker(env)
-    time.sleep(3)
+    # Worker 1: picks up the task, claims the step, blocks at the barrier.
+    worker1 = _start_worker(env)
     try:
+        time.sleep(3)
         result = process_transcript.delay(job_id)
         task_id = result.id
-        # Give the worker time to pick it up.
-        time.sleep(3)
-        state = client.get(f"celery-task-meta-{task_id}") or ""
-        # Kill the worker before ack (simulate crash mid-work).
-        worker.terminate()
-        worker.wait(timeout=10)
-        # Visibility timeout is 10s; wait for redelivery to a fresh worker.
-        worker2 = _start_worker(env)
-        time.sleep(2)
+
+        # Wait for the claim marker (the worker is now blocked mid-step).
         for _ in range(30):
-            meta = client.get(f"celery-task-meta-{task_id}")
-            if meta and '"status": "SUCCESS"' in meta:
+            if marker.exists():
                 break
             time.sleep(1)
-        worker2.terminate()
-        worker2.wait(timeout=10)
-        meta = client.get(f"celery-task-meta-{task_id}") or ""
-        assert '"status": "SUCCESS"' in meta or '"status": "FAILURE"' in meta, meta[:200]
+        assert marker.exists(), "worker did not reach the barrier"
+        first_claim = marker.read_text()
+        assert "claimed=True" in first_claim
+
+        # Kill worker 1 BEFORE it acks (late-ack: redelivery is guaranteed).
+        # SIGKILL simulates hard worker loss; warm SIGTERM would wait for the
+        # blocked task to finish.
+        worker1.kill()
+        worker1.wait(timeout=10)
+
+        # Worker 2: start after the visibility window; it either reclaims the
+        # step (dead worker's claim rolled back) or is fenced out. Release
+        # the barrier once a fresh claim appears.
+        time.sleep(10)
+        worker2 = _start_worker(env)
+        try:
+            time.sleep(2)
+            for _ in range(40):
+                if marker.exists() and marker.read_text() != first_claim:
+                    break
+                time.sleep(1)
+            release.write_text("go")
+            # Let the redelivered execution reach a terminal state.
+            for _ in range(40):
+                meta = client.get(f"celery-task-meta-{task_id}") or ""
+                if '"status": "SUCCESS"' in meta or '"status": "FAILURE"' in meta:
+                    break
+                time.sleep(1)
+            meta = client.get(f"celery-task-meta-{task_id}") or ""
+            assert '"status": "SUCCESS"' in meta or '"status": "FAILURE"' in meta, (
+                f"redelivered task never reached a terminal state: {meta[:200]}"
+            )
+        finally:
+            worker2.terminate()
+            worker2.wait(timeout=10)
+
+        # Exactly-once claim invariant: the step has AT MOST one committed
+        # attempt (the dead worker's claim rolled back with its transaction;
+        # if the redelivery reclaimed it, attempt == 1). A duplicate claim
+        # would show attempt >= 2 with two claims racing.
+        from app.db.models import JobStep, ProcessingJob
+        from app.db.session import SessionLocal
+
+        db = SessionLocal()
+        try:
+            step = (
+                db.query(JobStep)
+                .filter(JobStep.job_id == job_id, JobStep.name == "transcribe")
+                .first()
+            )
+            assert step is not None
+            assert step.attempt == 1, (
+                f"redelivery created duplicate work: attempt={step.attempt}"
+            )
+            # The claim token in the DB belongs to exactly one incarnation.
+            assert step.claim_token is not None
+        finally:
+            db.close()
     finally:
-        for proc in (worker,):
+        for proc in (worker1,):
             if proc.poll() is None:
                 proc.terminate()
                 proc.wait(timeout=5)

@@ -152,6 +152,9 @@ def _get_probe_engine():
     with _probe_lock:
         if _probe_engine is None:
             settings = get_settings()
+            kwargs = {}
+            if "postgresql" in settings.database.DATABASE_URL:
+                kwargs["connect_args"] = {"connect_timeout": 3}
             _probe_engine = create_engine(
                 settings.database.DATABASE_URL,
                 poolclass=QueuePool,
@@ -160,7 +163,7 @@ def _get_probe_engine():
                 pool_timeout=2.0,
                 pool_recycle=300,
                 pool_pre_ping=True,
-                connect_args={"connect_timeout": 3},
+                **kwargs,
             )
     return _probe_engine
 
@@ -178,11 +181,19 @@ SessionLocal = sessionmaker(
 
 
 def _session_local_with_metrics() -> Session:
-    """SessionLocal() wrapper that records checkout timeouts (Review Round 2 F10)."""
+    """SessionLocal() wrapper that records checkout timeouts.
+
+    SessionLocal() is lazy — the actual pool checkout happens on the first
+    statement — so we force an eager checkout (``session.connection()``)
+    inside the try so a QueuePool timeout is observed and counted here
+    (Review Round 2 F10).
+    """
     from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
     try:
-        return SessionLocal()
+        session = SessionLocal()
+        session.connection()  # eager checkout
+        return session
     except PoolTimeoutError:
         _inc("pool_timeout_total")
         raise

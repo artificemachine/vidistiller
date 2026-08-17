@@ -16,7 +16,7 @@ export interface JobStep {
 export interface JobEta {
   eta_low_seconds?: number | null;
   eta_high_seconds?: number | null;
-  confidence?: number | null;
+  eta_confidence?: 'high' | 'medium' | 'low' | 'cold' | string | null;
 }
 
 const STEP_ORDER = ['download', 'transcribe', 'snapshots', 'slides', 'summarize', 'export'];
@@ -60,10 +60,9 @@ function etaText(eta: JobEta): string | null {
   return null;
 }
 
-function confidenceLabel(confidence: number): string {
-  if (confidence >= 0.7) return 'high';
-  if (confidence >= 0.4) return 'medium';
-  return 'low';
+function confidenceLabel(confidence: JobEta['eta_confidence']): string {
+  if (confidence === 'cold') return 'cold-start estimate';
+  return confidence ?? 'low';
 }
 
 export default function JobStepsProgress({
@@ -99,8 +98,8 @@ export default function JobStepsProgress({
           {etaLine && (
             <p data-testid="eta-range" className="mt-1.5 text-xs text-text-dark/70 dark:text-text-light/70">
               {etaLine}
-              {eta?.confidence != null && (
-                <span> · {confidenceLabel(eta.confidence)} confidence</span>
+              {eta?.eta_confidence != null && (
+                <span> · {confidenceLabel(eta.eta_confidence)} confidence</span>
               )}
             </p>
           )}

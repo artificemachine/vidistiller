@@ -92,6 +92,23 @@ _METRIC_HELP = {
 
 def render_prometheus() -> str:
     """Render the metrics snapshot as Prometheus text exposition format."""
+    # Total counters are counters; gauges are gauges (Review Round 2 F10).
+    counter_metrics = {
+        "pool_checkout_total",
+        "pool_wait_total",
+        "pool_timeout_total",
+        "requests_total",
+        "requests_5xx_total",
+        "requests_4xx_total",
+        "auth_failures_total",
+        "db_idle_in_tx_abort_total",
+        "latency_bucket_lt_0_05",
+        "latency_bucket_lt_0_1",
+        "latency_bucket_lt_0_5",
+        "latency_bucket_lt_1",
+        "latency_bucket_lt_5",
+        "latency_bucket_ge_5",
+    }
     lines = [f"# HELP vidistiller_uptime_seconds Application uptime",
              "# TYPE vidistiller_uptime_seconds gauge",
              f"vidistiller_uptime_seconds {uptime_seconds():.3f}"]
@@ -99,9 +116,6 @@ def render_prometheus() -> str:
         metric = f"vidistiller_{name}"
         if name in _METRIC_HELP:
             lines.append(f"# HELP {metric} {_METRIC_HELP[name]}")
-        if name.startswith("pool_") or name == "requests_in_flight":
-            lines.append(f"# TYPE {metric} gauge")
-        else:
-            lines.append(f"# TYPE {metric} counter")
+        lines.append(f"# TYPE {metric} {'counter' if name in counter_metrics else 'gauge'}")
         lines.append(f"{metric} {value}")
     return "\n".join(lines) + "\n"

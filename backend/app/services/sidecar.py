@@ -47,9 +47,10 @@ _telemetry_loaded_at: float = 0.0
 def refresh_telemetry_cache(db: Session) -> None:
     """Probe all enabled sidecars and replace the shared cache.
 
-    Called by the periodic scheduler (never inside a request handler), so
-    request paths read timestamped telemetry without holding a DB
-    transaction open across network probes.
+    Called by the periodic scheduler (never inside a request handler). The
+    registry/slot reads are committed (transaction closed) BEFORE any
+    network probe so no DB connection is held across external I/O
+    (Review Round 2 F7).
     """
     global _telemetry_loaded_at
     settings = get_settings().admission
@@ -66,6 +67,7 @@ def refresh_telemetry_cache(db: Session) -> None:
         reserved_by_sidecar[slot.sidecar_id] = (
             reserved_by_sidecar.get(slot.sidecar_id, 0) + 1
         )
+    db.commit()  # end the read transaction before probing
 
     fresh: dict[str, SidecarTelemetry] = {}
     for sidecar in rows:

@@ -539,6 +539,17 @@ class JobResponse(BaseSchema):
     documents: List[DocumentResponse] = Field(default_factory=list, description="Generated documents")
     slides: List[SlideResponse] = Field(default_factory=list, description="Detected slides (slide_aware mode)")
     steps: List[JobStepResponse] = Field(default_factory=list, description="Persistent processing steps")
+    # WP2/WP5: admission state and calibrated progress/ETA (same contract as
+    # JobStatusResponse so list/status/detail agree — Review Round 2 F8).
+    admission_state: Optional[str] = Field(None, description="queued/admitted/finished/failed")
+    queue_reason: Optional[str] = Field(None, description="Why the job is queued, when queued")
+    queue_position: Optional[int] = Field(None, description="1-based queue position when queued")
+    sidecar_preference: Optional[str] = Field(None, description="Requested sidecar registered id, when set")
+    progress: Optional[int] = Field(None, ge=0, le=100, description="Overall monotonic progress 0..100")
+    eta_low_seconds: Optional[float] = Field(None, description="ETA lower bound (seconds remaining)")
+    eta_high_seconds: Optional[float] = Field(None, description="ETA upper bound (seconds remaining)")
+    eta_confidence: Optional[str] = Field(None, description="high|medium|low|cold")
+    eta_basis: Optional[str] = Field(None, description="Calibration basis")
 
     model_config = ConfigDict(
         from_attributes=True,

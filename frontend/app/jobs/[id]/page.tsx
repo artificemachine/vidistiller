@@ -82,7 +82,7 @@ interface JobDetail {
   progress?: number | null;
   eta_low_seconds?: number | null;
   eta_high_seconds?: number | null;
-  confidence?: number | null;
+  eta_confidence?: string | null;
 }
 
 function useIsMobile() {
@@ -526,11 +526,11 @@ export default function JobDetail() {
     steps: job.steps || [],
     onRetry: retryStep,
     overallProgress: job.progress ?? null,
-    eta: job.eta_low_seconds != null || job.eta_high_seconds != null || job.confidence != null
+    eta: job.eta_low_seconds != null || job.eta_high_seconds != null || job.eta_confidence != null
       ? {
           eta_low_seconds: job.eta_low_seconds ?? null,
           eta_high_seconds: job.eta_high_seconds ?? null,
-          confidence: job.confidence ?? null,
+          eta_confidence: job.eta_confidence ?? null,
         }
       : undefined,
   };

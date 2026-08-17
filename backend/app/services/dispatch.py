@@ -47,16 +47,42 @@ def publish_outbox(
     Redis failures are logged and the row stays pending for the sweep —
     never silently dropped. Rows are marked published only after the .delay()
     call succeeds (at-least-once semantics; the workers' claim-step
-    idempotency absorbs duplicate deliveries).
+    idempotency absorbs duplicate deliveries). When ``job_id`` is given the
+    query filters BEFORE the limit so a specific job's row is always found
+    even under backlog (Review Round 2 new finding).
     """
-    rows = pending_outbox_rows(db, limit=limit)
+    query = db.query(TaskOutbox).filter(TaskOutbox.state == "pending")
     if job_id is not None:
-        rows = [row for row in rows if row.job_id == job_id]
+        query = query.filter(TaskOutbox.job_id == job_id)
+    rows = query.order_by(TaskOutbox.created_at).limit(limit).all()
     if not rows:
         return 0
 
     published = 0
     for row in rows:
+        # Atomic claim: only one publisher (scheduler, create-route, another
+        # API replica) may publish a given row (Review Round 2 F2).
+        if db.bind.dialect.name == "postgresql":
+            claimed = db.execute(
+                text(
+                    "UPDATE task_outbox SET state = 'publishing' "
+                    "WHERE id = :id AND state = 'pending' RETURNING id"
+                ),
+                {"id": row.id},
+            )
+            if claimed.rowcount != 1:
+                db.rollback()
+                continue
+        else:
+            db.execute(
+                text(
+                    "UPDATE task_outbox SET state = 'publishing' "
+                    "WHERE id = :id AND state = 'pending'"
+                ),
+                {"id": row.id},
+            )
+            db.flush()
+
         task = _task_for_stage(row.stage)
         if task is None:
             logger.error(
@@ -72,6 +98,16 @@ def publish_outbox(
             task.delay(row.job_id)
         except Exception as exc:
             logger.error("outbox publish failed for row %d: %s", row.id, exc)
+            db.rollback()
+            # Release the publishing claim so the sweep can retry.
+            db.execute(
+                text(
+                    "UPDATE task_outbox SET state = 'pending' "
+                    "WHERE id = :id AND state = 'publishing'"
+                ),
+                {"id": row.id},
+            )
+            db.commit()
             continue  # stays pending; the sweep retries
         mark_outbox_published(db, row.id)
         db.commit()

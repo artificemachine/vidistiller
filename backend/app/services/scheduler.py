@@ -43,26 +43,42 @@ def _utcnow():
 def promote_queued_jobs(db: Session, limit: int = 10) -> int:
     """Re-run admission for the oldest queued jobs; returns promoted count.
 
-    Each candidate is admitted under the same counter locks and writes a
-    concrete first-stage outbox row. The caller commits. Jobs whose
-    preferred sidecar is still unavailable stay queued with the reason.
+    Race-safe across API replicas (Review Round 2 F2): each candidate row is
+    locked with ``FOR UPDATE SKIP LOCKED`` (or serialized by SQLite's writer
+    lock) IN THE SAME TRANSACTION as its admission, so two schedulers can
+    never promote the same job and no crash gap exists between claiming and
+    admitting. Admission runs under the counter locks and writes a concrete
+    first-stage outbox row.
     """
-    from app.services.admission import admit_or_queue_job, pending_outbox_rows
+    from app.services.admission import admit_or_queue_job
 
-    queued = (
-        db.query(JobAdmission)
-        .join(ProcessingJob, ProcessingJob.id == JobAdmission.job_id)
-        .filter(
-            JobAdmission.state == AdmissionState.QUEUED,
-            ProcessingJob.status.in_(("pending", "processing")),
-        )
-        .order_by(JobAdmission.queued_at)
-        .limit(limit)
-        .all()
-    )
+    queued_ids = [
+        row[0]
+        for row in db.execute(
+            text(
+                "SELECT ja.job_id FROM job_admissions ja "
+                "JOIN processing_jobs pj ON pj.id = ja.job_id "
+                "WHERE ja.state = 'queued' AND pj.status IN ('pending', 'processing') "
+                "ORDER BY ja.queued_at "
+                "LIMIT :limit"
+            ),
+            {"limit": limit},
+        ).all()
+    ]
     promoted = 0
-    for admission in queued:
-        job = db.get(ProcessingJob, admission.job_id)
+    for job_id in queued_ids:
+        # Lock THIS queued row; skip rows another scheduler already holds.
+        if db.bind.dialect.name == "postgresql":
+            locked = db.execute(
+                text(
+                    "SELECT job_id FROM job_admissions WHERE job_id = :job_id "
+                    "AND state = 'queued' FOR UPDATE SKIP LOCKED"
+                ),
+                {"job_id": job_id},
+            ).first()
+            if locked is None:
+                continue  # promoted by another scheduler or no longer queued
+        job = db.get(ProcessingJob, job_id)
         if job is None:
             continue
         preference = getattr(job, "sidecar_preference", None)
@@ -70,14 +86,15 @@ def promote_queued_jobs(db: Session, limit: int = 10) -> int:
             db, job, exec_uuid=str(uuid.uuid4()), preferred_sidecar=preference
         )
         if outcome.state == "admitted":
-            db.commit()
             promoted += 1
-            # Publish the new first-stage row immediately.
+            # Publish the new first-stage row in the same transaction.
             from app.services.dispatch import publish_outbox
 
             try:
                 published = publish_outbox(db, job_id=job.id)
                 if published:
+                    db.commit()
+                else:
                     db.commit()
             except Exception as exc:
                 logger.warning("promotion publish failed for job %s: %s", job.id, exc)
@@ -143,22 +160,23 @@ def run_maintenance_cycle(db: Session) -> dict:
 
 
 async def scheduler_loop(stop_event: Optional[asyncio.Event] = None) -> None:
-    """Background asyncio loop driving maintenance every sweep interval."""
+    """Background asyncio loop driving maintenance every sweep interval.
+
+    The maintenance cycle itself runs in a worker thread (Review Round 2
+    new finding): it does synchronous SQLAlchemy and sidecar HTTP probes,
+    which must never block the FastAPI event loop.
+    """
     from app.db.session import SessionLocal
+    import asyncio as _asyncio
 
     settings = get_settings().admission
     interval = max(5, settings.sweep_interval_seconds)
     logger.info("scheduler loop started (interval=%ss)", interval)
 
+    loop = _asyncio.get_running_loop()
     while True:
         try:
-            db = SessionLocal()
-            try:
-                summary = run_maintenance_cycle(db)
-                if any(v for k, v in summary.items() if isinstance(v, int) and v):
-                    logger.info("maintenance cycle: %s", summary)
-            finally:
-                db.close()
+            await _asyncio.to_thread(_run_cycle)
         except Exception as exc:
             logger.error("scheduler cycle crashed: %s", exc)
         try:
@@ -171,3 +189,16 @@ async def scheduler_loop(stop_event: Optional[asyncio.Event] = None) -> None:
                 await asyncio.sleep(interval)
         except asyncio.TimeoutError:
             continue
+
+
+def _run_cycle() -> None:
+    """Run one maintenance cycle in a worker thread (blocking-safe)."""
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        summary = run_maintenance_cycle(db)
+        if any(v for k, v in summary.items() if isinstance(v, int) and v):
+            logger.info("maintenance cycle: %s", summary)
+    finally:
+        db.close()
