@@ -40,7 +40,7 @@ describe('JobStepsProgress', () => {
       <JobStepsProgress
         steps={[]}
         overallProgress={64}
-        eta={{ eta_low_seconds: 120, eta_high_seconds: 360, confidence: 0.82 }}
+        eta={{ eta_low_seconds: 120, eta_high_seconds: 360, eta_confidence: 'high' }}
       />
     );
     expect(screen.getByTestId('overall-progress')).toHaveTextContent('64%');

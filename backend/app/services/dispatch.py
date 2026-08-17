@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.models import TaskOutbox
