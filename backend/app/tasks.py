@@ -305,17 +305,19 @@ def _record_capacity_queue_reason(db, job) -> None:
         db.rollback()
 
 
-def _terminalize_capacity_exhausted(db, job_id: int) -> bool:
-    """Terminalize a job whose capacity retries are exhausted (Review Round 2 NEW-6).
+def _terminalize_capacity_exhausted(db, job_id: int) -> str:
+    """Terminalize a job whose capacity retries are exhausted (NEW-6).
 
-    Returns True when this call performed the terminalization, False when it
-    skipped because another incarnation owns a running step (duplicate
-    redelivery — the owner must finish, P8-NEW-11). Callers MUST propagate
-    the skip: no stage state may be mutated when False.
+    Returns a tri-state disposition (P11-NEW-21):
+    - "done"       — this call terminalized the job (or its stage).
+    - "owned"      — another incarnation owns a running step; callers must
+                     perform NO mutation (P8-NEW-11).
+    - "completed"  — the conversion is already COMPLETED (summarize-only
+                     context); callers fail just the summarize stage.
+    - "already"    — job already terminal; nothing to do.
 
     Celery retries are finite; after the last capacity retry the job must not
-    stay admitted/processing with counters held forever. Mark it failed with
-    a visible capacity reason and release the admission exactly once.
+    stay admitted/processing with counters held forever.
     """
     try:
         from app.db.models import JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
@@ -333,12 +335,14 @@ def _terminalize_capacity_exhausted(db, job_id: int) -> bool:
                 {"job_id": job_id},
             ).first()
             if job_row is None:
-                return False
+                return "already"
+            if job_row[0] == "completed":
+                return "completed"  # summarize-only context (P11-NEW-21)
             if job_row[0] not in ("pending", "processing"):
-                return False  # already terminal or gone
+                return "already"  # terminal (failed/cancelled) or gone
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if job is None:
-            return False
+            return "already"
         # Guard: any step running under a claim we do NOT own means another
         # incarnation is actively processing — never terminalize it.
         running_steps = (
@@ -352,7 +356,7 @@ def _terminalize_capacity_exhausted(db, job_id: int) -> bool:
                     "capacity exhaustion for job %s skipped: step %s is owned by another incarnation",
                     job_id, step.name,
                 )
-                return False
+                return "owned"
         if job.status in (
             ProcessingStatus.PENDING, ProcessingStatus.PROCESSING,
         ):
@@ -396,14 +400,14 @@ def _terminalize_capacity_exhausted(db, job_id: int) -> bool:
                     "capacity exhaustion terminalize for job %s skipped: concurrent claim or non-active job",
                     job_id,
                 )
-                return False
+                return "owned"
             _finish_admission_for_job(db, job_id, failed=True)
         db.commit()
-        return True
+        return "done"
     except Exception as exc:
         logger.warning("capacity-exhausted terminalize failed for job %s: %s", job_id, exc)
         db.rollback()
-        return False
+        return "owned"  # conservative: do not mutate on error
 
 
 # ==============================================================================
@@ -641,6 +645,20 @@ def process_video_download(self, job_id: int):
             db.commit()
             raise self.retry(exc=exc, countdown=30)
         job.video_file_path = video_path
+        # P11-NEW-23: the claim was committed before the slow network/file
+        # work; revalidate the job's terminal state under a fresh lock so a
+        # concurrent cancellation cannot be resurrected by this worker.
+        if db.bind.dialect.name == "postgresql":
+            job_row = db.execute(
+                text(
+                    "SELECT status FROM processing_jobs WHERE id = :job_id FOR UPDATE"
+                ),
+                {"job_id": job_id},
+            ).first()
+            if job_row is None or job_row[0] in ("cancelled", "failed"):
+                fail_step(db, job.id, "download", exec_uuid, "job terminalized during download")
+                db.commit()
+                return {"job_id": job_id, "status": "skipped", "reason": "job is terminal"}
         complete_step(db, job.id, "download", exec_uuid, {"path": Path(video_path).name})
         dependent_step = (
             "slides"
@@ -854,6 +872,19 @@ def process_transcript(self, job_id: int):
                 )
                 job.video_file_path = video_path
                 if download_claim:
+                    # P11-NEW-23: revalidate terminal state after the slow
+                    # download before completing the step or dispatching.
+                    if db.bind.dialect.name == "postgresql":
+                        job_row = db.execute(
+                            text(
+                                "SELECT status FROM processing_jobs WHERE id = :job_id FOR UPDATE"
+                            ),
+                            {"job_id": job_id},
+                        ).first()
+                        if job_row is None or job_row[0] in ("cancelled", "failed"):
+                            fail_step(db, job.id, "download", exec_uuid, "job terminalized during download")
+                            db.commit()
+                            return {"status": "skipped", "reason": "job is terminal"}
                     complete_step(db, job.id, "download", exec_uuid, {"path": _Path(video_path).name})
                 logger.info(f"Video downloaded for job {job_id}: {video_path}")
             except Exception as e:
@@ -881,7 +912,19 @@ def process_transcript(self, job_id: int):
                 return {"status": "snapshot_processing", "source": source, "length": len(transcript_text)}
 
         # 10. Mark job as completed, clear Celery task ID. Terminal state and
-        # admission release commit together (Review Round 2 N5).
+        # admission release commit together (Review Round 2 N5). Guarded: a
+        # cancellation that committed while the transcript/download work ran
+        # must not be overwritten (P11-NEW-23).
+        if db.bind.dialect.name == "postgresql":
+            job_row = db.execute(
+                text(
+                    "SELECT status FROM processing_jobs WHERE id = :job_id FOR UPDATE"
+                ),
+                {"job_id": job_id},
+            ).first()
+            if job_row is not None and job_row[0] in ("cancelled", "failed"):
+                db.rollback()
+                return {"job_id": job_id, "status": "skipped", "reason": "job is terminal"}
         job.status = ProcessingStatus.COMPLETED
         job.celery_task_id = None
         _finish_admission_for_job(db, job_id)
@@ -1333,6 +1376,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
                     "Summarize: job %s force generation superseded before document replacement; aborting",
                     job_id,
                 )
+                _release_summarize_claim(db, job_id, exec_uuid)
                 return {"status": "skipped", "reason": "superseded by a newer force request"}
         if force:
             db.query(Document).filter(
@@ -1399,22 +1443,80 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
                     "Summarize: job %s force generation superseded after document save; discarding",
                     job_id,
                 )
+                cleanup_ok = True
                 try:
                     db.query(Document).filter(Document.id == doc.id).delete()
                     db.commit()
                 except Exception:
                     db.rollback()
+                    cleanup_ok = False
+                _release_summarize_claim(db, job_id, exec_uuid)
+                if not cleanup_ok:
+                    # P11-NEW-25: do not acknowledge a superseded document we
+                    # could not durably remove — surface the failure instead.
+                    return {"error": "superseded document cleanup failed"}
                 return {"status": "skipped", "reason": "superseded by a newer force request"}
 
-        # Mark summarization as completed
+        # Mark summarization as completed. Fenced final write (P11-NEW-22):
+        # revalidate under the job lock that (a) the generation still matches
+        # for force deliveries, (b) summarize_status is still 'processing'
+        # (a cancellation or newer force must not be overwritten), and (c)
+        # the step completion actually succeeded under our claim token.
+        final_ok = True
+        try:
+            if db.bind.dialect.name == "postgresql":
+                db.execute(
+                    text(
+                        "SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"
+                    ),
+                    {"job_id": job_id},
+                )
+            row = db.execute(
+                text(
+                    "SELECT force_generation, summarize_status FROM processing_jobs "
+                    "WHERE id = :job_id"
+                ),
+                {"job_id": job_id},
+            ).first()
+            if row is None:
+                final_ok = False
+            else:
+                current_gen, current_status = int(row[0]), row[1]
+                if force and force_generation is not None and current_gen != force_generation:
+                    final_ok = False
+                if current_status != "processing":
+                    final_ok = False
+        except Exception:
+            db.rollback()
+            final_ok = False
+
+        if not final_ok:
+            # A newer force/cancellation won while the LLM ran: discard the
+            # document and release the claim rather than overwriting state.
+            try:
+                db.query(Document).filter(Document.id == doc.id).delete()
+            except Exception:
+                pass
+            _release_summarize_claim(db, job_id, exec_uuid)
+            return {"status": "skipped", "reason": "superseded before completion"}
+
         job.summarize_status = "completed"
         job.celery_task_id = None
         if summarize_claimed:
             from app.services.job_steps import complete_step
-            complete_step(
+            step_done = complete_step(
                 db, job.id, "summarize", exec_uuid,
                 {"document_id": doc.id, "characters": len(summary_content)},
             )
+            if not step_done:
+                # We lost the step claim (another incarnation took over):
+                # do not mark the job completed on our behalf.
+                try:
+                    db.query(Document).filter(Document.id == doc.id).delete()
+                except Exception:
+                    pass
+                db.rollback()
+                return {"status": "skipped", "reason": "summarize claim lost before completion"}
         db.commit()
         _add_log(db, job_id, "Summarization completed", "info", "summarize")
 
@@ -1440,26 +1542,36 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
         logger.info("Summarize: job %s queued on sidecar capacity", job_id)
         if self.request.retries >= self.max_retries:
             # Retries exhausted: stage-aware terminalization (Review Round 2
-            # NEW-6). For a summarize running on an already-completed
-            # conversion, fail only the summarize stage; for a still-
-            # processing conversion, fail the whole job. The duplicate-
-            # redelivery guard inside _terminalize_capacity_exhausted
-            # prevents harming another incarnation's live work — when it
-            # returns False (another owner holds a running step), this
-            # delivery performs NO mutation at all (P8-NEW-11).
-            terminalized = _terminalize_capacity_exhausted(db, job_id)
-            if not terminalized:
+            # NEW-6 / P11-NEW-21). The helper returns a tri-state:
+            #   done      -> whole job failed + admission released
+            #   completed -> conversion already COMPLETED: fail only the
+            #                summarize stage (this delivery's own stage)
+            #   owned     -> another incarnation owns a running step: no
+            #                mutation at all (P8-NEW-11)
+            #   already   -> job already terminal: nothing to do
+            disposition = _terminalize_capacity_exhausted(db, job_id)
+            if disposition == "owned":
                 return {"status": "skipped", "reason": "another incarnation owns this job"}
-            try:
-                from app.db.models import ProcessingJob, ProcessingStatus
+            if disposition == "already":
+                return {"status": "skipped", "reason": "job already terminal"}
+            if disposition == "completed":
+                # Summarize-only context on a completed conversion: fail the
+                # summarize stage (guarded so a concurrent cancellation that
+                # already fenced it is not clobbered).
+                try:
+                    from app.db.models import ProcessingJob, ProcessingStatus
 
-                job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
-                if job is not None and job.status == ProcessingStatus.COMPLETED:
-                    job.summarize_status = "failed"
-                    job.celery_task_id = None
-                    db.commit()
-            except Exception:
-                db.rollback()
+                    job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+                    if (
+                        job is not None
+                        and job.status == ProcessingStatus.COMPLETED
+                        and job.summarize_status == "processing"
+                    ):
+                        job.summarize_status = "failed"
+                        job.celery_task_id = None
+                        db.commit()
+                except Exception:
+                    db.rollback()
             return {"error": "No sidecar capacity available after retries"}
         raise self.retry(exc=SidecarCapacityExhausted(str(job_id)), countdown=60)
 
@@ -1775,7 +1887,12 @@ def process_slides(self, job_id: int):
         # release admission (Review Round 2 NEW-6).
         logger.info("Slide task: job %s queued on sidecar capacity", job_id)
         if self.request.retries >= self.max_retries:
-            _terminalize_capacity_exhausted(db, job_id)
+            # On exhaustion, terminalize and release admission. "owned"
+            # (another incarnation holds a running step) means this is a
+            # duplicate redelivery — skip without mutation.
+            disposition = _terminalize_capacity_exhausted(db, job_id)
+            if disposition == "owned":
+                return {"status": "skipped", "reason": "another incarnation owns this job"}
             return {"error": "No sidecar capacity available after retries"}
         raise self.retry(exc=SidecarCapacityExhausted(str(job_id)), countdown=60)
 

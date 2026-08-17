@@ -139,16 +139,29 @@ def reap_orphaned_steps(db: Session) -> int:
     from app.services.job_steps import ORPHANED_CLAIM_TTL_SECONDS
 
     cutoff = _dt.now(UTC).replace(tzinfo=None) - _td(seconds=ORPHANED_CLAIM_TTL_SECONDS)
+    # Orphaned RUNNING steps on PROCESSING jobs (pipeline stages) AND on
+    # COMPLETED jobs whose summarize_status is 'processing' (interactive
+    # summarization — P11-NEW-24): a dead worker's summarize claim must be
+    # reclaimable even though the conversion itself is completed.
     orphaned = (
         db.query(JobStep)
         .join(ProcessingJob, ProcessingJob.id == JobStep.job_id)
         .filter(
             JobStep.status == JobStepStatus.RUNNING,
             JobStep.started_at < cutoff,
-            ProcessingJob.status == ProcessingStatus.PROCESSING,
+            JobStep.claim_token.isnot(None),
+            ProcessingJob.status.in_((ProcessingStatus.PROCESSING, ProcessingStatus.COMPLETED)),
         )
         .all()
     )
+    orphaned = [
+        step
+        for step in orphaned
+        if (
+            step.job.status == ProcessingStatus.PROCESSING
+            or (step.job.status == ProcessingStatus.COMPLETED and step.job.summarize_status == "processing")
+        )
+    ]
     reaped = 0
     for step in orphaned:
         # Atomic conditional reclamation (Review Round 2 NEW-2/NEW-9): the
