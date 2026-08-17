@@ -1005,55 +1005,17 @@ def summarize_transcript(
     # tasks on the same job race on the document row and one can mark the
     # job failed even though the other saved a valid summary).
     running_task_id = None
-    if job.summarize_status == "processing":
-        if not force:
-            return JSONResponse(
-                status_code=status.HTTP_202_ACCEPTED,
-                content={"message": "Summarization already in progress", "job_id": job_id},
-            )
-        # force: fence in the DB FIRST (status + stale task id cleared), then
-        # revoke the running task so only one generation proceeds
-        # (Review Round 2 N1/F1: fence-before-revoke). The revoke itself is
-        # deferred until AFTER the durable outbox row exists (P16-NEW-36).
-        running_task_id = job.celery_task_id
-        job.celery_task_id = None
-        job.summarize_status = "processing"
-        # Atomic monotonic force generation (Review Round 2 NEW-7): minted
-        # with an UPDATE...RETURNING so concurrent force requests get
-        # distinct generations and the older forced task is fenced out.
-        force_generation = _mint_force_generation(db, job.id)
-        db.commit()
-        # running_task_id revoke happens below, after the outbox row commits.
-    else:
-        # P14-NEW-31/P15-NEW-34: persist the authorized 'processing' state
-        # IN THE SAME transaction as the generation mint, before any
-        # publish. No later unconditional rewrite: a cancellation that
-        # commits after this point must not be overwritten.
-        force_generation = _mint_force_generation(db, job.id)
-        if db.bind.dialect.name == "postgresql":
-            db.execute(
-                text(
-                    "UPDATE processing_jobs SET summarize_status = 'processing' "
-                    "WHERE id = :job_id AND summarize_status IS DISTINCT FROM 'failed'"
-                ),
-                {"job_id": job.id},
-            )
-        else:
-            db.execute(
-                text(
-                    "UPDATE processing_jobs SET summarize_status = 'processing' "
-                    "WHERE id = :job_id AND summarize_status IS NOT 'failed'"
-                ),
-                {"job_id": job.id},
-            )
-        db.commit()
+    if job.summarize_status == "processing" and not force:
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={"message": "Summarization already in progress", "job_id": job_id},
+        )
 
-    # P15-NEW-34/P16-NEW-36: the processing state was already persisted
-    # above. Re-check under the lock that a cancellation did not win during
-    # the revoke; if it did, do NOT publish — the cancellation is
-    # authoritative. The durable outbox row is inserted IN THE SAME
-    # transaction as this check (one commit) so there is no commit-to-outbox
-    # crash gap (P16-NEW-36).
+    # P17-NEW: the ENTIRE force transaction is atomic (P16-NEW-36): lock the
+    # job row, mint the generation, re-check status under the lock, update
+    # state/task-id, enqueue the outbox row, then commit ONCE. No pre-outbox
+    # commit exists, so a crash can never leave processing state without a
+    # recoverable dispatch. Revoke runs only after the durable row commits.
     from app.services.admission import enqueue_first_stage
     from app.services.dispatch import publish_outbox
 
@@ -1062,6 +1024,9 @@ def summarize_transcript(
             text("SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"),
             {"job_id": job.id},
         )
+    if job.summarize_status == "processing":
+        running_task_id = job.celery_task_id
+    force_generation = _mint_force_generation(db, job.id)
     state = db.execute(
         text("SELECT summarize_status FROM processing_jobs WHERE id = :job_id"),
         {"job_id": job.id},
@@ -1072,6 +1037,8 @@ def summarize_transcript(
             status_code=status.HTTP_409_CONFLICT,
             content={"message": "Summarization was cancelled; cannot force-start", "job_id": job_id},
         )
+    job.celery_task_id = None
+    job.summarize_status = "processing"
     enqueue_first_stage(
         db, job.id, str(uuid.uuid4()),
         stage="summarize",
@@ -1079,10 +1046,10 @@ def summarize_transcript(
     )
     db.commit()
 
-    # P15-NEW-34: the force/processing state + outbox row are durable now.
-    # Revoke the old task AFTER the durable recovery state exists
-    # (P16-NEW-36): a revoke failure or crash cannot strand committed
-    # processing state without a recoverable dispatch.
+    # P15-NEW-34: state + outbox row are durable now. Revoke the old task
+    # AFTER the durable recovery state exists (P16-NEW-36): a revoke failure
+    # or crash cannot strand committed processing state without a
+    # recoverable dispatch.
     if running_task_id:
         try:
             celery_app.control.revoke(running_task_id, terminate=True, signal="SIGTERM")
@@ -1132,9 +1099,9 @@ def retry_job_step(
         db.commit()
         return {"message": "Export step reset; request the export download again", "job_id": job_id}
     if step_name == "summarize":
-        # _dispatch_summarize_retry mints the generation, sets processing and
-        # enqueues the outbox row in one transaction.
-        db.commit()
+        # The step reset above and _dispatch_summarize_retry's generation/
+        # status/outbox co-commit run in ONE transaction (P16-NEW-36): no
+        # pre-outbox commit exists here.
         _dispatch_summarize_retry(db, job)
         return {"message": f"Retry for {step_name} started", "job_id": job_id}
     # P16-NEW-36: the step reset and the durable outbox row commit in ONE
@@ -1244,19 +1211,23 @@ def cancel_job(
 # DELETE JOB - DELETE /jobs/{job_id}
 # ==============================================================================
 
-def _dispatch_summarize_retry(db: Session, job) -> None:
+def _dispatch_summarize_retry(db: Session, job, reset_step: bool = False) -> None:
     """Retry summarization with a fresh force generation (Review Round 2 NEW-7).
 
     P14-NEW-31: persist the authorized 'processing' state before dispatch so
     the retried task is not skipped by the failed-status guard.
-    P15-NEW-35: dispatch is durable via the outbox — a crash or Redis
-    failure after commit leaves a recoverable message.
+    P15-NEW-35/P16-NEW-36: generation mint, status transition, the step
+    reset (when requested) and the durable outbox row commit in ONE
+    transaction — no crash gap stranding processing state without a
+    recoverable dispatch. When called from the step-retry route the step
+    reset already happened in the same uncommitted transaction.
     """
+    if reset_step:
+        from app.services.job_steps import retry_failed_step
+
+        retry_failed_step(db, job.id, "summarize")
     gen = _mint_force_generation(db, job.id)
     job.summarize_status = "processing"
-    # P16-NEW-36: generation mint, status transition, and the durable outbox
-    # row commit in ONE transaction — no crash gap stranding processing
-    # state without a recoverable dispatch.
     from app.services.admission import enqueue_first_stage
     from app.services.dispatch import publish_outbox
 

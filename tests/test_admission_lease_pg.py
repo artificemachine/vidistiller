@@ -1041,8 +1041,9 @@ def test_force_route_does_not_overwrite_later_cancellation(db_factory):
 
 def test_step_retry_route_co_commits_outbox(db_factory):
     """The step-retry route commits the reset AND the outbox row in one
-    transaction: after the route returns, the row exists even though publish
-    may fail (P16-NEW-36/37)."""
+    transaction even when publish fails (Redis down): after the route
+    returns, exactly one recoverable pending outbox row exists (P16-NEW-36/37).
+    Exercises the real route function."""
     from app.db.models import JobStep, JobStepStatus, TaskOutbox
     from app.services.job_steps import seed_job_steps
 
@@ -1054,23 +1055,15 @@ def test_step_retry_route_co_commits_outbox(db_factory):
     step.status = JobStepStatus.FAILED
     db.commit()
     job_id = job.id
+    job_uuid = job.job_id
+    from app.db.models import User
+
+    owner = db.get(User, user_id)
     db.close()
 
-    # Drive the route's exact co-commit path (reset + enqueue + one commit).
-    from app.routes.jobs import _enqueue_stage_retry
-    import app.routes.jobs as jobs_mod
-
-    db = db_factory()
-    from app.services.job_steps import retry_failed_step
-
-    assert retry_failed_step(db, job_id, "transcribe")
-    from app.services.admission import enqueue_first_stage
-
-    enqueue_first_stage(db, job_id, str(uuid.uuid4()), stage="transcribe")
-    db.commit()
-
-    # Publish fails (Redis down simulated) — the row must still exist and be
-    # recoverable by the sweep. _enqueue_stage_retry swallows publish errors.
+    # Real .delay() failure: point the transcript task's delay at a broken
+    # stub so publish_outbox fails exactly like a Redis outage, while the
+    # route's co-commit already happened.
     import app.services.dispatch as dispatch_mod
 
     original_publish = dispatch_mod.publish_outbox
@@ -1078,16 +1071,29 @@ def test_step_retry_route_co_commits_outbox(db_factory):
         raise RuntimeError("redis down")
     dispatch_mod.publish_outbox = _boom
     try:
-        _enqueue_stage_retry(db, job_id, "transcribe")
-    except Exception:
-        pass
+        # Invoke the REAL route handler.
+        from app.routes.jobs import retry_job_step
+        from app.db.session import SessionLocal
+
+        d = SessionLocal()
+        try:
+            retry_job_step(job_uuid, "transcribe", db=d, current_user=owner)
+        finally:
+            d.close()
     finally:
         dispatch_mod.publish_outbox = original_publish
 
-    row = db.query(TaskOutbox).filter(
+    # A fresh session sees exactly one pending outbox row (sweep-recoverable)
+    # and the step reset to pending.
+    db = db_factory()
+    rows = db.query(TaskOutbox).filter(
         TaskOutbox.job_id == job_id, TaskOutbox.stage == "transcribe"
+    ).all()
+    assert len(rows) == 1, f"expected exactly one outbox row, got {len(rows)}"
+    assert rows[0].state in ("pending", "publishing"), rows[0].state
+    step = db.query(JobStep).filter(
+        JobStep.job_id == job_id, JobStep.name == "transcribe"
     ).first()
-    assert row is not None, "outbox row missing after retry route"
-    # The row may be pending (publish failed) — the sweep will retry it.
-    assert row.state in ("pending", "publishing", "published")
+    assert step.status == JobStepStatus.PENDING
     db.close()
+
