@@ -804,8 +804,25 @@ def process_transcript(self, job_id: int):
             return {"error": "No video URL"}
 
         # 2. Set status to PROCESSING, store Celery task ID for cancellation
-        job.status = ProcessingStatus.PROCESSING
-        job.celery_task_id = self.request.id
+        # P20-NEW-42: a conditional UPDATE — if a cancellation/force won the
+        # job-row lock first (status now CANCELLED/FAILED), this worker's
+        # stale write must not resurrect the job or install an uncaptured
+        # task id; it skips instead.
+        if db.bind.dialect.name == "postgresql":
+            claimed_start = db.execute(
+                text(
+                    "UPDATE processing_jobs SET status = 'processing', "
+                    "celery_task_id = :task_id "
+                    "WHERE id = :job_id AND status IN ('pending', 'processing')"
+                ),
+                {"job_id": job_id, "task_id": self.request.id},
+            )
+            if claimed_start.rowcount != 1:
+                db.rollback()
+                return {"job_id": job_id, "status": "skipped", "reason": "job is terminal"}
+        else:
+            job.status = ProcessingStatus.PROCESSING
+            job.celery_task_id = self.request.id
         db.commit()
         _add_log(db, job_id, f"Job started: {video_url}", "info", "init")
         logger.info(f"Processing transcript for job {job_id}: {video_url}")
@@ -1209,9 +1226,25 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
                 )
                 return {"status": "skipped", "reason": "summarization cancelled"}
 
-        # Store Celery task ID for cancellation
-        job.celery_task_id = self.request.id
-        job.summarize_status = "processing"
+        # Store Celery task ID for cancellation. P20-NEW-42: conditional
+        # UPDATE so a cancellation/force that won the lock first cannot be
+        # overwritten by this worker's stale write (non-PG falls back to ORM
+        # within the existing transaction).
+        if db.bind.dialect.name == "postgresql":
+            installed = db.execute(
+                text(
+                    "UPDATE processing_jobs SET celery_task_id = :task_id, "
+                    "summarize_status = 'processing' "
+                    "WHERE id = :job_id AND summarize_status IN ('processing', 'pending')"
+                ),
+                {"job_id": job_id, "task_id": self.request.id},
+            )
+            if installed.rowcount != 1:
+                db.rollback()
+                return {"status": "skipped", "reason": "job is terminal"}
+        else:
+            job.celery_task_id = self.request.id
+            job.summarize_status = "processing"
         db.commit()
         _add_log(db, job_id, "Starting LLM summarization...", "info", "summarize")
         _mark_stage_delivered(db, job_id, "summarize")
@@ -1751,16 +1784,40 @@ def process_snapshots(self, job_id: int):
         )
         _progress(90)
         snapshots = SnapshotService().save_snapshots(db, job.id, frames)
-        complete_step(
+        # P20-NEW-43: gate the finalizer on fresh job status under the job
+        # row lock AND on the step completion result — a cancelled/failed
+        # job is never resurrected, and a lost claim never writes terminal
+        # state.
+        step_done = complete_step(
             db,
             job.id,
             "snapshots",
             exec_uuid,
             {"count": len(snapshots), "frames_analyzed": len(frames)},
         )
+        terminal_ok = True
         if job.processing_mode != ProcessingMode.SLIDE_AWARE.value:
-            job.status = ProcessingStatus.COMPLETED
-            _finish_admission_for_job(db, job_id)
+            if db.bind.dialect.name == "postgresql":
+                fresh = db.execute(
+                    text(
+                        "SELECT status FROM processing_jobs WHERE id = :job_id FOR UPDATE"
+                    ),
+                    {"job_id": job_id},
+                ).first()
+            else:
+                fresh = db.execute(
+                    text("SELECT status FROM processing_jobs WHERE id = :job_id"),
+                    {"job_id": job_id},
+                ).first()
+            if fresh is not None and fresh[0] in ("cancelled", "failed"):
+                terminal_ok = False
+            else:
+                job.status = ProcessingStatus.COMPLETED
+                _finish_admission_for_job(db, job_id)
+        if not step_done or not terminal_ok:
+            # Lost claim or terminalized job: no terminal write.
+            db.rollback()
+            return {"status": "skipped", "reason": "snapshot finalize superseded"}
         db.commit()  # step + terminal state + admission release in one commit
         return {"status": "completed", "count": len(snapshots)}
     except Exception as exc:
@@ -1844,6 +1901,24 @@ def process_slides(self, job_id: int):
         if not job.video_file_path:
             logger.error(f"Slide task: Job {job_id} has no video file")
             _add_log(db, job_id, "No video file for slide detection", "error", "slide_detect")
+            # P20-NEW-44: gate the early terminal write on fresh job status
+            # under the job-row lock — a concurrent cancellation/failure must
+            # never be overwritten with COMPLETED.
+            if db.bind.dialect.name == "postgresql":
+                fresh = db.execute(
+                    text(
+                        "SELECT status FROM processing_jobs WHERE id = :job_id FOR UPDATE"
+                    ),
+                    {"job_id": job_id},
+                ).first()
+            else:
+                fresh = db.execute(
+                    text("SELECT status FROM processing_jobs WHERE id = :job_id"),
+                    {"job_id": job_id},
+                ).first()
+            if fresh is not None and fresh[0] in ("cancelled", "failed"):
+                db.rollback()
+                return {"status": "skipped", "reason": "job is terminal"}
             job.status = ProcessingStatus.COMPLETED
             job.slide_status = "skipped"
             _finish_admission_for_job(db, job_id)
@@ -1928,9 +2003,10 @@ def process_slides(self, job_id: int):
         )
         heartbeat_thread.start()
 
-        def _finish(slide_status: str) -> None:
+        def _finish(slide_status: str) -> str:
             """Mark the job COMPLETED with the given slide_status and clear
-            the task ID.
+            the task ID. Returns 'done' | 'terminal' | 'claim-lost' so stale
+            workers do not report/log success (P20-NEW-45).
 
             P19-NEW-41: gated on FRESH job status under the job-row lock and
             on the step completion result — a cancelled/failed job is never
@@ -1951,7 +2027,7 @@ def process_slides(self, job_id: int):
                     {"job_id": job_id},
                 ).first()
             if fresh is None:
-                return
+                return "terminal"
             fresh_status = fresh[0]
             if fresh_status in ("cancelled", "failed"):
                 # Never overwrite a terminal decision; just mark the step.
@@ -1961,7 +2037,7 @@ def process_slides(self, job_id: int):
 
                     fail_step(db, j.id, "slides", exec_uuid, slide_status or "skipped")
                 db.commit()
-                return
+                return "terminal"
             j = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
             if j:
                 j.status = ProcessingStatus.COMPLETED
@@ -1978,14 +2054,17 @@ def process_slides(self, job_id: int):
                     # Lost the step claim: do not write terminal job state on
                     # a claim we do not own (P19-NEW-41).
                     db.rollback()
-                    return
+                    return "claim-lost"
                 _finish_admission_for_job(db, j.id)
                 db.commit()
+            return "done"
 
         service = SlideDetectionService()
         service.run_full_pipeline(db, job, cancel_check, provider=provider, model=llm_model)
 
-        _finish("completed")
+        disposition = _finish("completed")
+        if disposition in ("terminal", "claim-lost"):
+            return {"status": "skipped", "reason": disposition}
         _add_log(db, job_id, "Job completed successfully (with slides)", "info", "complete")
         logger.info(f"Slide detection completed for job {job_id}")
 

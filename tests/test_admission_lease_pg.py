@@ -1103,56 +1103,62 @@ def test_step_retry_route_co_commits_outbox(db_factory):
 
 def test_slide_finalizer_never_resurrects_cancelled(db_factory):
     """The slide finalizer must not overwrite a cancellation with COMPLETED
-    (P19-NEW-41): a cancelled job keeps CANCELLED; only the step is failed."""
+    (P19-NEW-41/P20-NEW-45): cancellation committed DURING the pipeline (the
+    mocked pipeline cancels then raises) leaves the job CANCELLED; the step
+    is failed/skipped, never completed."""
     from unittest.mock import patch
 
     from app.db.models import JobStep, JobStepStatus, ProcessingJob, ProcessingStatus, ResourceSlot
     from app.services.admission import admit_or_queue_job
-    from app.services.job_steps import claim_step, seed_job_steps
+    from app.services.job_steps import seed_job_steps
 
     db = db_factory()
     user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
     job = _mkjob(db, user_id)
     job.processing_mode = "slide_aware"
     job.video_file_path = "/tmp/fake-slide.mp4"
+    job.status = ProcessingStatus.PROCESSING
     seed_job_steps(db, job, extract_snapshots=False, is_slide_mode=True)
     admit_or_queue_job(db, job, exec_uuid="e1")
-    db.commit()
-    claimed = claim_step(db, job.id, "slides", "exec-slides")
-    assert claimed is not None
-    db.commit()
-    # Cancellation commits while the pipeline runs.
-    db.execute(
-        text("UPDATE processing_jobs SET status = 'cancelled', celery_task_id = NULL WHERE id = :id"),
-        {"id": job.id},
-    )
     db.commit()
     job_id = job.id
     db.close()
 
-    # Run the REAL task against the REAL DB, mocking only the pipeline (raise
-    # CancelledException) and the lease (return a fake slot). The finalizer
-    # must see the committed CANCELLED status and NOT resurrect the job.
     from app.services.llm import CancelledException
     from app.tasks import process_slides
 
     fake_slot = ResourceSlot(sidecar_id="primary", slot_index=0, generation=1)
 
+    def _cancel_then_raise(db, job, cancel_check, provider=None, model=None):
+        # A user cancellation commits DURING the pipeline run; the worker
+        # then observes it and raises — the exact cancel_check sequence.
+        d2 = db_factory()
+        d2.execute(
+            text(
+                "UPDATE processing_jobs SET status = 'cancelled', "
+                "celery_task_id = NULL WHERE id = :id"
+            ),
+            {"id": job.id},
+        )
+        d2.commit()
+        d2.close()
+        raise CancelledException()
+
     with patch(
         "app.services.slide_detection.SlideDetectionService.run_full_pipeline",
-        side_effect=CancelledException(),
-    ), patch("app.tasks._lease_slot_for_job", return_value=fake_slot), \
-         patch("app.tasks._add_log"):
+        side_effect=_cancel_then_raise,
+    ), patch("app.tasks._lease_slot_for_job", return_value=fake_slot), patch("app.tasks._add_log"):
         result = process_slides.apply(kwargs={"job_id": job_id}).get()
 
-    # The terminal guard refuses to run slides work on a cancelled job at
-    # all (skipped) — the invariant is that CANCELLED is never overwritten.
-    assert result["status"] == "skipped", result
+    assert result == {"status": "cancelled"}, result
     db = db_factory()
     fresh = db.execute(
-        text("SELECT status FROM processing_jobs WHERE id = :id"),
+        text("SELECT status, slide_status FROM processing_jobs WHERE id = :id"),
         {"id": job_id},
     ).first()
     assert fresh[0] == "cancelled", f"cancelled job resurrected: {fresh[0]}"
+    step = db.query(JobStep).filter(
+        JobStep.job_id == job_id, JobStep.name == "slides"
+    ).first()
+    assert step.status in (JobStepStatus.FAILED, JobStepStatus.SKIPPED), step.status
     db.close()
-
