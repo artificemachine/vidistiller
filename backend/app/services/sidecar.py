@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -397,7 +398,14 @@ def load_sidecar_config(path: Optional[str] = None) -> list[dict]:
 
     Returns raw dicts; the caller persists them via the seed function.
     """
-    candidate = path or Path(__file__).resolve().parent.parent / "core" / "sidecars.json"
+    # The committed default ships in a public repository, so it deliberately
+    # describes placeholder hosts. Real deployments point SIDECAR_CONFIG_PATH at
+    # a file kept outside the repo, which is where actual topology belongs.
+    candidate = (
+        path
+        or os.getenv("SIDECAR_CONFIG_PATH")
+        or Path(__file__).resolve().parent.parent / "core" / "sidecars.json"
+    )
     p = Path(candidate)
     if not p.exists():
         return []
