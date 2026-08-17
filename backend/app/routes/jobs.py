@@ -1044,8 +1044,15 @@ def summarize_transcript(
             status_code=status.HTTP_409_CONFLICT,
             content={"message": "Summarization was cancelled; cannot force-start", "job_id": job_id},
         )
-    job.celery_task_id = None
-    job.summarize_status = "processing"
+    # P18-NEW-38/P19-NEW-40: clear task identity with a DIRECT locked UPDATE
+    # (never a stale-ORM assignment that can be a no-op against a live id).
+    db.execute(
+        text(
+            "UPDATE processing_jobs SET celery_task_id = NULL, "
+            "summarize_status = 'processing' WHERE id = :job_id"
+        ),
+        {"job_id": job.id},
+    )
     enqueue_first_stage(
         db, job.id, str(uuid.uuid4()),
         stage="summarize",
@@ -1179,10 +1186,27 @@ def cancel_job(
 
     # Allow cancelling an in-progress summarization on a completed job
     if job.summarize_status == "processing":
-        running_task_id = job.celery_task_id
+        # P19-NEW-40: lock + fresh-read the task id under the lock, then
+        # fence with a direct UPDATE; a worker committing its id after the
+        # initial ORM read must still be captured and cleared.
+        if db.bind.dialect.name == "postgresql":
+            db.execute(
+                text("SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"),
+                {"job_id": job.id},
+            )
+        locked = db.execute(
+            text("SELECT celery_task_id FROM processing_jobs WHERE id = :job_id"),
+            {"job_id": job.id},
+        ).first()
+        running_task_id = locked[0] if locked else None
         # Fence in the DB first, then revoke (Review Round 2 F1).
-        job.summarize_status = "failed"
-        job.celery_task_id = None
+        db.execute(
+            text(
+                "UPDATE processing_jobs SET summarize_status = 'failed', "
+                "celery_task_id = NULL WHERE id = :job_id"
+            ),
+            {"job_id": job.id},
+        )
         db.commit()
         if running_task_id:
             celery_app.control.revoke(running_task_id, terminate=True, signal="SIGTERM")
@@ -1199,7 +1223,6 @@ def cancel_job(
     # the status transition and the admission release happen in ONE
     # transaction so a crash cannot leak the active-job counter. The revoke
     # merely terminates the in-flight OS process.
-    running_task_id = job.celery_task_id
     # Lock order JOB -> ADMISSION (Review Round 2 P8-NEW-13): explicitly lock
     # the job row before the admission transition so a concurrent promotion
     # (which locks job then admission) serializes with cancellation.
@@ -1208,9 +1231,22 @@ def cancel_job(
             text("SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"),
             {"job_id": job.id},
         )
-    job.status = ProcessingStatus.CANCELLED
-    job.error_message = "Cancelled by user"
-    job.celery_task_id = None
+    # P19-NEW-40: fresh-read the task id under the lock so a worker that
+    # committed its id after the initial ORM read is captured; clear it with
+    # a direct UPDATE, never a stale-ORM assignment.
+    locked = db.execute(
+        text("SELECT celery_task_id FROM processing_jobs WHERE id = :job_id"),
+        {"job_id": job.id},
+    ).first()
+    running_task_id = locked[0] if locked else None
+    db.execute(
+        text(
+            "UPDATE processing_jobs SET status = 'cancelled', "
+            "error_message = 'Cancelled by user', celery_task_id = NULL "
+            "WHERE id = :job_id"
+        ),
+        {"job_id": job.id},
+    )
     _finish_job_admission_for_route(db, job.id, failed=True)
     db.commit()
 

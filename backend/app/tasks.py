@@ -1929,18 +1929,56 @@ def process_slides(self, job_id: int):
         heartbeat_thread.start()
 
         def _finish(slide_status: str) -> None:
-            """Mark the job COMPLETED with the given slide_status and clear the task ID."""
+            """Mark the job COMPLETED with the given slide_status and clear
+            the task ID.
+
+            P19-NEW-41: gated on FRESH job status under the job-row lock and
+            on the step completion result — a cancelled/failed job is never
+            resurrected to COMPLETED, and a lost claim never writes terminal
+            state. Slides are optional: when the job was cancelled, leave the
+            cancellation intact and only fail the slides step.
+            """
+            if db.bind.dialect.name == "postgresql":
+                fresh = db.execute(
+                    text(
+                        "SELECT status FROM processing_jobs WHERE id = :job_id FOR UPDATE"
+                    ),
+                    {"job_id": job_id},
+                ).first()
+            else:
+                fresh = db.execute(
+                    text("SELECT status FROM processing_jobs WHERE id = :job_id"),
+                    {"job_id": job_id},
+                ).first()
+            if fresh is None:
+                return
+            fresh_status = fresh[0]
+            if fresh_status in ("cancelled", "failed"):
+                # Never overwrite a terminal decision; just mark the step.
+                j = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+                if j is not None and slide_claimed:
+                    from app.services.job_steps import fail_step
+
+                    fail_step(db, j.id, "slides", exec_uuid, slide_status or "skipped")
+                db.commit()
+                return
             j = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
             if j:
                 j.status = ProcessingStatus.COMPLETED
                 j.slide_status = slide_status
                 j.celery_task_id = None
+                step_ok = True
                 if slide_claimed:
                     from app.services.job_steps import complete_step, fail_step
                     if slide_status == "completed":
-                        complete_step(db, j.id, "slides", exec_uuid)
+                        step_ok = complete_step(db, j.id, "slides", exec_uuid)
                     else:
-                        fail_step(db, j.id, "slides", exec_uuid, slide_status)
+                        step_ok = fail_step(db, j.id, "slides", exec_uuid, slide_status)
+                if not step_ok:
+                    # Lost the step claim: do not write terminal job state on
+                    # a claim we do not own (P19-NEW-41).
+                    db.rollback()
+                    return
                 _finish_admission_for_job(db, j.id)
                 db.commit()
 
