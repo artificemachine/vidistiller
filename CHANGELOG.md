@@ -727,3 +727,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - test(media-stress): pin REDIS_URL for the spawned Uvicorn subprocess. The fixture forwarded DATABASE_URL but not REDIS_URL, so the server fell back to .env, whose REDIS_URL uses the compose-internal hostname and does not resolve from the host. The rate limiter then failed closed and every login returned 400 "Rate limiting is temporarily unavailable", surfacing as an opaque fixture error. Both host-facing test defaults now use 127.0.0.1 rather than localhost, since macOS resolves localhost to ::1 first while the container runtime publishes IPv4 only.
+
+### Security
+- security(api): stop serving /docs, /redoc and /openapi.json when ENVIRONMENT=production. Publishing the full schema handed anyone who asked a complete route and payload map. Non-production environments are unchanged, and an operator who deliberately wants public schema in production opts in via API_DOCS_ENABLED. Only an exact "production" disables them, so a typo in ENVIRONMENT cannot quietly change behaviour.
+- security(sidecars): the committed sidecar registry no longer describes real hosts. It previously carried live fleet topology (host identifiers and GPU inventory in the labels) in a public repository; addresses already used the RFC 5737 documentation range but the labels did not. The committed file is now an explicit placeholder, and deployments point SIDECAR_CONFIG_PATH at a registry kept outside the repository so real topology never enters version control.
