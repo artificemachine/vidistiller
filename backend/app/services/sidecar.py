@@ -136,11 +136,7 @@ def _telemetry_from_dict(payload: dict) -> Optional[SidecarTelemetry]:
             return None
         if not isinstance(observed_at, (int, float)) or isinstance(observed_at, bool):
             return None
-        observed_at = float(observed_at)
-        import math
-
-        if not math.isfinite(observed_at):  # NaN/Inf would evade staleness
-            return None
+        observed_at = _strict_float(observed_at)  # rejects NaN/±Inf/overflow
         if capabilities is None:
             return None  # capabilities is REQUIRED (strict fail-closed)
         if (
@@ -166,7 +162,7 @@ def _telemetry_from_dict(payload: dict) -> Optional[SidecarTelemetry]:
             total_slots=_strict_int(payload.get("total_slots")),
             observed_at=observed_at,
         )
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -199,7 +195,10 @@ def _strict_float(value, nullable: bool = False) -> Optional[float]:
         raise TypeError("missing required number")
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"expected number, got {type(value).__name__}")
-    result = float(value)
+    try:
+        result = float(value)
+    except (OverflowError, ValueError) as exc:  # e.g. 10**400 overflows
+        raise ValueError("unconvertible number") from exc
     import math
 
     if not math.isfinite(result):  # NaN/±Inf must never deserialize

@@ -610,6 +610,8 @@ def test_malformed_telemetry_fails_closed(cross_process_env):
         {"cache_hit_rate": float("-inf")},  # negative infinity
         {"capabilities": None},  # capabilities REQUIRED, not null
         {"capabilities": []},  # empty capabilities list
+        {"cache_hit_rate": 10**400},  # oversized int -> OverflowError on float()
+        {"observed_at": 10**400},  # oversized observed_at int
     ]
     for overrides in malformed:
         _publish_raw(_valid_payload(**overrides))
@@ -627,3 +629,31 @@ def test_malformed_telemetry_with_valid_shape_still_requires_healthy_model(cross
         out_worker = _run_role(WORKER_ROLE, env)
         result = json.loads(out_worker.splitlines()[-1])
         assert result["slot"] is None, f"payload {overrides} did not fail closed"
+
+
+def test_deserializer_strict_contract_unit():
+    """Direct unit test of the strict deserializer contract (no subprocess):
+    EVERY malformed payload must yield None, including overflow cases that
+    raise OverflowError during float() conversion."""
+    from app.services.sidecar import _telemetry_from_dict
+
+    base = _valid_payload()
+    malformed = [
+        {"cache_hit_rate": 10**400},
+        {"observed_at": 10**400},
+        {"cache_hit_rate": float("nan")},
+        {"cache_hit_rate": float("inf")},
+        {"observed_at": float("-inf")},
+        {"capabilities": None},
+        {"capabilities": []},
+        {"healthy": "false"},
+        {"served_models": [""]},
+        {"running_requests": "2"},
+        {"declared_model": 42},
+    ]
+    for overrides in malformed:
+        payload = dict(base)
+        payload.update(overrides)
+        assert _telemetry_from_dict(payload) is None, f"{overrides} must fail closed"
+    # Control: the valid payload deserializes.
+    assert _telemetry_from_dict(base) is not None
