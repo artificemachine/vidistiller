@@ -151,6 +151,17 @@ def publish_outbox(
                     gen = _mint_force_generation(db, row.job_id)
                 db.commit()
                 task.delay(row.job_id, True, gen)
+            elif row.stage == "summarize":
+                # P22-NEW-54: non-force summarize deliveries also carry the
+                # generation minted at dispatch so their final writes are
+                # fenced against any later force.
+                gen = payload.get("force_generation")
+                if gen is None:
+                    from app.routes.jobs import _mint_force_generation
+
+                    gen = _mint_force_generation(db, row.job_id)
+                db.commit()
+                task.delay(row.job_id, False, gen)
             else:
                 task.delay(row.job_id)
         except Exception as exc:

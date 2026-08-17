@@ -517,17 +517,10 @@ def _transcribe_audio(db, job_id: int, job, video_service, video_url: str) -> tu
     except Exception as e:
         _add_log(db, job_id, f"Ollama transcription failed: {e}", "error", "whisper")
         logger.error(f"Ollama transcription failed: {e}")
-        # P21-NEW-49: conditional write — never overwrite a committed
-        # cancellation with FAILED.
-        db.execute(
-            text(
-                "UPDATE processing_jobs SET status = 'failed', "
-                "error_message = :msg "
-                "WHERE id = :job_id AND status IN ('pending', 'processing')"
-            ),
-            {"job_id": job_id, "msg": f"Transcription failed: {str(e)[:500]}"},
-        )
-        db.commit()
+        # P22-NEW-51: do NOT mark the job FAILED here — the outer exception
+        # handler owns terminalization (only at true exhaustion, via a
+        # conditional UPDATE). Marking FAILED on every audio failure would
+        # make the authorized final retry skip at the entry guard.
         raise
 
 
@@ -780,10 +773,22 @@ def process_transcript(self, job_id: int):
             job.status == ProcessingStatus.FAILED
             and self.request.retries >= self.max_retries
         ):
-            logger.info(
-                "Job %s failed after max retries; skipping late redelivery", job_id
+            # P22-NEW-51: distinguish an AUTHORIZED final retry (admission
+            # still held) from a terminal redelivery (admission already
+            # released). Only the latter is skipped — the final authorized
+            # attempt must run so the exhaustion handler releases admission.
+            from app.db.models import AdmissionState, JobAdmission
+
+            admission = db.get(JobAdmission, job.id)
+            admission_released = (
+                admission is not None
+                and admission.state in (AdmissionState.FINISHED, AdmissionState.FAILED)
             )
-            return {"job_id": job_id, "status": "failed", "skipped": True}
+            if admission_released:
+                logger.info(
+                    "Job %s failed after max retries; skipping late redelivery", job_id
+                )
+                return {"job_id": job_id, "status": "failed", "skipped": True}
 
         # Staleness guard against redelivered executions while a delivery is
         # still actively running: video download + Whisper fallback
@@ -818,11 +823,15 @@ def process_transcript(self, job_id: int):
         # task id; it skips instead. FAILED is allowed only for authorized
         # retries (retries < max); the exhaustion guard above already
         # skipped terminal redeliveries (P21-NEW-46).
+        # P22-NEW-53: exclusive task-ID claim — the predicate requires an
+        # empty/self-owned id so two deliveries cannot both install.
         claimed_start = db.execute(
             text(
                 "UPDATE processing_jobs SET status = 'processing', "
                 "celery_task_id = :task_id "
-                "WHERE id = :job_id AND (status IN ('pending', 'processing') "
+                "WHERE id = :job_id AND (celery_task_id IS NULL "
+                "OR celery_task_id = :task_id) "
+                "AND (status IN ('pending', 'processing') "
                 "OR (status = 'failed' AND :retries < :max_retries))"
             ),
             {
@@ -834,7 +843,10 @@ def process_transcript(self, job_id: int):
         )
         if claimed_start.rowcount != 1:
             db.rollback()
-            return {"job_id": job_id, "status": "skipped", "reason": "job is terminal"}
+            return {"job_id": job_id, "status": "skipped", "reason": "job is terminal or claimed"}
+        # P22-NEW-52: reflect the raw install in the ORM so later clears are
+        # not no-ops (expire_on_commit=False keeps the stale value otherwise).
+        db.refresh(job, ["celery_task_id", "status"])
         db.commit()
         _add_log(db, job_id, f"Job started: {video_url}", "info", "init")
         logger.info(f"Processing transcript for job {job_id}: {video_url}")
@@ -1236,7 +1248,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
         # row), so a newer force mint can neither slip between the check and
         # the commit nor run concurrently with it. On PostgreSQL this
         # serializes; on SQLite the writer lock provides the same effect.
-        if force and force_generation is not None:
+        if force_generation is not None:
             if db.bind.dialect.name == "postgresql":
                 db.execute(
                     text(
@@ -1267,11 +1279,14 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
         # generation while this worker waited, its install affects zero rows
         # and it skips. Dialect-safe rowcount check (P21-NEW-50).
         observed_gen = getattr(job, "force_generation", 0) or 0
+        # P22-NEW-53: exclusive task-ID claim — empty/self-owned id required.
         installed = db.execute(
             text(
                 "UPDATE processing_jobs SET celery_task_id = :task_id, "
                 "summarize_status = 'processing' "
-                "WHERE id = :job_id AND summarize_status IN ('processing', 'pending') "
+                "WHERE id = :job_id AND (celery_task_id IS NULL "
+                "OR celery_task_id = :task_id) "
+                "AND summarize_status IN ('processing', 'pending') "
                 "AND force_generation = :gen"
             ),
             {"job_id": job_id, "task_id": self.request.id, "gen": observed_gen},
@@ -1279,6 +1294,8 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
         if installed.rowcount != 1:
             db.rollback()
             return {"status": "skipped", "reason": "job superseded or terminal"}
+        # P22-NEW-52: reflect the raw install in the ORM.
+        db.refresh(job, ["celery_task_id", "summarize_status"])
         db.commit()
         _add_log(db, job_id, "Starting LLM summarization...", "info", "summarize")
         _mark_stage_delivered(db, job_id, "summarize")
@@ -1341,7 +1358,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
         if _has_persisted_steps(job):
             from app.services.job_steps import claim_step
 
-            if force and force_generation is not None:
+            if force_generation is not None:
                 if not _force_generation_still_valid(db, job.id, force_generation):
                     _release_slot_if_held(db, slot, exec_uuid)
                     db.commit()
@@ -1506,7 +1523,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
         # generation under the job-row lock BEFORE the destructive write
         # (P9-NEW-14): a newer force mints a fresh generation and fences this
         # delivery out.
-        if force and force_generation is not None:
+        if force_generation is not None:
             if not _force_generation_still_valid(db, job.id, force_generation):
                 logger.info(
                     "Summarize: job %s force generation superseded before document replacement; aborting",
@@ -1558,7 +1575,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
         # Persist document. For force deliveries, revalidate the generation
         # once more under the job lock before the final write (P9-NEW-14):
         # a newer force that minted during the LLM call must win.
-        if force and force_generation is not None:
+        if force_generation is not None:
             if not _force_generation_still_valid(db, job.id, force_generation):
                 logger.info(
                     "Summarize: job %s force generation superseded before final save; aborting",
@@ -1574,7 +1591,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
         # a fresh lock before marking summarization completed; if a newer
         # force minted during the save, delete the just-written document and
         # let the newer delivery win.
-        if force and force_generation is not None:
+        if force_generation is not None:
             if not _force_generation_still_valid(db, job.id, force_generation):
                 logger.info(
                     "Summarize: job %s force generation superseded after document save; discarding",
