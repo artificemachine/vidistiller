@@ -1157,6 +1157,18 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
         if job.summarize_status == "completed" and not force:
             logger.info("Summarize: job %s already completed, skipping", job_id)
             return {"status": "skipped", "reason": "already completed"}
+        # P13-NEW-29: a reaped/forced delivery must not resurrect a cancelled
+        # summarization (user cancel sets summarize_status='failed' and clears
+        # the task id). Forced work only proceeds from a 'processing' state.
+        if force and job.summarize_status == "failed":
+            logger.info(
+                "Summarize: job %s summarization was cancelled (status=failed); skipping forced recovery",
+                job_id,
+            )
+            return {"status": "skipped", "reason": "summarization cancelled"}
+        if job.summarize_status not in (None, "processing", "failed") and not force:
+            logger.info("Summarize: job %s summarize_status=%s; skipping", job_id, job.summarize_status)
+            return {"status": "skipped", "reason": f"summarize_status={job.summarize_status}"}
 
         # Force-generation fence (Review Round 2 NEW-7/P8-NEW-12): for a
         # forced delivery, the generation check is ATOMIC with the state

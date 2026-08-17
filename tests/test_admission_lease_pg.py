@@ -898,3 +898,92 @@ def test_claim_vs_terminalize_race(db_factory):
         assert step.status == JobStepStatus.RUNNING
         assert adm == "admitted", adm
         assert int(counter) == 1, counter
+
+
+def test_reaped_transcribe_recovery_dispatches_transcript(db_factory):
+    """An orphaned transcribe step reaped by the scheduler re-dispatches to
+    the transcript task via the transcribe->transcript stage mapping, and the
+    stale celery_task_id is cleared (P13-NEW-28/30)."""
+    from app.db.models import JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
+    from app.services.job_steps import claim_step, seed_job_steps
+    from app.services.scheduler import reap_orphaned_steps
+
+    db = db_factory()
+    user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
+    job = _mkjob(db, user_id)
+    seed_job_steps(db, job, extract_snapshots=False, is_slide_mode=False)
+    job.status = ProcessingStatus.PROCESSING
+    job.celery_task_id = "dead-task-id"
+    db.commit()
+    claimed = claim_step(db, job.id, "transcribe", "stale-exec")
+    db.execute(
+        text("UPDATE job_steps SET started_at = now() - interval '3 hours' WHERE id = :id"),
+        {"id": claimed.id},
+    )
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    assert reap_orphaned_steps(db_factory()) == 1
+
+    db = db_factory()
+    step = db.query(JobStep).filter(
+        JobStep.job_id == job_id, JobStep.name == "transcribe"
+    ).first()
+    assert step.status == JobStepStatus.PENDING
+    cleared = db.execute(
+        text("SELECT celery_task_id FROM processing_jobs WHERE id = :id"),
+        {"id": job_id},
+    ).scalar()
+    assert cleared is None, f"stale celery_task_id not cleared: {cleared}"
+    # The outbox row carries the canonical transcribe name; the dispatcher
+    # maps it to the transcript task (alias) — verified via _task_for_stage.
+    from app.services.dispatch import _task_for_stage
+
+    assert _task_for_stage("transcribe") is not None
+    assert _task_for_stage("transcribe").name == "process_transcript"
+    db.close()
+
+
+def test_cancelled_summarize_recovery_rejected(db_factory):
+    """A reaped summarize outbox row for a cancelled summarization must not
+    restart the work at dispatch (P13-NEW-29)."""
+    from app.db.models import TaskOutbox
+    from app.services.admission import enqueue_first_stage
+
+    db = db_factory()
+    user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
+    job = _mkjob(db, user_id)
+    job.status = "completed"
+    job.summarize_status = "failed"  # user cancelled
+    db.commit()
+    job_id = job.id
+    enqueue_first_stage(db, job_id, "exec-1", stage="summarize", payload={"force": True})
+    db.commit()
+    row = db.query(TaskOutbox).filter(
+        TaskOutbox.job_id == job_id, TaskOutbox.stage == "summarize"
+    ).first()
+    assert row is not None
+
+    # Publish: the dispatcher must skip (delivered, no task started) because
+    # summarize_status != processing.
+    import app.services.dispatch as dispatch_mod
+
+    original = dispatch_mod._task_for_stage
+    started = []
+
+    def _fake_task(stage):
+        class _FakeTask:
+            @staticmethod
+            def delay(*args):
+                started.append(args)
+        return _FakeTask()
+
+    dispatch_mod._task_for_stage = _fake_task
+    try:
+        count = dispatch_mod.publish_outbox(db, job_id=job_id)
+    finally:
+        dispatch_mod._task_for_stage = original
+    assert count == 1  # row published/delivered, but no task started
+    assert started == [], f"cancelled summarize was restarted: {started}"
+    db.close()

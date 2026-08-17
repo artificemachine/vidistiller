@@ -187,19 +187,6 @@ def reap_orphaned_steps(db: Session) -> int:
             ).first()
             if job_locked is None:
                 continue  # job terminalized concurrently or not eligible
-            if step.job.status == ProcessingStatus.COMPLETED:
-                # Re-dispatched summarize work must not be fenced out by a
-                # stale celery_task_id from the dead delivery, and the
-                # summarize_status must stay 'processing' so the fresh task
-                # runs (P12-NEW-26).
-                db.execute(
-                    text(
-                        "UPDATE processing_jobs SET celery_task_id = NULL "
-                        "WHERE id = :job_id AND status = 'completed' "
-                        "AND summarize_status = 'processing'"
-                    ),
-                    {"job_id": step.job_id},
-                )
         result = db.execute(
             text(
                 "UPDATE job_steps SET status = 'pending', claim_token = NULL, "
@@ -213,6 +200,51 @@ def reap_orphaned_steps(db: Session) -> int:
         )
         if result.rowcount != 1:
             continue  # another replica reclaimed it (or a newer claim exists)
+
+        # Winner-gated, stage-scoped celery_task_id clearing (P13-NEW-30):
+        # only after the conditional reset above proves THIS replica won,
+        # clear the stale task id so the fresh delivery is not rejected by
+        # the global-ID guard. Completed-conversion eligibility is restricted
+        # to the summarize step. Dialect-safe (SQLite gets the same clear).
+        if db.bind.dialect.name == "postgresql":
+            if step.job.status == ProcessingStatus.COMPLETED and step.name == "summarize":
+                db.execute(
+                    text(
+                        "UPDATE processing_jobs SET celery_task_id = NULL "
+                        "WHERE id = :job_id AND status = 'completed' "
+                        "AND summarize_status = 'processing'"
+                    ),
+                    {"job_id": step.job_id},
+                )
+            else:
+                db.execute(
+                    text(
+                        "UPDATE processing_jobs SET celery_task_id = NULL "
+                        "WHERE id = :job_id AND status = 'processing' "
+                        "AND celery_task_id IS NOT NULL"
+                    ),
+                    {"job_id": step.job_id},
+                )
+        else:
+            if step.job.status == ProcessingStatus.COMPLETED and step.name == "summarize":
+                db.execute(
+                    text(
+                        "UPDATE processing_jobs SET celery_task_id = NULL "
+                        "WHERE id = :job_id AND status = 'completed' "
+                        "AND summarize_status = 'processing'"
+                    ),
+                    {"job_id": step.job_id},
+                )
+            else:
+                db.execute(
+                    text(
+                        "UPDATE processing_jobs SET celery_task_id = NULL "
+                        "WHERE id = :job_id AND status = 'processing' "
+                        "AND celery_task_id IS NOT NULL"
+                    ),
+                    {"job_id": step.job_id},
+                )
+
         # Re-dispatch the stage via the durable outbox. For summarize on a
         # completed conversion the outbox payload carries the summarize
         # force flag so the fresh delivery keeps its context (P12-NEW-26).

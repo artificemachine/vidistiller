@@ -27,7 +27,12 @@ def _utcnow() -> datetime:
 
 
 def _task_for_stage(stage: str):
-    """Map an outbox stage to its Celery task."""
+    """Map an outbox stage to its Celery task (P13-NEW-28).
+
+    The canonical job_steps name is ``transcribe`` while the first-stage
+    outbox/task name is ``transcript``; both must dispatch to the same
+    task so orphan-reaped transcribe steps recover correctly.
+    """
     from app.tasks import (
         process_slides,
         process_snapshots,
@@ -38,6 +43,7 @@ def _task_for_stage(stage: str):
 
     return {
         "transcript": process_transcript,
+        "transcribe": process_transcript,  # canonical step name alias (P13-NEW-28)
         "download": process_video_download,
         "snapshots": process_snapshots,
         "slides": process_slides,
@@ -109,7 +115,34 @@ def publish_outbox(
             payload = row.payload or {}
             if row.stage == "summarize" and payload.get("force"):
                 # Orphan-reaped summarize on a completed conversion: mint a
-                # fresh force generation and pass it (P12-NEW-26).
+                # fresh force generation and pass it (P12-NEW-26). Fenced
+                # against cancellation (P13-NEW-29): if the user cancelled
+                # after the reaper enqueued, summarize_status is 'failed' and
+                # this recovery must NOT restart the work.
+                if db.bind.dialect.name == "postgresql":
+                    state = db.execute(
+                        text(
+                            "SELECT summarize_status FROM processing_jobs "
+                            "WHERE id = :job_id"
+                        ),
+                        {"job_id": row.job_id},
+                    ).scalar()
+                else:
+                    from app.db.models import ProcessingJob
+
+                    _j = db.get(ProcessingJob, row.job_id)
+                    state = _j.summarize_status if _j else None
+                if state != "processing":
+                    logger.info(
+                        "outbox: skipping reaped summarize for job %s (summarize_status=%s)",
+                        row.job_id, state,
+                    )
+                    from app.services.admission import mark_outbox_delivered
+
+                    mark_outbox_delivered(db, row.id)
+                    db.commit()
+                    published += 1
+                    continue
                 from app.routes.jobs import _mint_force_generation
 
                 gen = _mint_force_generation(db, row.job_id)
