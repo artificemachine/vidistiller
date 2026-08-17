@@ -722,6 +722,12 @@ All notable changes to this project will be documented in this file.
 ### Added
 - ops(backups): schedule a weekly isolated NAS restore drill that selects the newest signed verified bundle and revalidates immutable, Cosign-verified restore images.
 
+### Security
+- security(ci): add CodeQL static analysis for Python and TypeScript, running on push, pull request, and a weekly schedule. Actions are SHA-pinned and the workflow declares least-privilege permissions explicitly.
+
+### Fixed
+- test(media-stress): pin REDIS_URL for the spawned Uvicorn subprocess. The fixture forwarded DATABASE_URL but not REDIS_URL, so the server fell back to .env, whose REDIS_URL uses the compose-internal hostname and does not resolve from the host. The rate limiter then failed closed and every login returned 400 "Rate limiting is temporarily unavailable", surfacing as an opaque fixture error. Both host-facing test defaults now use 127.0.0.1 rather than localhost, since macOS resolves localhost to ::1 first while the container runtime publishes IPv4 only.
+
 ### Removed
 - docs(audits): remove docs/audits/ (12 files, 1483 lines) — dated self-audit reports (job-ready, portfolio-ready, golive, and their progress trackers) that accumulated across three assessment runs in July. Their headline findings are now stale rather than live: the sharp@0.34.5 CVE regression they flagged is patched (^0.35.0), docs/README.my.notes.md (the raw AI-transcript finding) is no longer tracked, the Alembic-vs-startup-create_all dual schema-management path they rated CRITICAL is resolved, and the unconditional /docs+/openapi.json exposure they carried forward across every re-run is gated in production as of this same change set. What remained was 155KB of redundant, overlapping snapshots of the same audit run, not curated documentation — kept nowhere else, but git history preserves the originals if ever needed. Also removes the now-unused `docs/audits/.*` gitleaks allowlist entry (added for a real redaction incident in this directory in July: personal emails and an operator IPv4 were once committed there); the entry has no remaining target.
 - 2026-08-17: docs(bulletproof-report): annotate the 2 citations into the just-removed docs/audits/ directory (2026-07-21-portfolio-ready.md, 2026-07-21-job-ready.md) with a removal note and the deleting commit, so the report's claims stay traceable without pointing at paths that no longer resolve. The report's own docs/audits/*.md scope-exclusion line is unaffected — it describes a policy, not a citation to a specific file.
