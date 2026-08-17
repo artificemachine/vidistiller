@@ -262,17 +262,21 @@ def _delete_document_durably(db, doc_id: int) -> bool:
 
 
 def _fail_summarize_owned(
-    db, job_id: int, task_id: str, generation: int | None, reason: str
+    db, job_id: int, task_id: str, generation: int | None, reason: str,
+    step_token: str | None = None, step_claimed: bool = False,
 ) -> bool:
     """Fail the summarize stage only when this delivery still owns it
     (P23-NEW-55): the conditional update requires the task id, the expected
     status and (when known) the generation, so a stale worker (superseded by
     a newer force) can never clobber the newer delivery's state. Returns
     True when the write applied.
+
+    P24-NEW-59: the JobStep claim token is the per-incarnation exec_uuid,
+    never the Celery task id — pass ``step_token`` (exec_uuid) and only fail
+    the step when this delivery actually claimed it; otherwise the step
+    stays PENDING, which is retryable.
     """
     try:
-        from app.services.job_steps import fail_step
-
         if generation is not None:
             res = db.execute(
                 text(
@@ -295,7 +299,10 @@ def _fail_summarize_owned(
                 {"job_id": job_id, "task_id": task_id},
             )
         if res.rowcount == 1:
-            fail_step(db, job_id, "summarize", task_id, reason)
+            if step_claimed and step_token:
+                from app.services.job_steps import fail_step
+
+                fail_step(db, job_id, "summarize", step_token, reason)
             db.commit()
             return True
         db.rollback()
@@ -868,9 +875,11 @@ def process_transcript(self, job_id: int):
         # P20-NEW-42: a conditional UPDATE — if a cancellation/force won the
         # job-row lock first (status now CANCELLED/FAILED), this worker's
         # stale write must not resurrect the job or install an uncaptured
-        # task id; it skips instead. FAILED is allowed only for authorized
-        # retries (retries < max); the exhaustion guard above already
-        # skipped terminal redeliveries (P21-NEW-46).
+        # task id; it skips instead. FAILED is allowed for authorized retries
+        # whenever admission is STILL HELD (P24-NEW-58): the entry guard
+        # already rejected terminal redeliveries whose admission was
+        # released, so a failed job reaching this update is an authorized
+        # retry — including the final attempt at retries == max_retries.
         # P22-NEW-53: exclusive task-ID claim — the predicate requires an
         # empty/self-owned id so two deliveries cannot both install.
         claimed_start = db.execute(
@@ -880,13 +889,13 @@ def process_transcript(self, job_id: int):
                 "WHERE id = :job_id AND (celery_task_id IS NULL "
                 "OR celery_task_id = :task_id) "
                 "AND (status IN ('pending', 'processing') "
-                "OR (status = 'failed' AND :retries < :max_retries))"
+                "OR (status = 'failed' AND NOT EXISTS (SELECT 1 FROM job_admissions ja "
+                "WHERE ja.job_id = processing_jobs.id "
+                "AND ja.state IN ('finished', 'failed'))))"
             ),
             {
                 "job_id": job_id,
                 "task_id": self.request.id,
-                "retries": self.request.retries,
-                "max_retries": self.max_retries,
             },
         )
         if claimed_start.rowcount != 1:
@@ -1490,10 +1499,13 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
         owner = db.query(User).filter(User.id == job.user_id).first() if job.user_id else None
 
         if not job.transcripts:
-            # P23-NEW-55: fail only if this delivery still owns the stage.
+            # P23-NEW-55/P24-NEW-59: fail only if this delivery still owns
+            # the stage; the step claim token is the exec_uuid and only
+            # applies when claimed (pre-claim exits leave it PENDING).
             _fail_summarize_owned(
                 db, job.id, self.request.id, force_generation,
                 "No transcript available",
+                step_token=exec_uuid, step_claimed=summarize_claimed,
             )
             _add_log(db, job_id, "No transcript available for summarization", "error", "summarize")
             return {"error": "No transcript"}
@@ -1733,9 +1745,11 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
     except CancelledException:
         logger.info(f"Summarize task cancelled for job {job_id}")
         _add_log(db, job_id, "Summarization cancelled by user", "warning", "summarize")
-        # P23-NEW-55: fail only if this delivery still owns the stage.
+        # P23-NEW-55/P24-NEW-59: fail only if this delivery still owns the
+        # stage; the step claim token is the exec_uuid.
         _fail_summarize_owned(
-            db, job_id, self.request.id, force_generation, "Cancelled"
+            db, job_id, self.request.id, force_generation, "Cancelled",
+            step_token=exec_uuid, step_claimed=summarize_claimed,
         )
         return {"status": "cancelled"}
 
@@ -1762,6 +1776,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
                 _fail_summarize_owned(
                     db, job_id, self.request.id, force_generation,
                     "No sidecar capacity available after retries",
+                    step_token=exec_uuid, step_claimed=summarize_claimed,
                 )
             return {"error": "No sidecar capacity available after retries"}
         raise self.retry(exc=SidecarCapacityExhausted(str(job_id)), countdown=60)
@@ -1787,10 +1802,12 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
                     is not None
                 )
             if not already_done:
-                # P23-NEW-55: fail only if this delivery still owns the stage
-                # (generation + task id + status fenced).
+                # P23-NEW-55/P24-NEW-59: fail only if this delivery still
+                # owns the stage (generation + task id + status fenced); the
+                # step claim token is the exec_uuid.
                 _fail_summarize_owned(
-                    db, job_id, self.request.id, force_generation, str(e)
+                    db, job_id, self.request.id, force_generation, str(e),
+                    step_token=exec_uuid, step_claimed=summarize_claimed,
                 )
         except Exception:
             pass

@@ -1296,25 +1296,27 @@ def test_admitted_final_transcript_retry_is_not_skipped(db_factory):
     db = db_factory()
     admission = db.get(JobAdmission, job_id)
     assert admission is not None and admission.state.value == "admitted"
-    # The skip guard requires admission RELEASED; with it admitted the
-    # retry proceeds (predicate matches: retries == max but admission held).
+    # The start claim uses the admission-state predicate (P24-NEW-58): a
+    # FAILED job whose admission is STILL HELD is claimable at retries ==
+    # max_retries — the final authorized attempt must run.
     claimed = db.execute(
         text(
             "UPDATE processing_jobs SET status = 'processing', "
             "celery_task_id = :task_id "
             "WHERE id = :job_id AND (celery_task_id IS NULL OR celery_task_id = :task_id) "
             "AND (status IN ('pending', 'processing') "
-            "OR (status = 'failed' AND :retries < :max_retries))"
+            "OR (status = 'failed' AND NOT EXISTS (SELECT 1 FROM job_admissions ja "
+            "WHERE ja.job_id = processing_jobs.id "
+            "AND ja.state IN ('finished', 'failed'))))"
         ),
-        {"job_id": job_id, "task_id": "final-retry", "retries": 2, "max_retries": 2},
+        {"job_id": job_id, "task_id": "final-retry"},
     )
-    # retries < max is false here, so the failed-branch does NOT match —
-    # the task relies on the admission-state guard to allow the run; the
-    # actual re-entry happens because the guard passes and the start update
-    # matches pending/processing only. Verify the guard decision directly:
-    from app.db.models import AdmissionState
-
-    admission_released = admission.state in (AdmissionState.FINISHED, AdmissionState.FAILED)
-    assert not admission_released, "admission should still be held"
-    db.rollback()
+    assert claimed.rowcount == 1, "authorized final retry was rejected"
+    db.commit()
+    status = db.execute(
+        text("SELECT status, celery_task_id FROM processing_jobs WHERE id = :id"),
+        {"id": job_id},
+    ).first()
+    assert status[0] == "processing", status
+    assert status[1] == "final-retry"
     db.close()
