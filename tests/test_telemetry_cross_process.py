@@ -324,7 +324,12 @@ def test_worker_process_acquires_slot_and_resolves_model_via_shared_store(cross_
     result = json.loads(out_worker.splitlines()[-1])
     assert result["slot"] == "primary"
     assert result["model"] == "stub-model"
-    assert result["provider_base_url"]  # provider bound to leased sidecar URL
+    # Provider bound to the LEASED sidecar's registry URL (not the declared
+    # model, not any fallback): must equal the stub's base URL with /v1
+    # appended (VLLMProvider normalizes to the OpenAI-compatible path).
+    expected_url = cross_process_env["stub"].base_url.rstrip("/") + "/v1"
+    assert result["provider_base_url"].rstrip("/") == expected_url, \
+        f"provider bound to {result['provider_base_url']!r}, expected {expected_url!r}"
     # The worker's own local cache was populated via the shared store, not
     # injected: it must contain the stub's served model.
     assert result["local_cache"].get("primary") is not None
@@ -445,12 +450,20 @@ def _valid_payload(**overrides) -> dict:
 
 
 def test_no_redis_io_while_row_locks_held(cross_process_env):
-    """Proof of the no-network-I/O-under-lock invariant: after prefetch,
-    acquire_slot must complete WITHOUT any Redis read (a Redis client that
-    raises on any call would fail the acquire if the locked loop touched it).
-    Runs in-process against the migrated PG with the shared store primed."""
+    """Proof of the no-network-I/O-under-lock invariant: with a supplied
+    snapshot and an EMPTY local cache, acquire_slot must complete without ANY
+    Redis read (the read path is patched to raise, so any read-through would
+    fail the acquire while locks are held)."""
     import redis as _redis
-    from app.services.sidecar import _telemetry_key
+    from app.services.sidecar import (
+        _get_redis,
+        _read_telemetry_from_redis,
+        _telemetry_cache,
+        _telemetry_key,
+        _telemetry_local_ts,
+        _telemetry_lock,
+        prefetch_sidecar_telemetry,
+    )
 
     env = cross_process_env["env"]
     out_api = _run_role(API_ROLE, env)
@@ -458,27 +471,31 @@ def test_no_redis_io_while_row_locks_held(cross_process_env):
 
     from app.db.models import ProcessingJob
     from app.services.lease import acquire_slot
-    from app.services.sidecar import (
-        _get_redis,
-        prefetch_sidecar_telemetry,
-    )
 
-    # Prime this process's local cache from the shared store exactly like a
-    # worker would (empty local cache -> prefetch reads Redis once).
     seed_engine = create_engine(DATABASE_URL)
     SeedSession = sessionmaker(bind=seed_engine, expire_on_commit=False)
     db = SeedSession()
     try:
-        prefetch_sidecar_telemetry(db)
+        # Build the snapshot exactly like a task would (empty local cache ->
+        # prefetch reads Redis once, BEFORE any lock).
+        snapshot = prefetch_sidecar_telemetry(db)
+        assert snapshot.get("primary") is not None
 
-        # Break Redis so ANY read would raise. The locked section must never
-        # call it.
+        # Empty the local cache AND break every Redis read path: if the
+        # locked section attempted any read-through, it would raise.
+        with _telemetry_lock:
+            _telemetry_cache.clear()
+            _telemetry_local_ts.clear()
         real_get = _get_redis().get
+        real_read = _read_telemetry_from_redis
 
         def _boom(*a, **k):
             raise AssertionError("Redis read attempted while row locks held")
 
         _get_redis().get = _boom  # type: ignore[method-assign]
+        import app.services.sidecar as _sc
+
+        _sc._read_telemetry_from_redis = _boom  # type: ignore[assignment]
         try:
             job = ProcessingJob(
                 job_id="noio-lock-proof",
@@ -489,19 +506,24 @@ def test_no_redis_io_while_row_locks_held(cross_process_env):
             )
             db.add(job)
             db.commit()
-            slot = acquire_slot(db, job, exec_uuid="exec-noio")
+            # Pass the snapshot explicitly: lock-held paths never prefetch.
+            slot = acquire_slot(
+                db, job, exec_uuid="exec-noio", telemetry_snapshot=snapshot
+            )
             db.commit()
-            assert slot is not None, "acquire_slot must use the prefetch snapshot only"
+            assert slot is not None, "acquire_slot must use the supplied snapshot only"
         finally:
             _get_redis().get = real_get  # type: ignore[method-assign]
+            _sc._read_telemetry_from_redis = real_read  # type: ignore[assignment]
     finally:
         db.close()
         seed_engine.dispose()
 
 
-def test_resolve_provider_fails_closed_without_telemetry(cross_process_env):
-    """A leased slot whose telemetry is absent/stale must yield NO provider
-    (fail closed) — the summarize/slide path must not fabricate capacity."""
+def test_resolve_provider_fails_closed_on_stale_telemetry(cross_process_env):
+    """A leased slot whose telemetry is STALE must yield NO provider (fail
+    closed) — the summarize/slide path must not fabricate capacity from an
+    aged snapshot."""
     import redis as _redis
     from app.db.models import ProcessingJob
     from app.services.lease import acquire_slot, release_slot
@@ -567,11 +589,22 @@ def test_malformed_telemetry_fails_closed(cross_process_env):
         {"healthy": "false"},  # string not bool — must not coerce to True
         {"served_models": "stub-model"},  # string not list
         {"served_models": [""]},  # empty model id
+        {"served_models": [123]},  # non-string model id
         {"observed_at": "NaN"},  # non-finite timestamp must be rejected
+        {"observed_at": "123"},  # string timestamp — no coercion
         {"registered_id": "other"},  # mismatched registered id
         {"capabilities": "text"},  # string not list
+        {"capabilities": [""]},  # empty capability
         {"label": 123},  # wrong type
         {"base_url": None},  # wrong type
+        {"declared_model": 42},  # non-string declared model
+        {"running_requests": "2"},  # string int — must reject, not coerce
+        {"running_requests": True},  # bool is not an int
+        {"reserved_slots": "1"},  # string int
+        {"total_slots": 1.5},  # float int
+        {"vram_used_mib": "abc"},  # string for nullable int
+        {"cache_hit_rate": "0.9"},  # string for nullable float
+        {"vram_total_mib": True},  # bool for nullable int
     ]
     for overrides in malformed:
         _publish_raw(_valid_payload(**overrides))

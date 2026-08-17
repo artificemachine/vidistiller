@@ -173,17 +173,29 @@ def _mark_stage_delivered(db, job_id: int, stage: str) -> None:
         db.rollback()
 
 
-def _lease_slot_for_job(db, job, exec_uuid: str):
-    """Acquire a sidecar slot for a job under its fencing token (WP2)."""
+def _lease_slot_for_job(db, job, exec_uuid: str, telemetry_snapshot=None):
+    """Acquire a sidecar slot for a job under its fencing token (WP2).
+
+    ``telemetry_snapshot`` is the precomputed result of
+    prefetch_sidecar_telemetry() taken by the caller BEFORE any DB write
+    (WP3-hotfix: lock-held code must never initiate Redis I/O itself).
+    """
     from app.services.lease import acquire_slot
 
     preference = getattr(job, "sidecar_preference", None)
     if preference and preference != "auto":
-        return acquire_slot(db, job, exec_uuid=exec_uuid, preferred_sidecar=preference)
-    return acquire_slot(db, job, exec_uuid=exec_uuid)
+        return acquire_slot(
+            db, job,
+            exec_uuid=exec_uuid,
+            preferred_sidecar=preference,
+            telemetry_snapshot=telemetry_snapshot,
+        )
+    return acquire_slot(
+        db, job, exec_uuid=exec_uuid, telemetry_snapshot=telemetry_snapshot
+    )
 
 
-def _resolve_provider_for_slot(db, slot):
+def _resolve_provider_for_slot(db, slot, telemetry_snapshot=None):
     """Build the LLM provider bound to the LEASED sidecar (Review Round 2 F6).
 
     Uses the registry endpoint of the leased sidecar plus the model the
@@ -198,13 +210,17 @@ def _resolve_provider_for_slot(db, slot):
         prefetch_sidecar_telemetry,
     )
 
-    # WP3-hotfix: warm this worker process's local telemetry cache from the
-    # shared Redis store and snapshot it BEFORE any DB read, so this
-    # function performs no network I/O while holding a DB transaction/row
-    # lock (Review Round 2 F7 invariant) and the leased sidecar's telemetry
-    # is visible across the process boundary. The snapshot (not a second
-    # read-through) is consumed below.
-    telemetry_snapshot = prefetch_sidecar_telemetry(db)
+    # WP3-hotfix: consume the caller's precomputed telemetry snapshot (taken
+    # BEFORE any DB write). If none was supplied (standalone callers/tests),
+    # prefetch here — but note lock-held production paths always pass one so
+    # no network I/O occurs under a DB transaction/row lock (Review Round 2
+    # F7 invariant). The snapshot (not a read-through getter) is what binds
+    # the provider to the leased sidecar's live served model across the
+    # process boundary.
+    telemetry_snapshot = (
+        telemetry_snapshot if telemetry_snapshot is not None
+        else prefetch_sidecar_telemetry(db)
+    )
 
     sidecar = get_sidecar(db, slot.sidecar_id)
     if sidecar is None:
@@ -1368,13 +1384,20 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
         db.refresh(job, ["celery_task_id", "summarize_status"])
         db.commit()
         _add_log(db, job_id, "Starting LLM summarization...", "info", "summarize")
+        # WP3-hotfix: prefetch the telemetry snapshot BEFORE the outbox
+        # delivered-UPDATE below — the snapshot is then passed through
+        # acquire_slot/_resolve_provider_for_slot so no Redis I/O occurs
+        # while the outbox row (or any later row) is locked.
+        from app.services.sidecar import prefetch_sidecar_telemetry
+
+        telemetry_snapshot = prefetch_sidecar_telemetry(db)
         _mark_stage_delivered(db, job_id, "summarize")
 
         # WP2/WP3 (Review Round 2 F3/F6/N3): summarization performs external
         # LLM work and therefore REQUIRES a sidecar slot lease under this
         # incarnation's exec_uuid. No slot -> visible capacity reason and a
         # bounded retry, never unleased sidecar work.
-        slot = _lease_slot_for_job(db, job, exec_uuid)
+        slot = _lease_slot_for_job(db, job, exec_uuid, telemetry_snapshot)
         if slot is None:
             _record_capacity_queue_reason(db, job)
             logger.info(
@@ -1542,7 +1565,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
             logger.error("Summarize: leased sidecar %s missing from registry", slot.sidecar_id)
             _release_summarize_claim(db, job_id, exec_uuid)
             raise SidecarCapacityExhausted(job_id)
-        provider, _model = _resolve_provider_for_slot(db, slot)
+        provider, _model = _resolve_provider_for_slot(db, slot, telemetry_snapshot)
         if provider is None:
             logger.error(
                 "Summarize: could not build provider for leased sidecar %s", slot.sidecar_id
@@ -2052,7 +2075,14 @@ def process_slides(self, job_id: int):
         # leaves a RUNNING claim owned by a dead incarnation. No slot -> the
         # job waits visibly (admission reason recorded) and the task retries
         # with a bounded countdown; it never runs unleased.
-        slot = _lease_slot_for_job(db, job, exec_uuid)
+        # WP3-hotfix: prefetch the telemetry snapshot BEFORE any DB write
+        # below (job-row update / step claim / outbox delivered) and pass it
+        # through acquire_slot and provider resolution, so no Redis I/O
+        # occurs while DB row locks are held.
+        from app.services.sidecar import prefetch_sidecar_telemetry
+
+        telemetry_snapshot = prefetch_sidecar_telemetry(db)
+        slot = _lease_slot_for_job(db, job, exec_uuid, telemetry_snapshot)
         if slot is None:
             _record_capacity_queue_reason(db, job)
             logger.info(
@@ -2090,7 +2120,7 @@ def process_slides(self, job_id: int):
         # Bind the LLM provider to the LEASED sidecar (registry endpoint +
         # live served model), not the generic fleet resolver — the selected
         # registry sidecar is the one the lease authorizes (Review Round 2 F6).
-        provider, llm_model = _resolve_provider_for_slot(db, slot)
+        provider, llm_model = _resolve_provider_for_slot(db, slot, telemetry_snapshot)
         if provider is None:
             _add_log(db, job_id, "No LLM provider available; slide disambiguation will be skipped", "warning", "slide_detect")
 

@@ -150,7 +150,7 @@ def _telemetry_from_dict(payload: dict) -> Optional[SidecarTelemetry]:
             registered_id=registered_id,
             label=label,
             base_url=base_url,
-            declared_model=payload.get("declared_model") if isinstance(payload.get("declared_model"), (str, type(None))) else None,
+            declared_model=_strict_optional_str(payload.get("declared_model")),
             capabilities=list(capabilities or []),
             healthy=healthy,
             served_models=list(served_models),
@@ -167,22 +167,35 @@ def _telemetry_from_dict(payload: dict) -> Optional[SidecarTelemetry]:
         return None
 
 
-def _strict_int(value, nullable: bool = False) -> int:
-    """Strict int validation (no bool/float coercion). None allowed when
-    nullable; otherwise 0 is returned for a missing/invalid field rather
-    than failing the whole row (counters are not security-relevant)."""
+def _strict_optional_str(value) -> Optional[str]:
+    """Accept None or a non-empty string; ANY other type raises so the whole
+    row is rejected (no coercion of numbers/bools to strings)."""
     if value is None:
-        return None if nullable else 0  # type: ignore[return-value]
+        return None
+    if not isinstance(value, str) or not value:
+        raise TypeError(f"expected optional non-empty string, got {type(value).__name__}")
+    return value
+
+
+def _strict_int(value, nullable: bool = False) -> int:
+    """Strict int validation: only int (never bool) accepted; None accepted
+    only when nullable. Any other type raises so the whole row is rejected."""
+    if value is None:
+        if nullable:
+            return None  # type: ignore[return-value]
+        raise TypeError("missing required integer")
     if isinstance(value, bool) or not isinstance(value, int):
-        return None if nullable else 0  # type: ignore[return-value]
+        raise TypeError(f"expected int, got {type(value).__name__}")
     return value
 
 
 def _strict_float(value, nullable: bool = False) -> Optional[float]:
     if value is None:
-        return None if nullable else 0.0
+        if nullable:
+            return None
+        raise TypeError("missing required number")
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None if nullable else 0.0
+        raise TypeError(f"expected number, got {type(value).__name__}")
     return float(value)
 
 
@@ -239,8 +252,9 @@ def prefetch_sidecar_telemetry(db: Session) -> dict[str, Optional[SidecarTelemet
 
     The returned snapshot maps every enabled registered id to its telemetry
     or an explicit None (miss) — consumers that hold DB row locks MUST read
-    from this snapshot (or the local cache) and never call the read-through
-    getter, so no Redis I/O can occur under a lock.
+    from this snapshot and never call the read-through getter, so no Redis
+    I/O can occur under a lock. The dict is a fresh copy (mutating it cannot
+    disturb the local cache).
     """
     ids = [rid for (rid,) in db.query(Sidecar.registered_id).filter(Sidecar.enabled.is_(True)).all()]
     if not ids:
@@ -269,7 +283,7 @@ def prefetch_sidecar_telemetry(db: Session) -> dict[str, Optional[SidecarTelemet
                 _telemetry_cache.pop(rid, None)
                 _telemetry_local_ts.pop(rid, None)
             snapshot[rid] = None
-    return snapshot
+    return dict(snapshot)
 
 
 def refresh_telemetry_cache(db: Session) -> None:

@@ -72,6 +72,7 @@ def acquire_slot(
     *,
     exec_uuid: str,
     preferred_sidecar: Optional[str] = None,
+    telemetry_snapshot: Optional[dict] = None,
 ) -> Optional[ResourceSlot]:
     """Acquire one free slot for a job inside the admission transaction.
 
@@ -80,21 +81,30 @@ def acquire_slot(
     model are eligible. A preferred sidecar that is unavailable returns
     None (the caller queues visibly) rather than falling through to another
     lane. Returns the acquired slot or None when no compatible slot is free.
+
+    ``telemetry_snapshot`` (WP3-hotfix): the precomputed
+    prefetch_sidecar_telemetry() result supplied by callers that already
+    hold (or are about to take) DB row locks. When None (standalone
+    callers/tests), the snapshot is computed here BEFORE any lock — but
+    production lock-held paths always pass one so no network I/O occurs
+    while DB row locks are held (Review Round 2 F7 invariant).
     """
     settings = get_settings().admission
     from app.services.sidecar import (
         get_sidecar,
-        local_sidecar_telemetry,
         prefetch_sidecar_telemetry,
     )
 
-    # WP3-hotfix: warm this process's local cache from the shared Redis
-    # store BEFORE taking any row lock, and snapshot the result so the
-    # eligibility loop below reads ONLY the local snapshot — never Redis —
-    # while DB row locks are held (Review Round 2 F7 invariant). In the
-    # Celery worker this is what makes telemetry visible at all: the API
-    # scheduler published it; the worker reads it through.
-    snapshot = prefetch_sidecar_telemetry(db)
+    # WP3-hotfix: use the caller's snapshot, or warm this process's local
+    # cache from the shared Redis store BEFORE taking any row lock. The
+    # eligibility loop below reads ONLY the snapshot — never Redis — while
+    # DB row locks are held. In the Celery worker this is what makes
+    # telemetry visible at all: the API scheduler published it; the worker
+    # reads it through.
+    snapshot = (
+        telemetry_snapshot if telemetry_snapshot is not None
+        else prefetch_sidecar_telemetry(db)
+    )
 
     def _eligible(sidecar_id: str) -> bool:
         sidecar = get_sidecar(db, sidecar_id)
