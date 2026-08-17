@@ -756,3 +756,141 @@ def test_concurrent_force_generation_is_distinct(db_factory):
     assert (job.force_generation or 0) != stale
     d.rollback()
     d.close()
+
+
+def test_failed_job_redelivery_not_resurrected(db_factory):
+    """A redelivered transcript task past max_retries must not resurrect a
+    FAILED job whose admission was already released (P9-NEW-16)."""
+    from app.db.models import ProcessingJob, ProcessingStatus
+    from app.services.admission import admit_or_queue_job, finish_job_admission
+    from app.services.job_steps import seed_job_steps
+
+    db = db_factory()
+    user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
+    job = _mkjob(db, user_id)
+    seed_job_steps(db, job, extract_snapshots=False, is_slide_mode=False)
+    admit_or_queue_job(db, job, exec_uuid="e1")
+    db.commit()
+    # Simulate terminal failure with admission released (as the exhaustion
+    # path does).
+    job.status = ProcessingStatus.FAILED
+    job.error_message = "No transcript could be generated"
+    job.celery_task_id = None
+    finish_job_admission(db, job.id, failed=True)
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    # Redelivered execution with retries == max_retries (post-exhaustion).
+    from unittest.mock import patch
+
+    from app.tasks import process_transcript
+
+    with patch("app.db.session.SessionLocal") as MockSession, \
+         patch("app.tasks._add_log"):
+        mock_db = MockSession.return_value
+        mock_db.query.return_value.filter.return_value.first.return_value = job
+
+        from app.tasks import process_transcript
+
+        # apply() with retries=2 == max_retries emulates a post-exhaustion
+        # redelivery; the guard must skip it without resurrecting the job.
+        result = process_transcript.apply(
+            kwargs={"job_id": job_id},
+            task_id="task-redelivered",
+            retries=2,
+        ).get()
+
+
+    assert job.status == ProcessingStatus.FAILED, "FAILED job was resurrected"
+    assert job.celery_task_id is None
+
+
+def test_claim_vs_terminalize_race(db_factory):
+    """A claim racing capacity terminalization: whichever wins the job-row
+    lock, the job must never end up BOTH failed-and-admitted nor
+    processing-with-released-admission (P9-NEW-17)."""
+    from app.db.models import JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
+    from app.services.admission import admit_or_queue_job
+    from app.services.job_steps import claim_step, seed_job_steps
+
+    db = db_factory()
+    user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
+    job = _mkjob(db, user_id)
+    seed_job_steps(db, job, extract_snapshots=False, is_slide_mode=False)
+    admit_or_queue_job(db, job, exec_uuid="e1")
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    barrier = threading.Barrier(2)
+    results = []
+    lock = threading.Lock()
+
+    def claimer():
+        d = db_factory()
+        try:
+            barrier.wait(timeout=30)
+            c = claim_step(d, job_id, "transcribe", "incarnation-B")
+            d.commit()
+            d.close()
+            with lock:
+                results.append("claimed" if c else "claim-lost")
+        except Exception as exc:
+            with lock:
+                results.append(f"claimer-error={exc!r}")
+            try:
+                d.close()
+            except Exception:
+                pass
+
+    def terminalizer():
+        from app.tasks import _terminalize_capacity_exhausted
+
+        d = db_factory()
+        try:
+            barrier.wait(timeout=30)
+            ok = _terminalize_capacity_exhausted(d, job_id)
+            d.close()
+            with lock:
+                results.append(f"terminalized={ok}")
+        except Exception as exc:
+            with lock:
+                results.append(f"terminalizer-error={exc!r}")
+            try:
+                d.close()
+            except Exception:
+                pass
+
+    t1 = threading.Thread(target=claimer)
+    t2 = threading.Thread(target=terminalizer)
+    t1.start(); t2.start()
+    t1.join(timeout=60); t2.join(timeout=60)
+
+    errors = [r for r in results if "error" in r]
+    assert not errors, f"thread errors: {errors}"
+
+    db = db_factory()
+    job = db.get(ProcessingJob, job_id)
+    step = db.query(JobStep).filter(
+        JobStep.job_id == job_id, JobStep.name == "transcribe"
+    ).first()
+    adm = db.execute(
+        text("SELECT state FROM job_admissions WHERE job_id = :id"),
+        {"id": job_id},
+    ).scalar()
+    counter = db.execute(
+        text("SELECT active FROM admission_counters WHERE key='global'")
+    ).scalar()
+    db.close()
+
+    if job.status == ProcessingStatus.FAILED:
+        # Terminalizer won: no running claim may exist and admission released.
+        assert step.status != JobStepStatus.RUNNING
+        assert adm in ("finished", "failed"), adm
+        assert int(counter) == 0, counter
+    else:
+        # Claimer won: job still processing/admitted with a running claim.
+        assert step.status == JobStepStatus.RUNNING
+        assert adm == "admitted", adm
+        assert int(counter) == 1, counter

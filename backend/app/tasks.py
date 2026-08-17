@@ -237,9 +237,33 @@ class SidecarCapacityExhausted(Exception):
     """
 
 
+def _force_generation_still_valid(db, job_id: int, force_generation: int) -> bool:
+    """Revalidate a force generation under the job-row lock (P9-NEW-14).
+
+    Called immediately before destructive/final writes so a newer force
+    request (which bumps the generation with UPDATE...RETURNING and the
+    row lock) fences this delivery out before it deletes or replaces the
+    summary document.
+    """
+    try:
+        if db.bind.dialect.name == "postgresql":
+            db.execute(
+                text(
+                    "SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"
+                ),
+                {"job_id": job_id},
+            )
+        row = db.execute(
+            text("SELECT force_generation FROM processing_jobs WHERE id = :job_id"),
+            {"job_id": job_id},
+        ).first()
+        return row is not None and int(row[0]) == force_generation
+    except Exception:
+        db.rollback()
+        return False
+
+
 def _release_summarize_claim(db, job_id: int, exec_uuid: str) -> None:
-    """Reset the summarize step claim to pending under the fencing triple
-    so a capacity retry (fresh incarnation) can reclaim it (Review Round 2 N6)."""
     try:
         from app.services.job_steps import fail_step
 
@@ -316,11 +340,47 @@ def _terminalize_capacity_exhausted(db, job_id: int) -> bool:
         if job.status in (
             ProcessingStatus.PENDING, ProcessingStatus.PROCESSING,
         ):
-            job.status = ProcessingStatus.FAILED
-            job.error_message = "No sidecar capacity available after retries"
-            job.celery_task_id = None
-            if job.processing_mode == "slide_aware":
-                job.slide_status = "failed"
+            # Atomic against a concurrent claim (P9-NEW-17): the job-fail is
+            # a single conditional UPDATE that re-checks, in the same
+            # statement, that no running claim exists. If another incarnation
+            # claims between our read above and this UPDATE, the NOT EXISTS
+            # fails, rowcount is 0, and we skip without failing the job.
+            if db.bind.dialect.name == "postgresql":
+                result = db.execute(
+                    text(
+                        "UPDATE processing_jobs SET status = 'failed', "
+                        "error_message = 'No sidecar capacity available after retries', "
+                        "celery_task_id = NULL, slide_status = CASE "
+                        "WHEN processing_mode = 'slide_aware' THEN 'failed' "
+                        "ELSE slide_status END, updated_at = now() "
+                        "WHERE id = :job_id AND status IN ('pending', 'processing') "
+                        "AND NOT EXISTS (SELECT 1 FROM job_steps js "
+                        "WHERE js.job_id = processing_jobs.id "
+                        "AND js.status = 'running' AND js.claim_token IS NOT NULL)"
+                    ),
+                    {"job_id": job_id},
+                )
+            else:
+                result = db.execute(
+                    text(
+                        "UPDATE processing_jobs SET status = 'failed', "
+                        "error_message = 'No sidecar capacity available after retries', "
+                        "celery_task_id = NULL "
+                        "WHERE id = :job_id AND status IN ('pending', 'processing') "
+                        "AND NOT EXISTS (SELECT 1 FROM job_steps js "
+                        "WHERE js.job_id = processing_jobs.id "
+                        "AND js.status = 'running' AND js.claim_token IS NOT NULL)"
+                    ),
+                    {"job_id": job_id},
+                )
+            if result.rowcount != 1:
+                # A claim won the race (or the job is no longer active).
+                db.rollback()
+                logger.warning(
+                    "capacity exhaustion terminalize for job %s skipped: concurrent claim or non-active job",
+                    job_id,
+                )
+                return False
             _finish_admission_for_job(db, job_id, failed=True)
         db.commit()
         return True
@@ -538,11 +598,11 @@ def process_video_download(self, job_id: int):
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if job is None or not job.video_url:
             return {"job_id": job_id, "status": "skipped"}
-        # Terminal guard (Review Round 2 NEW-9): never resurrect cancelled or
-        # failed jobs via redriven download work. COMPLETED jobs are allowed
-        # through: the restore-drill flow deliberately retries a failed
-        # download step on a completed job to resume its pending dependent
-        # step (see the dependent-step re-dispatch below).
+        # Terminal guard (Review Round 2 NEW-9/P9-NEW-16): never resurrect
+        # cancelled or failed jobs via redriven download work. COMPLETED jobs
+        # are allowed through: the restore-drill flow deliberately retries a
+        # failed download step on a completed job to resume its pending
+        # dependent step (see the dependent-step re-dispatch below).
         if job.status in (ProcessingStatus.CANCELLED, ProcessingStatus.FAILED):
             return {"job_id": job_id, "status": "skipped", "reason": "job is terminal"}
         claimed = claim_step(db, job.id, "download", exec_uuid)
@@ -620,12 +680,24 @@ def process_transcript(self, job_id: int):
         # Idempotency guard. task_acks_late=True means a worker killed after
         # finishing but before acking gets the same job redelivered. Reprocessing
         # a completed job would overwrite its transcript and re-run the LLM, so
-        # skip anything already in a terminal state.
+        # skip anything already in a terminal state. FAILED is also terminal
+        # for redeliveries past max_retries (P9-NEW-16): a retried attempt
+        # (retries < max) may proceed — the retry path below re-enters
+        # PROCESSING — but a redelivery after final exhaustion must not
+        # resurrect an unadmitted job.
         if job.status in (ProcessingStatus.COMPLETED, ProcessingStatus.CANCELLED):
             logger.info(
                 "Job %s already %s; skipping duplicate delivery", job_id, job.status.value
             )
             return {"job_id": job_id, "status": job.status.value, "skipped": True}
+        if (
+            job.status == ProcessingStatus.FAILED
+            and self.request.retries >= self.max_retries
+        ):
+            logger.info(
+                "Job %s failed after max retries; skipping late redelivery", job_id
+            )
+            return {"job_id": job_id, "status": "failed", "skipped": True}
 
         # Staleness guard against redelivered executions while a delivery is
         # still actively running: video download + Whisper fallback
@@ -1059,9 +1131,18 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
         heartbeat_thread.start()
 
         # Step claim comes AFTER the lease so a no-capacity retry never holds
-        # a claim owned by a dead incarnation (Review Round 2 F1/N1).
+        # a claim owned by a dead incarnation (Review Round 2 F1/N1). For
+        # force deliveries, revalidate the generation under the job lock at
+        # the claim point too (P9-NEW-14) — a newer force minted during the
+        # lease wait must fence this delivery out.
         if _has_persisted_steps(job):
             from app.services.job_steps import claim_step
+
+            if force and force_generation is not None:
+                if not _force_generation_still_valid(db, job.id, force_generation):
+                    _release_slot_if_held(db, slot, exec_uuid)
+                    db.commit()
+                    return {"status": "skipped", "reason": "superseded by a newer force request"}
 
             summarize_claimed = claim_step(
                 db, job.id, "summarize", exec_uuid
@@ -1211,7 +1292,17 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
                     })
 
 
-        # Delete old summary if force re-generating
+        # Delete old summary if force re-generating. Revalidate the force
+        # generation under the job-row lock BEFORE the destructive write
+        # (P9-NEW-14): a newer force mints a fresh generation and fences this
+        # delivery out.
+        if force and force_generation is not None:
+            if not _force_generation_still_valid(db, job.id, force_generation):
+                logger.info(
+                    "Summarize: job %s force generation superseded before document replacement; aborting",
+                    job_id,
+                )
+                return {"status": "skipped", "reason": "superseded by a newer force request"}
         if force:
             db.query(Document).filter(
                 Document.job_id == job.id, Document.format == "summary"
@@ -1253,7 +1344,16 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
             cancel_check=lambda: _is_cancelled(db, job_id) or lease_lost.is_set(),
         )
 
-        # Persist document
+        # Persist document. For force deliveries, revalidate the generation
+        # once more under the job lock before the final write (P9-NEW-14):
+        # a newer force that minted during the LLM call must win.
+        if force and force_generation is not None:
+            if not _force_generation_still_valid(db, job.id, force_generation):
+                logger.info(
+                    "Summarize: job %s force generation superseded before final save; aborting",
+                    job_id,
+                )
+                return {"status": "skipped", "reason": "superseded by a newer force request"}
         doc = llm.save_document(db, job.id, title, summary_content, "summary")
 
         # Mark summarization as completed
