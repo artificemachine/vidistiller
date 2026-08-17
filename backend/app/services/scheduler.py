@@ -55,6 +55,13 @@ def promote_queued_jobs(db: Session, limit: int = 10) -> int:
     first-stage outbox row.
     """
     from app.services.admission import admit_or_queue_job
+    from app.services.sidecar import prefetch_sidecar_telemetry
+
+    # WP3-hotfix: warm the telemetry snapshot BEFORE any FOR UPDATE row lock
+    # below — the preference check inside admit_or_queue_job reads ONLY the
+    # local snapshot (no Redis I/O under job/admission row locks, Review
+    # Round 2 F7 invariant).
+    prefetch_sidecar_telemetry(db)
 
     queued_ids = [
         row[0]

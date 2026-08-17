@@ -194,23 +194,23 @@ def _resolve_provider_for_slot(db, slot):
     """
     from app.services.llm_providers import build_provider
     from app.services.sidecar import (
-        cached_sidecar_telemetry,
         get_sidecar,
         prefetch_sidecar_telemetry,
     )
 
     # WP3-hotfix: warm this worker process's local telemetry cache from the
-    # shared Redis store before any DB read, so this function never performs
-    # network I/O while holding a DB transaction/row lock (Review Round 2 F7
-    # invariant) and so the leased sidecar's telemetry is visible across the
-    # process boundary.
-    prefetch_sidecar_telemetry(db)
+    # shared Redis store and snapshot it BEFORE any DB read, so this
+    # function performs no network I/O while holding a DB transaction/row
+    # lock (Review Round 2 F7 invariant) and the leased sidecar's telemetry
+    # is visible across the process boundary. The snapshot (not a second
+    # read-through) is consumed below.
+    telemetry_snapshot = prefetch_sidecar_telemetry(db)
 
     sidecar = get_sidecar(db, slot.sidecar_id)
     if sidecar is None:
         logger.warning("leased sidecar %s missing from registry", slot.sidecar_id)
         return None, None
-    telemetry = cached_sidecar_telemetry(slot.sidecar_id)
+    telemetry = telemetry_snapshot.get(slot.sidecar_id)
     if telemetry is None or not telemetry.healthy or telemetry.stale:
         logger.warning(
             "leased sidecar %s has no fresh healthy telemetry; treating as no capacity",

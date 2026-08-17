@@ -32,6 +32,7 @@ import pytest
 import requests
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
@@ -159,36 +160,42 @@ def _flush_telemetry_keys():
 @pytest.fixture()
 def cross_process_env(stub_sidecar):
     """Migrated DB with a registered sidecar + slot, plus the shared env for
-    both subprocess roles."""
+    both subprocess roles. Uses an EXPLICIT engine bound to DATABASE_URL for
+    parent-process seeding (never the global app SessionLocal, which may be
+    bound to SQLite in the test process)."""
     _fresh_schema()
     _flush_telemetry_keys()
 
-    from app.db.models import ResourceSlot, Sidecar, User
-    from app.db.session import SessionLocal
+    from app.db.models import Base, ResourceSlot, Sidecar, User
     from app.services.auth import AuthService
 
-    db = SessionLocal()
-    user = User(
-        username="telemetry_share",
-        email="telemetry_share@test.local",
-        password_hash=AuthService.hash_password("SharePass123"),
-        is_active=True,
-    )
-    db.add(user)
-    db.flush()
-    db.add(
-        Sidecar(
-            registered_id="primary",
-            label="Primary (stub)",
-            base_url=stub_sidecar.base_url,
-            capabilities=["text"],
-            enabled=True,
+    seed_engine = create_engine(DATABASE_URL)
+    SeedSession = sessionmaker(bind=seed_engine, expire_on_commit=False)
+    db = SeedSession()
+    try:
+        user = User(
+            username="telemetry_share",
+            email="telemetry_share@test.local",
+            password_hash=AuthService.hash_password("SharePass123"),
+            is_active=True,
         )
-    )
-    db.add(ResourceSlot(sidecar_id="primary", slot_index=0, enabled=True))
-    db.commit()
-    user_id = user.id
-    db.close()
+        db.add(user)
+        db.flush()
+        db.add(
+            Sidecar(
+                registered_id="primary",
+                label="Primary (stub)",
+                base_url=stub_sidecar.base_url,
+                capabilities=["text"],
+                enabled=True,
+            )
+        )
+        db.add(ResourceSlot(sidecar_id="primary", slot_index=0, enabled=True))
+        db.commit()
+        user_id = user.id
+    finally:
+        db.close()
+        seed_engine.dispose()
 
     env = dict(os.environ)
     env["DATABASE_URL"] = DATABASE_URL
@@ -400,3 +407,185 @@ def test_worker_restart_reload_reads_shared_store(cross_process_env):
 
     out3 = _run_role(WORKER_ROLE, env)
     assert json.loads(out3.splitlines()[-1])["slot"] is None
+
+
+def _publish_raw(payload: dict) -> None:
+    """Write an arbitrary (possibly malformed) payload under the primary
+    telemetry key, bypassing the strict serializer."""
+    import redis as _redis
+
+    client = _redis.from_url(REDIS_URL, decode_responses=True)
+    client.set(
+        f"vidistiller:sidecar-telemetry:primary",
+        json.dumps(payload, allow_nan=True),
+        ex=120,
+    )
+
+
+def _valid_payload(**overrides) -> dict:
+    payload = {
+        "registered_id": "primary",
+        "label": "Primary",
+        "base_url": "http://127.0.0.1:1",
+        "declared_model": "stub-model",
+        "capabilities": ["text"],
+        "healthy": True,
+        "served_models": ["stub-model"],
+        "running_requests": 0,
+        "waiting_requests": 0,
+        "vram_used_mib": None,
+        "vram_total_mib": None,
+        "cache_hit_rate": None,
+        "reserved_slots": 0,
+        "total_slots": 1,
+        "observed_at": time.time(),
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_no_redis_io_while_row_locks_held(cross_process_env):
+    """Proof of the no-network-I/O-under-lock invariant: after prefetch,
+    acquire_slot must complete WITHOUT any Redis read (a Redis client that
+    raises on any call would fail the acquire if the locked loop touched it).
+    Runs in-process against the migrated PG with the shared store primed."""
+    import redis as _redis
+    from app.services.sidecar import _telemetry_key
+
+    env = cross_process_env["env"]
+    out_api = _run_role(API_ROLE, env)
+    assert "published" in out_api
+
+    from app.db.models import ProcessingJob
+    from app.services.lease import acquire_slot
+    from app.services.sidecar import (
+        _get_redis,
+        prefetch_sidecar_telemetry,
+    )
+
+    # Prime this process's local cache from the shared store exactly like a
+    # worker would (empty local cache -> prefetch reads Redis once).
+    seed_engine = create_engine(DATABASE_URL)
+    SeedSession = sessionmaker(bind=seed_engine, expire_on_commit=False)
+    db = SeedSession()
+    try:
+        prefetch_sidecar_telemetry(db)
+
+        # Break Redis so ANY read would raise. The locked section must never
+        # call it.
+        real_get = _get_redis().get
+
+        def _boom(*a, **k):
+            raise AssertionError("Redis read attempted while row locks held")
+
+        _get_redis().get = _boom  # type: ignore[method-assign]
+        try:
+            job = ProcessingJob(
+                job_id="noio-lock-proof",
+                status="pending",
+                video_url="https://example.com/v",
+                user_id=cross_process_env["user_id"],
+                processing_mode="slide_aware",
+            )
+            db.add(job)
+            db.commit()
+            slot = acquire_slot(db, job, exec_uuid="exec-noio")
+            db.commit()
+            assert slot is not None, "acquire_slot must use the prefetch snapshot only"
+        finally:
+            _get_redis().get = real_get  # type: ignore[method-assign]
+    finally:
+        db.close()
+        seed_engine.dispose()
+
+
+def test_resolve_provider_fails_closed_without_telemetry(cross_process_env):
+    """A leased slot whose telemetry is absent/stale must yield NO provider
+    (fail closed) — the summarize/slide path must not fabricate capacity."""
+    import redis as _redis
+    from app.db.models import ProcessingJob
+    from app.services.lease import acquire_slot, release_slot
+    from app.services.sidecar import _telemetry_key
+    from app.tasks import _resolve_provider_for_slot
+
+    env = cross_process_env["env"]
+    out_api = _run_role(API_ROLE, env)
+    assert "published" in out_api
+
+    seed_engine = create_engine(DATABASE_URL)
+    SeedSession = sessionmaker(bind=seed_engine, expire_on_commit=False)
+    db = SeedSession()
+    try:
+        job = ProcessingJob(
+            job_id="resolve-fail-closed",
+            status="pending",
+            video_url="https://example.com/v",
+            user_id=cross_process_env["user_id"],
+            processing_mode="slide_aware",
+        )
+        db.add(job)
+        db.commit()
+        slot = acquire_slot(db, job, exec_uuid="exec-resolve")
+        db.commit()
+        assert slot is not None
+
+        # Age the snapshot past staleness: provider resolution must fail
+        # closed even though a slot is held. Clear this process's local
+        # cache first so the resolve path reads the (aged) shared store —
+        # exactly what a fresh worker process would do.
+        client = _redis.from_url(REDIS_URL, decode_responses=True)
+        raw = json.loads(client.get(_telemetry_key("primary")))
+        raw["observed_at"] = time.time() - 3600
+        client.setex(_telemetry_key("primary"), 120, json.dumps(raw))
+
+        from app.services.sidecar import (
+            _telemetry_cache,
+            _telemetry_local_ts,
+            _telemetry_lock,
+        )
+
+        with _telemetry_lock:
+            _telemetry_cache.clear()
+            _telemetry_local_ts.clear()
+
+        provider, model = _resolve_provider_for_slot(db, slot)
+        db.commit()
+        assert provider is None and model is None
+        release_slot(db, slot.id, "exec-resolve", slot.generation)
+        db.commit()
+    finally:
+        db.close()
+        seed_engine.dispose()
+
+
+def test_malformed_telemetry_fails_closed(cross_process_env):
+    """Strict deserialization: any shape/type violation fails closed (no
+    coercion). Each malformed variant must produce NO slot in a fresh worker
+    process."""
+    env = cross_process_env["env"]
+    malformed = [
+        {"healthy": "false"},  # string not bool — must not coerce to True
+        {"served_models": "stub-model"},  # string not list
+        {"served_models": [""]},  # empty model id
+        {"observed_at": "NaN"},  # non-finite timestamp must be rejected
+        {"registered_id": "other"},  # mismatched registered id
+        {"capabilities": "text"},  # string not list
+        {"label": 123},  # wrong type
+        {"base_url": None},  # wrong type
+    ]
+    for overrides in malformed:
+        _publish_raw(_valid_payload(**overrides))
+        out_worker = _run_role(WORKER_ROLE, env)
+        result = json.loads(out_worker.splitlines()[-1])
+        assert result["slot"] is None, f"malformed payload {overrides} did not fail closed"
+
+
+def test_malformed_telemetry_with_valid_shape_still_requires_healthy_model(cross_process_env):
+    """A well-typed but semantically empty/unhealthy snapshot still fails
+    closed (strictness is on top of the existing fail-closed gates)."""
+    env = cross_process_env["env"]
+    for overrides in ({"healthy": False}, {"served_models": []}, {"observed_at": time.time() - 3600}):
+        _publish_raw(_valid_payload(**overrides))
+        out_worker = _run_role(WORKER_ROLE, env)
+        result = json.loads(out_worker.splitlines()[-1])
+        assert result["slot"] is None, f"payload {overrides} did not fail closed"

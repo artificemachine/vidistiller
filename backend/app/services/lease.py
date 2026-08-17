@@ -83,23 +83,24 @@ def acquire_slot(
     """
     settings = get_settings().admission
     from app.services.sidecar import (
-        cached_sidecar_telemetry,
         get_sidecar,
+        local_sidecar_telemetry,
         prefetch_sidecar_telemetry,
     )
 
     # WP3-hotfix: warm this process's local cache from the shared Redis
-    # store BEFORE taking any row lock, so the eligibility loop below never
-    # performs network I/O while holding DB row locks (Review Round 2 F7
-    # invariant). In the Celery worker this is what makes telemetry visible
-    # at all — the API scheduler published it; the worker reads it through.
-    prefetch_sidecar_telemetry(db)
+    # store BEFORE taking any row lock, and snapshot the result so the
+    # eligibility loop below reads ONLY the local snapshot — never Redis —
+    # while DB row locks are held (Review Round 2 F7 invariant). In the
+    # Celery worker this is what makes telemetry visible at all: the API
+    # scheduler published it; the worker reads it through.
+    snapshot = prefetch_sidecar_telemetry(db)
 
     def _eligible(sidecar_id: str) -> bool:
         sidecar = get_sidecar(db, sidecar_id)
         if sidecar is None or not sidecar.enabled:
             return False
-        telemetry = cached_sidecar_telemetry(sidecar_id)
+        telemetry = snapshot.get(sidecar_id)
         if telemetry is None:
             return False  # never probed -> fail closed for new allocations
         if not telemetry.healthy or telemetry.stale:

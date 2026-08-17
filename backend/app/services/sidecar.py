@@ -85,7 +85,9 @@ def _telemetry_key(registered_id: str) -> str:
 
 def _telemetry_to_dict(t: SidecarTelemetry) -> dict:
     """Serialize a telemetry row for the shared store (fields only; the
-    ``stale``/``available_slots`` properties are recomputed on read)."""
+    ``stale``/``available_slots`` properties are recomputed on read).
+    ``allow_nan=False`` rejects NaN/Infinity so a malformed float can never
+    be published and later evade staleness checks."""
     return {
         "registered_id": t.registered_id,
         "label": t.label,
@@ -106,37 +108,95 @@ def _telemetry_to_dict(t: SidecarTelemetry) -> dict:
 
 
 def _telemetry_from_dict(payload: dict) -> Optional[SidecarTelemetry]:
-    """Deserialize a telemetry row from the shared store (fail closed on
-    malformed payloads: return None so callers treat it as no capacity)."""
+    """Strictly validate and deserialize a telemetry row from the shared
+    store. Returns None on ANY shape/type violation (fail closed): the
+    caller treats it as no capacity. Validation is strict — no coercion:
+    ``healthy`` must be a real bool, ``served_models`` a list of non-empty
+    strings, ``observed_at`` a finite number, and ``registered_id`` must
+    match the caller's expectation."""
+    if not isinstance(payload, dict):
+        return None
     try:
+        registered_id = payload.get("registered_id")
+        label = payload.get("label")
+        base_url = payload.get("base_url")
+        healthy = payload.get("healthy")
+        served_models = payload.get("served_models")
+        observed_at = payload.get("observed_at")
+        capabilities = payload.get("capabilities")
+        if not isinstance(registered_id, str) or not registered_id:
+            return None
+        if not isinstance(label, str) or not isinstance(base_url, str):
+            return None
+        if not isinstance(healthy, bool):  # never coerce "false" strings
+            return None
+        if not isinstance(served_models, list) or not all(
+            isinstance(m, str) and m for m in served_models
+        ):
+            return None
+        if not isinstance(observed_at, (int, float)) or isinstance(observed_at, bool):
+            return None
+        observed_at = float(observed_at)
+        import math
+
+        if not math.isfinite(observed_at):  # NaN/Inf would evade staleness
+            return None
+        if capabilities is not None and (
+            not isinstance(capabilities, list)
+            or not all(isinstance(c, str) and c for c in capabilities)
+        ):
+            return None
         return SidecarTelemetry(
-            registered_id=str(payload.get("registered_id", "")),
-            label=str(payload.get("label", "")),
-            base_url=str(payload.get("base_url", "")),
-            declared_model=payload.get("declared_model"),
-            capabilities=list(payload.get("capabilities") or []),
-            healthy=bool(payload.get("healthy", False)),
-            served_models=list(payload.get("served_models") or []),
-            running_requests=int(payload.get("running_requests", 0)),
-            waiting_requests=int(payload.get("waiting_requests", 0)),
-            vram_used_mib=payload.get("vram_used_mib"),
-            vram_total_mib=payload.get("vram_total_mib"),
-            cache_hit_rate=payload.get("cache_hit_rate"),
-            reserved_slots=int(payload.get("reserved_slots", 0)),
-            total_slots=int(payload.get("total_slots", 0)),
-            observed_at=float(payload.get("observed_at", 0.0)),
+            registered_id=registered_id,
+            label=label,
+            base_url=base_url,
+            declared_model=payload.get("declared_model") if isinstance(payload.get("declared_model"), (str, type(None))) else None,
+            capabilities=list(capabilities or []),
+            healthy=healthy,
+            served_models=list(served_models),
+            running_requests=_strict_int(payload.get("running_requests")),
+            waiting_requests=_strict_int(payload.get("waiting_requests")),
+            vram_used_mib=_strict_int(payload.get("vram_used_mib"), nullable=True),
+            vram_total_mib=_strict_int(payload.get("vram_total_mib"), nullable=True),
+            cache_hit_rate=_strict_float(payload.get("cache_hit_rate"), nullable=True),
+            reserved_slots=_strict_int(payload.get("reserved_slots")),
+            total_slots=_strict_int(payload.get("total_slots")),
+            observed_at=observed_at,
         )
     except (TypeError, ValueError):
         return None
 
 
+def _strict_int(value, nullable: bool = False) -> int:
+    """Strict int validation (no bool/float coercion). None allowed when
+    nullable; otherwise 0 is returned for a missing/invalid field rather
+    than failing the whole row (counters are not security-relevant)."""
+    if value is None:
+        return None if nullable else 0  # type: ignore[return-value]
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None if nullable else 0  # type: ignore[return-value]
+    return value
+
+
+def _strict_float(value, nullable: bool = False) -> Optional[float]:
+    if value is None:
+        return None if nullable else 0.0
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None if nullable else 0.0
+    return float(value)
+
+
 def _publish_telemetry(t: SidecarTelemetry) -> None:
     """Publish one telemetry row to the shared Redis store (best-effort;
-    failure must never break the API scheduler sweep)."""
+    failure must never break the API scheduler sweep). ``allow_nan=False``
+    refuses to publish NaN/Infinity (which could otherwise evade staleness
+    checks on read)."""
     try:
         ttl = get_settings().admission.telemetry_redis_ttl_seconds
         _get_redis().setex(
-            _telemetry_key(t.registered_id), ttl, json.dumps(_telemetry_to_dict(t))
+            _telemetry_key(t.registered_id),
+            ttl,
+            json.dumps(_telemetry_to_dict(t), allow_nan=False),
         )
     except Exception as exc:
         logger.warning("telemetry publish failed for %s: %s", t.registered_id, exc)
@@ -145,54 +205,71 @@ def _publish_telemetry(t: SidecarTelemetry) -> None:
 def _read_telemetry_from_redis(registered_id: str) -> Optional[SidecarTelemetry]:
     """Read one telemetry row from the shared Redis store (bounded, fail
     closed on any error). Returns None when absent/unreadable/unhealthy —
-    the caller's eligibility checks apply staleness/no-model rules."""
+    the caller's eligibility checks apply staleness/no-model rules. The
+    payload's registered_id MUST match the key it was read from (a
+    mismatched row is malformed and fails closed)."""
     try:
         raw = _get_redis().get(_telemetry_key(registered_id))
         if not raw:
             return None
         payload = json.loads(raw)
-        return _telemetry_from_dict(payload)
+        t = _telemetry_from_dict(payload)
+        if t is None or t.registered_id != registered_id:
+            return None
+        return t
     except Exception as exc:
         logger.warning("telemetry read failed for %s: %s", registered_id, exc)
         return None
 
 
-def prefetch_sidecar_telemetry(db: Session) -> None:
+def prefetch_sidecar_telemetry(db: Session) -> dict[str, Optional[SidecarTelemetry]]:
     """Warm this process's local cache from the shared Redis store for all
-    enabled sidecars. Called by capacity-critical paths BEFORE any DB row
-    lock is taken (Review Round 2 F7 invariant: no network I/O while
-    holding a DB transaction/row lock). Safe in every process: the API
-    scheduler refreshes local data directly; workers (and a fresh API after
-    restart) fill their local cache here.
+    enabled sidecars and RETURN an immutable snapshot of the result.
+
+    Called by capacity-critical paths BEFORE any DB row lock is taken
+    (Review Round 2 F7 invariant: no network I/O while holding a DB
+    transaction/row lock). Safe in every process: the API scheduler
+    refreshes local data directly; workers (and a fresh API after restart)
+    fill their local cache here.
 
     A FRESH local copy is always kept (never clobbered by a Redis miss): in
     the API process the scheduler just wrote it; in tests the fixture
     injected it. Only stale/missing local entries are re-read from Redis,
     and a Redis miss for those evicts them (fail closed).
+
+    The returned snapshot maps every enabled registered id to its telemetry
+    or an explicit None (miss) — consumers that hold DB row locks MUST read
+    from this snapshot (or the local cache) and never call the read-through
+    getter, so no Redis I/O can occur under a lock.
     """
     ids = [rid for (rid,) in db.query(Sidecar.registered_id).filter(Sidecar.enabled.is_(True)).all()]
     if not ids:
-        return
+        return {}
     now = time.monotonic()
     local_ttl = get_settings().admission.local_telemetry_cache_ttl_seconds
+    snapshot: dict[str, Optional[SidecarTelemetry]] = {}
     for rid in ids:
         with _telemetry_lock:
             entry = _telemetry_cache.get(rid)
             loaded = _telemetry_local_ts.get(rid, 0.0)
             fresh_local = entry is not None and (now - loaded) < local_ttl
         if fresh_local:
-            continue  # fresh local copy — no Redis round trip, never evict
+            snapshot[rid] = entry  # fresh local copy — no Redis round trip
+            continue
         t = _read_telemetry_from_redis(rid)
         if t is not None:
             with _telemetry_lock:
                 _telemetry_cache[rid] = t
                 _telemetry_local_ts[rid] = time.monotonic()
+            snapshot[rid] = t
         else:
             # Fail closed for this process: an absent/unreadable shared row
             # must not leave a stale local copy serving as capacity.
             with _telemetry_lock:
                 _telemetry_cache.pop(rid, None)
                 _telemetry_local_ts.pop(rid, None)
+            snapshot[rid] = None
+    return snapshot
 
 
 def refresh_telemetry_cache(db: Session) -> None:
@@ -241,18 +318,18 @@ def refresh_telemetry_cache(db: Session) -> None:
 
 
 def get_sidecar_telemetry_status(registered_id: str) -> str:
-    """Return the cached health status of a sidecar: 'ok' | 'unknown' |
+    """Return the LOCAL cached health status of a sidecar: 'ok' | 'unknown' |
     'unhealthy' | 'stale' | 'no_capacity'.
 
-    Used by admission for the fail-closed preference check. Unknown means
-    the cache has never loaded (scheduler not yet run) — treated as 'ok'
-    for the preference gate only if the registry row exists, but the task
+    Used by admission for the fail-closed preference check. STRICTLY LOCAL
+    (never touches Redis): callers must prefetch_sidecar_telemetry() BEFORE
+    entering a lock-holding section, then read status here. Unknown means
+    the local cache has nothing fresh (scheduler not yet run in this
+    process, or prefetch not yet called) — treated as 'ok' for the
+    preference gate only if the registry row exists, but the task
     incarnation still requires a live slot lease before external work.
-    WP3-hotfix: read-through, so a fresh process (API after restart, or any
-    worker) resolves against the shared Redis store instead of an empty
-    local cache.
     """
-    telemetry = cached_sidecar_telemetry(registered_id)
+    telemetry = local_sidecar_telemetry(registered_id)
     if telemetry is None:
         return "unknown"
     if not telemetry.healthy:
@@ -264,11 +341,19 @@ def get_sidecar_telemetry_status(registered_id: str) -> str:
     return "ok"
 
 
+def local_sidecar_telemetry(registered_id: str) -> Optional[SidecarTelemetry]:
+    """Strictly local lookup — NEVER touches Redis. Lock-held code paths
+    must use this after prefetch_sidecar_telemetry(), never the read-through
+    getter, so no network I/O can occur while DB row locks are held."""
+    with _telemetry_lock:
+        return _telemetry_cache.get(registered_id)
+
+
 def cached_sidecar_telemetry(registered_id: str) -> Optional[SidecarTelemetry]:
     """Return the telemetry row for a sidecar: fresh process-local copy
     first, then the shared Redis store (WP3-hotfix). Fail closed: returns
     None when the local copy is missing/stale and the shared store has
-    nothing readable."""
+    nothing readable. Safe to call outside row-lock sections only."""
     local_ttl = get_settings().admission.local_telemetry_cache_ttl_seconds
     now = time.monotonic()
     with _telemetry_lock:

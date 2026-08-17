@@ -231,7 +231,13 @@ def create_job(
         # outbox dispatch row is written; it is published to Redis only after
         # commit (durable at-least-once, Review Round 1 Finding 7).
         from app.services.admission import admit_or_queue_job
+        from app.services.sidecar import prefetch_sidecar_telemetry
 
+        # WP3-hotfix: warm the telemetry snapshot BEFORE the admission
+        # transaction takes any lock — the preference check inside
+        # admit_or_queue_job reads ONLY the local snapshot (no Redis I/O
+        # under counter/job locks, Review Round 2 F7 invariant).
+        prefetch_sidecar_telemetry(db)
         outcome = admit_or_queue_job(
             db, new_job, preferred_sidecar=sidecar_pref
         )
