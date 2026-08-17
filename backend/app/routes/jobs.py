@@ -1024,15 +1024,71 @@ def summarize_transcript(
         if running_task_id:
             celery_app.control.revoke(running_task_id, terminate=True, signal="SIGTERM")
     else:
+        # P14-NEW-31/P15-NEW-34: persist the authorized 'processing' state
+        # IN THE SAME transaction as the generation mint, before any
+        # publish. No later unconditional rewrite: a cancellation that
+        # commits after this point must not be overwritten.
         force_generation = _mint_force_generation(db, job.id)
+        if db.bind.dialect.name == "postgresql":
+            db.execute(
+                text(
+                    "UPDATE processing_jobs SET summarize_status = 'processing' "
+                    "WHERE id = :job_id AND summarize_status IS DISTINCT FROM 'failed'"
+                ),
+                {"job_id": job.id},
+            )
+        else:
+            db.execute(
+                text(
+                    "UPDATE processing_jobs SET summarize_status = 'processing' "
+                    "WHERE id = :job_id AND summarize_status IS NOT 'failed'"
+                ),
+                {"job_id": job.id},
+            )
         db.commit()
 
-    # Dispatch background summarization task (task sets celery_task_id itself)
-    # P14-NEW-31: persist the authorized 'processing' state BEFORE publishing
-    # so a fast worker never observes 'failed' and skips a legitimate run.
-    job.summarize_status = "processing"
+    # P15-NEW-34: the processing state was already persisted above. Re-check
+    # under the lock that a cancellation did not win during the revoke; if it
+    # did, do NOT publish — the cancellation is authoritative.
+    if db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT id FROM processing_jobs WHERE id = :job_id FOR UPDATE"),
+            {"job_id": job.id},
+        )
+    state = db.execute(
+        text("SELECT summarize_status FROM processing_jobs WHERE id = :job_id"),
+        {"job_id": job.id},
+    ).scalar()
+    if state == "failed":
+        db.rollback()
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"message": "Summarization was cancelled; cannot force-start", "job_id": job_id},
+        )
     db.commit()
-    summarize_transcript_task.delay(job.id, force, force_generation)
+
+    # Dispatch background summarization task via the durable outbox
+    # (P15-NEW-35): the outbox row is persisted atomically with the state
+    # transition above, and the publisher/sweep delivers it — a crash or
+    # Redis failure after commit leaves a recoverable message.
+    from app.services.admission import enqueue_first_stage
+    from app.services.dispatch import publish_outbox
+
+    enqueue_first_stage(
+        db, job.id, str(uuid.uuid4()),
+        stage="summarize",
+        payload={"force": force, "force_generation": force_generation},
+    )
+    db.commit()
+    try:
+        publish_outbox(db, job_id=job.id)
+        db.commit()
+    except Exception as exc:
+        logger.warning(
+            "summarize dispatch publish failed for job %s (outbox will retry): %s",
+            job.id, exc,
+        )
+        db.rollback()
 
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
@@ -1058,16 +1114,34 @@ def retry_job_step(
     db.commit()
 
     dispatchers = {
-        "download": lambda: process_video_download.delay(job.id),
-        "transcribe": lambda: process_transcript.delay(job.id),
-        "snapshots": lambda: process_snapshots.delay(job.id),
-        "slides": lambda: process_slides.delay(job.id),
+        "download": lambda: _enqueue_stage_retry(db, job.id, "download"),
+        "transcribe": lambda: _enqueue_stage_retry(db, job.id, "transcribe"),
+        "snapshots": lambda: _enqueue_stage_retry(db, job.id, "snapshots"),
+        "slides": lambda: _enqueue_stage_retry(db, job.id, "slides"),
         "summarize": lambda: _dispatch_summarize_retry(db, job),
     }
     if step_name == "export":
         return {"message": "Export step reset; request the export download again", "job_id": job_id}
     dispatchers[step_name]()
     return {"message": f"Retry for {step_name} started", "job_id": job_id}
+
+
+def _enqueue_stage_retry(db: Session, job_id: int, step_name: str) -> None:
+    """Durably dispatch a step retry via the outbox (P15-NEW-35)."""
+    from app.services.admission import enqueue_first_stage
+    from app.services.dispatch import publish_outbox
+
+    enqueue_first_stage(db, job_id, str(uuid.uuid4()), stage=step_name)
+    db.commit()
+    try:
+        publish_outbox(db, job_id=job_id)
+        db.commit()
+    except Exception as exc:
+        logger.warning(
+            "step retry publish failed for job %s/%s (outbox will retry): %s",
+            job_id, step_name, exc,
+        )
+        db.rollback()
 
 
 # ==============================================================================
@@ -1156,11 +1230,30 @@ def _dispatch_summarize_retry(db: Session, job) -> None:
 
     P14-NEW-31: persist the authorized 'processing' state before dispatch so
     the retried task is not skipped by the failed-status guard.
+    P15-NEW-35: dispatch is durable via the outbox — a crash or Redis
+    failure after commit leaves a recoverable message.
     """
     gen = _mint_force_generation(db, job.id)
     job.summarize_status = "processing"
     db.commit()
-    summarize_transcript_task.delay(job.id, True, gen)
+    from app.services.admission import enqueue_first_stage
+    from app.services.dispatch import publish_outbox
+
+    enqueue_first_stage(
+        db, job.id, str(uuid.uuid4()),
+        stage="summarize",
+        payload={"force": True, "force_generation": gen},
+    )
+    db.commit()
+    try:
+        publish_outbox(db, job_id=job.id)
+        db.commit()
+    except Exception as exc:
+        logger.warning(
+            "summarize retry publish failed for job %s (outbox will retry): %s",
+            job.id, exc,
+        )
+        db.rollback()
 
 
 def _mint_force_generation(db: Session, job_id: int) -> int:

@@ -25,11 +25,15 @@ import logging
 import uuid
 from typing import Optional
 
-from sqlalchemy import text
+from sqlalchemy import and_, or_, text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import AdmissionState, JobAdmission, ProcessingJob
+from app.db.models import (
+    AdmissionState,
+    JobAdmission,
+    ProcessingJob,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -140,9 +144,9 @@ def reap_orphaned_steps(db: Session) -> int:
 
     cutoff = _dt.now(UTC).replace(tzinfo=None) - _td(seconds=ORPHANED_CLAIM_TTL_SECONDS)
     # Orphaned RUNNING steps on PROCESSING jobs (pipeline stages) AND on
-    # COMPLETED jobs whose summarize_status is 'processing' — but only the
-    # summarize step qualifies on completed jobs (P14-NEW-33): a completed
-    # conversion has no legitimate download/transcribe/slides work left.
+    # COMPLETED jobs — but ONLY the summarize step qualifies on completed
+    # jobs (P14-NEW-33): the filter is in SQL so a step observed while its
+    # job was processing cannot be redriven once the job completes.
     orphaned = (
         db.query(JobStep)
         .join(ProcessingJob, ProcessingJob.id == JobStep.job_id)
@@ -150,22 +154,17 @@ def reap_orphaned_steps(db: Session) -> int:
             JobStep.status == JobStepStatus.RUNNING,
             JobStep.started_at < cutoff,
             JobStep.claim_token.isnot(None),
-            ProcessingJob.status.in_((ProcessingStatus.PROCESSING, ProcessingStatus.COMPLETED)),
+            or_(
+                ProcessingJob.status == ProcessingStatus.PROCESSING,
+                and_(
+                    ProcessingJob.status == ProcessingStatus.COMPLETED,
+                    ProcessingJob.summarize_status == "processing",
+                    JobStep.name == "summarize",
+                ),
+            ),
         )
         .all()
     )
-    orphaned = [
-        step
-        for step in orphaned
-        if (
-            step.job.status == ProcessingStatus.PROCESSING
-            or (
-                step.job.status == ProcessingStatus.COMPLETED
-                and step.job.summarize_status == "processing"
-                and step.name == "summarize"
-            )
-        )
-    ]
     reaped = 0
     for step in orphaned:
         # Atomic conditional reclamation (Review Round 2 NEW-2/NEW-9): the
@@ -177,19 +176,19 @@ def reap_orphaned_steps(db: Session) -> int:
         if db.bind.dialect.name == "postgresql":
             # Serialize with cancellation: take the job row lock FIRST
             # (cancellation updates the job row in its terminal transaction),
-            # then re-check the job is still eligible (processing pipeline
-            # stages, or completed conversions with an active summarize
-            # step — P11-NEW-24, scoped to summarize per P14-NEW-33).
-            if step.job.status == ProcessingStatus.COMPLETED and step.name != "summarize":
-                continue  # unrelated step on a completed job: not eligible
+            # then re-check the job is still eligible. The completed-job
+            # branch requires the summarize step IN SQL (P14-NEW-33).
             job_locked = db.execute(
                 text(
                     "SELECT id FROM processing_jobs WHERE id = :job_id "
                     "AND (status = 'processing' OR "
-                    "(status = 'completed' AND summarize_status = 'processing')) "
+                    "(status = 'completed' AND summarize_status = 'processing' "
+                    "AND EXISTS (SELECT 1 FROM job_steps js "
+                    "WHERE js.job_id = processing_jobs.id "
+                    "AND js.name = 'summarize' AND js.id = :step_id))) "
                     "FOR UPDATE"
                 ),
-                {"job_id": step.job_id},
+                {"job_id": step.job_id, "step_id": step.id},
             ).first()
             if job_locked is None:
                 continue  # job terminalized concurrently or not eligible
@@ -200,7 +199,8 @@ def reap_orphaned_steps(db: Session) -> int:
                 "WHERE id = :id AND status = 'running' AND started_at < :cutoff "
                 "AND EXISTS (SELECT 1 FROM processing_jobs pj "
                 "WHERE pj.id = job_steps.job_id AND (pj.status = 'processing' OR "
-                "(pj.status = 'completed' AND pj.summarize_status = 'processing')))"
+                "(pj.status = 'completed' AND pj.summarize_status = 'processing' "
+                "AND job_steps.name = 'summarize')))"
             ),
             {"id": step.id, "cutoff": cutoff},
         )

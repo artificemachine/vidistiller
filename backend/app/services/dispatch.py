@@ -114,11 +114,12 @@ def publish_outbox(
         try:
             payload = row.payload or {}
             if row.stage == "summarize" and payload.get("force"):
-                # Orphan-reaped summarize on a completed conversion: mint a
-                # fresh force generation and pass it (P12-NEW-26). Fenced
-                # against cancellation (P13-NEW-29): if the user cancelled
-                # after the reaper enqueued, summarize_status is 'failed' and
-                # this recovery must NOT restart the work.
+                # Force summarize (route or orphan-reaped): the payload
+                # carries the generation minted by the route when present;
+                # otherwise mint a fresh one (P12-NEW-26). Fenced against
+                # cancellation (P13-NEW-29): if the user cancelled after
+                # the outbox row was written, summarize_status is 'failed'
+                # and this recovery must NOT restart the work.
                 if db.bind.dialect.name == "postgresql":
                     state = db.execute(
                         text(
@@ -134,7 +135,7 @@ def publish_outbox(
                     state = _j.summarize_status if _j else None
                 if state != "processing":
                     logger.info(
-                        "outbox: skipping reaped summarize for job %s (summarize_status=%s)",
+                        "outbox: skipping summarize dispatch for job %s (summarize_status=%s)",
                         row.job_id, state,
                     )
                     from app.services.admission import mark_outbox_delivered
@@ -143,9 +144,11 @@ def publish_outbox(
                     db.commit()
                     published += 1
                     continue
-                from app.routes.jobs import _mint_force_generation
+                gen = payload.get("force_generation")
+                if gen is None:
+                    from app.routes.jobs import _mint_force_generation
 
-                gen = _mint_force_generation(db, row.job_id)
+                    gen = _mint_force_generation(db, row.job_id)
                 db.commit()
                 task.delay(row.job_id, True, gen)
             else:
