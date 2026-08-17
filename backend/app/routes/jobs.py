@@ -508,13 +508,16 @@ def get_job(
             joinedload(ProcessingJob.snapshots),
             joinedload(ProcessingJob.slides),
         )
-        .filter(ProcessingJob.job_id == job_id)
+        # P29-NEW-67: ownership scoped in the SQL predicate — never load
+        # another user's job graph before authorization.
+        .filter(
+            ProcessingJob.job_id == job_id,
+            ProcessingJob.user_id == current_user.id,
+        )
         .first()
     )
 
     if not job:
-        raise ResourceNotFoundException("Job", job_id)
-    if job.user_id != current_user.id:
         raise ResourceNotFoundException("Job", job_id)
 
     response = JobResponse.model_validate(job)

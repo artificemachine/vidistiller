@@ -1436,11 +1436,15 @@ def test_final_exhaustion_co_commits_terminal_and_admission(db_factory):
 
     # Run the REAL task at retries == max_retries against the REAL DB:
     # the claim succeeds, then caption fetch fails on the final attempt and
-    # the exhaustion handler terminalizes atomically.
+    # the exhaustion handler terminalizes atomically. The caption-fetch mock
+    # must actually be hit (proving the task progressed past the claim).
+    from unittest.mock import Mock
     from app.tasks import process_transcript
 
-    with patch("app.tasks._add_log"), \
-         patch("app.tasks._fetch_platform_captions", side_effect=RuntimeError("final fail")):
+    captions_mock = Mock(side_effect=RuntimeError("final fail"))
+    with patch("app.tasks._add_log"), patch(
+        "app.tasks._fetch_platform_captions", captions_mock
+    ):
         from app.db.session import SessionLocal as _RealSL
 
         real_session = _RealSL()
@@ -1473,6 +1477,8 @@ def test_final_exhaustion_co_commits_terminal_and_admission(db_factory):
     step = db.query(JobStep).filter(
         JobStep.job_id == job_id, JobStep.name == "transcribe"
     ).first()
-    assert step.status in (JobStepStatus.FAILED, JobStepStatus.PENDING), step.status
+    assert step is not None
+    assert step.status == JobStepStatus.FAILED, f"step not failed: {step.status}"
+    assert captions_mock.called, "caption fetch never reached — earlier failure path"
     db.close()
 
