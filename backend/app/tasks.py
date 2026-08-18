@@ -557,6 +557,56 @@ def _terminalize_capacity_exhausted(db, job_id: int) -> str:
         return "owned"  # conservative: do not mutate on error
 
 
+def _terminalize_download_exhausted(db, job_id: int, error: str) -> str:
+    """Fail an active job and every unowned dependent step atomically.
+
+    Video-backed artifacts are part of the requested conversion. Exhausting
+    the durable download retries must therefore never produce a false
+    ``completed`` job with pending slides/snapshots.
+    """
+    try:
+        from app.db.models import JobStepStatus, ProcessingJob, ProcessingStatus
+
+        if db.bind.dialect.name == "postgresql":
+            row = db.execute(
+                text("SELECT status FROM processing_jobs WHERE id = :job_id FOR UPDATE"),
+                {"job_id": job_id},
+            ).first()
+            if row is None:
+                return "already"
+
+        job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+        if job is None:
+            return "already"
+        if job.status not in (ProcessingStatus.PENDING, ProcessingStatus.PROCESSING):
+            return "already"
+        if any(
+            step.status == JobStepStatus.RUNNING and step.claim_token
+            for step in job.steps
+        ):
+            db.rollback()
+            return "owned"
+
+        message = f"Video download failed after retries: {error}"[:1024]
+        job.status = ProcessingStatus.FAILED
+        job.error_message = message
+        job.celery_task_id = None
+        if job.processing_mode == "slide_aware":
+            job.slide_status = "failed"
+        for step in job.steps:
+            if step.status in (JobStepStatus.PENDING, JobStepStatus.FAILED) and not step.claim_token:
+                step.status = JobStepStatus.FAILED
+                step.error_message = message
+                step.finished_at = _utcnow()
+        _finish_admission_for_job(db, job_id, failed=True)
+        db.commit()
+        return "done"
+    except Exception as exc:
+        logger.warning("download-exhausted terminalization failed for job %s: %s", job_id, exc)
+        db.rollback()
+        return "owned"
+
+
 # ==============================================================================
 # TRANSCRIPT TASK HELPERS
 # ==============================================================================
@@ -779,6 +829,7 @@ def process_video_download(self, job_id: int):
         claimed = claim_step(db, job.id, "download", exec_uuid)
         if claimed is None:
             return {"job_id": job_id, "status": "skipped"}
+        _mark_stage_delivered(db, job_id, "download")
         # P10-NEW-20: commit the claim promptly so the job-row lock is not
         # held across the network/file work below (which would block
         # cancellation and terminalization for the download duration).
@@ -794,7 +845,30 @@ def process_video_download(self, job_id: int):
         except Exception as exc:
             fail_step(db, job.id, "download", exec_uuid, str(exc))
             db.commit()
-            raise self.retry(exc=exc, countdown=30)
+            if self.request.retries < self.max_retries:
+                countdown = 30 * (2 ** self.request.retries)
+                _add_log(
+                    db,
+                    job_id,
+                    f"Video download failed; automatic retry in {countdown}s",
+                    "warning",
+                    "video_download",
+                )
+                raise self.retry(exc=exc, countdown=countdown)
+            disposition = _terminalize_download_exhausted(db, job_id, str(exc))
+            if disposition == "done":
+                _add_log(
+                    db,
+                    job_id,
+                    "Video download failed after automatic retries; job failed",
+                    "error",
+                    "video_download",
+                )
+            return {
+                "job_id": job_id,
+                "status": "failed" if disposition == "done" else "skipped",
+                "reason": "video download retries exhausted",
+            }
         job.video_file_path = video_path
         # P11-NEW-23: the claim was committed before the slow network/file
         # work; revalidate the job's terminal state under a fresh lock so a
@@ -1056,7 +1130,9 @@ def process_transcript(self, job_id: int):
                 {"source": source, "language": detected_language, "characters": len(transcript_text)},
             )
 
-        # 7. Download video for snapshot capture (non-fatal)
+        # 7. Download video for snapshot/slide capture. A transient failure
+        # is handed to the durable download-only task; do not re-transcribe
+        # and never report a false completed conversion.
         download_claim = (
             claim_step(db, job.id, "download", exec_uuid)
             if steps_enabled
@@ -1103,8 +1179,42 @@ def process_transcript(self, job_id: int):
             except Exception as e:
                 if download_claim:
                     fail_step(db, job.id, "download", exec_uuid, str(e))
-                _add_log(db, job_id, f"Video download failed (non-fatal): {e}", "warning", "video_download")
-                logger.warning(f"Video download failed (non-fatal): {e}")
+                    job.celery_task_id = None
+                    from app.services.admission import enqueue_first_stage
+
+                    enqueue_first_stage(
+                        db,
+                        job.id,
+                        _mint_exec_uuid(),
+                        stage="download",
+                    )
+                    db.commit()
+                    _add_log(
+                        db,
+                        job_id,
+                        "Video download failed; durable recovery queued",
+                        "warning",
+                        "video_download",
+                    )
+                    try:
+                        from app.services.dispatch import publish_outbox
+
+                        publish_outbox(db, job_id=job.id)
+                        db.commit()
+                    except Exception as dispatch_exc:
+                        logger.warning(
+                            "download recovery publish failed for job %s; outbox will retry: %s",
+                            job_id,
+                            dispatch_exc,
+                        )
+                        db.rollback()
+                    return {
+                        "status": "download_retrying",
+                        "source": source,
+                        "length": len(transcript_text),
+                    }
+                _add_log(db, job_id, f"Video download failed: {e}", "error", "video_download")
+                logger.warning("Video download failed for legacy job %s: %s", job_id, e)
 
         # 9. If slide_aware mode and video downloaded, dispatch slide processing
         if job.processing_mode == ProcessingMode.SLIDE_AWARE.value and job.video_file_path:

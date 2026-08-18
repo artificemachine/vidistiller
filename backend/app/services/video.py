@@ -8,6 +8,7 @@ Supports any platform yt-dlp handles: YouTube, Vimeo, Twitch, Twitter/X, TikTok,
 import json
 import logging
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -25,6 +26,8 @@ except ImportError:
     _redis = None  # type: ignore
 
 logger = logging.getLogger(__name__)
+
+VIDEO_DOWNLOAD_RETRY_DELAYS = (1.0, 4.0, 10.0)
 
 
 class VideoService:
@@ -140,7 +143,13 @@ class VideoService:
     def download_video(
         self, url: str, output_path: Optional[str] = None, quality: str = "best"
     ) -> Tuple[str, int]:
-        """Download video file. Returns (file_path, file_size_bytes)."""
+        """Download video file with fresh-extraction retries.
+
+        YouTube CDN URLs can fail transiently with HTTP 403 while a new
+        extraction succeeds moments later. Each attempt creates a fresh
+        ``YoutubeDL`` instance so signed media URLs are never reused.
+        Returns ``(file_path, file_size_bytes)``.
+        """
         source_type, source_id = VideoSourceResolver.resolve(url)
 
         if output_path is None:
@@ -161,29 +170,69 @@ class VideoService:
             "no_warnings": False,
         }
 
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                logger.info(f"Downloading video ({quality}) for {source_type.value}:{source_id}...")
-                ydl.download([url])
+        attempt_count = len(VIDEO_DOWNLOAD_RETRY_DELAYS) + 1
+        last_error: Exception | None = None
+        for attempt in range(1, attempt_count + 1):
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    logger.info(
+                        "Downloading video (%s) for %s:%s (attempt %d/%d)...",
+                        quality,
+                        source_type.value,
+                        source_id,
+                        attempt,
+                        attempt_count,
+                    )
+                    ydl.download([url])
 
-            video_files = list(Path(output_path).glob(f"{source_id}.*"))
-            if not video_files:
-                raise VideoProcessingException("Video file was not created")
+                video_files = [
+                    candidate
+                    for candidate in Path(output_path).glob(f"{source_id}.*")
+                    if candidate.is_file()
+                    and not candidate.name.endswith((".part", ".ytdl", ".temp"))
+                ]
+                if not video_files:
+                    raise VideoProcessingException("Video file was not created")
 
-            file_path = str(video_files[0])
-            file_size = Path(file_path).stat().st_size
-            logger.info(f"✓ Video downloaded: {file_path} ({file_size} bytes)")
-            return file_path, file_size
+                file_path = str(video_files[0])
+                file_size = Path(file_path).stat().st_size
+                logger.info(f"✓ Video downloaded: {file_path} ({file_size} bytes)")
+                return file_path, file_size
+            except Exception as exc:
+                last_error = exc
+                if attempt >= attempt_count:
+                    break
+                self._cleanup_partial_video_downloads(Path(output_path), source_id)
+                delay = VIDEO_DOWNLOAD_RETRY_DELAYS[attempt - 1]
+                logger.warning(
+                    "Video download attempt %d/%d failed for %s:%s; retrying in %.1fs: %s",
+                    attempt,
+                    attempt_count,
+                    source_type.value,
+                    source_id,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
 
-        except VideoProcessingException:
-            raise
-        except Exception as e:
-            logger.error(f"Video download failed: {e}")
-            raise VideoProcessingException(f"Failed to download video: {e}")
+        logger.error("Video download failed after %d attempts: %s", attempt_count, last_error)
+        if isinstance(last_error, VideoProcessingException):
+            raise last_error
+        raise VideoProcessingException(f"Failed to download video: {last_error}")
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _cleanup_partial_video_downloads(output_path: Path, source_id: str) -> None:
+        """Remove only yt-dlp partials for this source before a fresh retry."""
+        for candidate in output_path.glob(f"{source_id}.*"):
+            if candidate.name.endswith((".part", ".ytdl", ".temp")):
+                try:
+                    candidate.unlink()
+                except FileNotFoundError:
+                    pass
 
     def _parse_date(self, date_str: Optional[str]) -> Optional[str]:
         if not date_str:
