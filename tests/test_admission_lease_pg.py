@@ -1492,7 +1492,7 @@ def test_capacity_exhaustion_terminalizes_pending_steps(db_factory):
     exhaustion must have its NON-TERMINAL (pending/failed, unclaimed) steps
     terminalized in the SAME transaction — no dangling pending steps on a
     failed job (job 293's slides step stayed pending)."""
-    from app.db.models import JobAdmission, JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
+    from app.db.models import JobAdmission, JobStep, JobStepStatus, ProcessingStatus
     from app.services.admission import admit_or_queue_job
     from app.services.job_steps import seed_job_steps
     from app.tasks import _terminalize_capacity_exhausted
@@ -1508,9 +1508,17 @@ def test_capacity_exhaustion_terminalizes_pending_steps(db_factory):
     job.celery_task_id = "task-cap"
     db.commit()
     job_id = job.id
+    db.close()
 
+    # _terminalize_capacity_exhausted commits internally.
+    db = db_factory()
     disposition = _terminalize_capacity_exhausted(db, job_id)
-    db.commit()
+    db.close()
+
+    # FRESH session for assertions — the handler updated steps via raw SQL
+    # and the seeding session's identity map may still hold stale PENDING
+    # ORM state (the durable DB rows are what we assert).
+    db = db_factory()
     assert disposition == "done", disposition
 
     status = db.execute(
@@ -1519,17 +1527,18 @@ def test_capacity_exhaustion_terminalizes_pending_steps(db_factory):
     assert status == "failed", status
     admission = db.get(JobAdmission, job_id)
     assert admission.state.value in ("finished", "failed"), admission.state
-    # EVERY step must be terminal (completed or failed) — no pending left.
+    # EVERY step must be terminal (completed/failed/skipped) — no pending left.
     steps = db.query(JobStep).filter(JobStep.job_id == job_id).all()
     assert steps, "no steps seeded"
-    for step in steps:
+    by_name = {step.name: step for step in steps}
+    for name, step in by_name.items():
         assert step.status in (
             JobStepStatus.COMPLETED, JobStepStatus.FAILED, JobStepStatus.SKIPPED,
         ), (
-            f"step {step.name} left non-terminal: {step.status}"
+            f"step {name} left non-terminal: {step.status}"
         )
-    slides = db.query(JobStep).filter(
-        JobStep.job_id == job_id, JobStep.name == "slides"
-    ).first()
-    assert slides is not None and slides.status == JobStepStatus.FAILED, slides
+    # snapshots is skipped (extract_snapshots=False); slides is the step that
+    # must be terminalized by the fix.
+    assert by_name["snapshots"].status == JobStepStatus.SKIPPED, by_name["snapshots"].status
+    assert by_name["slides"].status == JobStepStatus.FAILED, by_name["slides"].status
     db.close()
