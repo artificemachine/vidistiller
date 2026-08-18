@@ -7,6 +7,7 @@ Supports any platform yt-dlp handles: YouTube, Vimeo, Twitch, Twitter/X, TikTok,
 
 import json
 import logging
+import os
 import tempfile
 import time
 from datetime import datetime
@@ -163,12 +164,25 @@ class VideoService:
             "360p": "best[height<=360][ext=mp4]/best",
         }
 
+        format_selector = quality_map.get(quality, "best[ext=mp4]/best")
         ydl_opts = {
-            "format": quality_map.get(quality, "best[ext=mp4]/best"),
+            "format": format_selector,
             "outtmpl": str(Path(output_path) / "%(id)s.%(ext)s"),
             "quiet": False,
             "no_warnings": False,
         }
+        if source_type == SourceType.YOUTUBE:
+            provider_url = os.getenv(
+                "YOUTUBE_POT_PROVIDER_URL",
+                "http://tutorial_bgutil_provider:4416",
+            )
+            ydl_opts.update({
+                "remote_components": ["ejs:github"],
+                "extractor_args": {
+                    "youtube": {"player_client": ["mweb"]},
+                    "youtubepot-bgutilhttp": {"base_url": [provider_url]},
+                },
+            })
 
         attempt_count = len(VIDEO_DOWNLOAD_RETRY_DELAYS) + 1
         last_error: Exception | None = None

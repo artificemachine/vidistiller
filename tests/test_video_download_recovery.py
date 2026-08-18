@@ -27,7 +27,7 @@ def test_video_download_reextracts_after_transient_403(tmp_path):
         nonlocal attempts
         attempts += 1
         if attempts == 1:
-            raise RuntimeError("HTTP Error 403: Forbidden")
+            raise RuntimeError("temporary connection reset")
         (tmp_path / "JWhICz1QR8M.mp4").write_bytes(b"video")
 
     with patch.object(VideoService, "_init_cache", return_value=None), patch(
@@ -58,6 +58,28 @@ def test_video_download_stops_after_bounded_retries(tmp_path):
 
     assert youtube_dl.call_count == 4
     assert [call.args[0] for call in sleep.call_args_list] == [1.0, 4.0, 10.0]
+
+
+def test_youtube_download_uses_mweb_pot_provider_and_ejs(tmp_path):
+    with patch.object(VideoService, "_init_cache", return_value=None), patch(
+        "app.services.video.yt_dlp.YoutubeDL"
+    ) as youtube_dl:
+        ydl = youtube_dl.return_value.__enter__.return_value
+        ydl.download.side_effect = lambda _urls: (
+            tmp_path / "JWhICz1QR8M.mp4"
+        ).write_bytes(b"video")
+        path, size = VideoService().download_video(
+            VIDEO_URL, output_path=str(tmp_path), quality="720p"
+        )
+
+    assert path == str(tmp_path / "JWhICz1QR8M.mp4")
+    assert size == 5
+    options = youtube_dl.call_args.args[0]
+    assert options["remote_components"] == ["ejs:github"]
+    assert options["extractor_args"]["youtube"]["player_client"] == ["mweb"]
+    assert options["extractor_args"]["youtubepot-bgutilhttp"]["base_url"] == [
+        "http://tutorial_bgutil_provider:4416"
+    ]
 
 
 def test_capture_reports_retryable_upstream_failure(
