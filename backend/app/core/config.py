@@ -511,6 +511,16 @@ class SlideDetectionSettings(BaseSettings):
     llm_batch_size: int = Field(default=20, validation_alias="SLIDE_LLM_BATCH_SIZE")
     llm_batch_concurrency: int = Field(default=1, validation_alias="SLIDE_LLM_BATCH_CONCURRENCY")
 
+    # Fast, dynamic content-region analysis.  Presentation videos frequently
+    # switch between a slide-plus-speaker layout and speaker-only segments, so
+    # one layout vote for the whole file is not sufficient.  Frames are reduced
+    # before CV work and a new region must persist for a few samples before it
+    # becomes the active temporal segment.
+    scan_max_width: int = Field(default=640, ge=160, le=1920, validation_alias="SLIDE_SCAN_MAX_WIDTH")
+    layout_analysis_width: int = Field(default=320, ge=160, le=960, validation_alias="SLIDE_LAYOUT_ANALYSIS_WIDTH")
+    layout_confirm_samples: int = Field(default=2, ge=1, le=10, validation_alias="SLIDE_LAYOUT_CONFIRM_SAMPLES")
+    slide_presence_score: float = Field(default=0.45, ge=0.0, le=1.0, validation_alias="SLIDE_PRESENCE_SCORE")
+
     # pip_speaker (screencasting) tuning: screen motion scores 0.80-0.90 naturally,
     # so real transitions need a lower floor and slides need a longer minimum duration.
     pip_speaker_ssim_threshold: float = 0.65

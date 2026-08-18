@@ -1,8 +1,10 @@
 """Tests for the slide detection service."""
 
+from unittest.mock import MagicMock, patch
+
+import cv2
 import numpy as np
 import pytest
-from unittest.mock import MagicMock, patch
 
 from app.services.slide_detection import SlideDetectionService
 
@@ -24,6 +26,10 @@ def service():
         settings.slide_detection.incremental_ssim_threshold = 0.95
         settings.slide_detection.llm_batch_size = 1   # legacy sequential path
         settings.slide_detection.llm_batch_concurrency = 1
+        settings.slide_detection.scan_max_width = 640
+        settings.slide_detection.layout_analysis_width = 320
+        settings.slide_detection.layout_confirm_samples = 2
+        settings.slide_detection.slide_presence_score = 0.45
         settings.slide_detection.pip_speaker_ssim_threshold = 0.65
         settings.slide_detection.pip_speaker_ssim_ambiguous_low = 0.65
         settings.slide_detection.pip_speaker_ssim_ambiguous_high = 0.80
@@ -46,6 +52,150 @@ class TestLayoutDetection:
         """Layout detection should return a valid layout string."""
         result = service.layout_detection("/nonexistent/video.mp4")
         assert result in ("full_frame", "pip_speaker", "split_panel")
+
+
+class TestDynamicContentRegion:
+    """Regression coverage for mixed slide/interview masterclass layouts."""
+
+    @staticmethod
+    def _right_slide_frame() -> np.ndarray:
+        frame = np.full((360, 640, 3), 24, dtype=np.uint8)
+        # Presenter panel on the left (skin-coloured moving subject).
+        cv2.rectangle(frame, (25, 45), (145, 315), (80, 140, 200), -1)
+        # Structured deck occupies the right ~75%.
+        cv2.rectangle(frame, (155, 20), (630, 340), (8, 12, 18), -1)
+        for y in range(55, 315, 28):
+            cv2.line(frame, (190, y), (575, y), (220, 240, 245), 3)
+            cv2.putText(
+                frame,
+                "GRAPH EXECUTION",
+                (205, y - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.38,
+                (240, 240, 240),
+                1,
+                cv2.LINE_AA,
+            )
+        cv2.rectangle(frame, (360, 95), (570, 265), (40, 90, 110), 3)
+        return frame
+
+    @staticmethod
+    def _two_speakers_frame() -> np.ndarray:
+        frame = np.full((360, 640, 3), 185, dtype=np.uint8)
+        cv2.rectangle(frame, (55, 45), (265, 330), (80, 140, 200), -1)
+        cv2.rectangle(frame, (375, 45), (585, 330), (80, 140, 200), -1)
+        return frame
+
+    def test_slide_on_right_beats_presenter_panel(self, service):
+        observation = service._slide_region_observation(self._right_slide_frame())
+        assert observation["slide_present"] is True
+        assert observation["layout"] == "content_right"
+        assert observation["region"][0] > 0.0
+
+    def test_two_presenters_is_no_slide(self, service):
+        observation = service._slide_region_observation(self._two_speakers_frame())
+        assert observation["slide_present"] is False
+        assert observation["layout"] == "no_slide"
+
+    def test_skin_motion_is_neutralized_before_ssim(self, service):
+        first = self._right_slide_frame()
+        second = first.copy()
+        # Move the presenter-shaped skin region while leaving slide content fixed.
+        second[:, :155] = 24
+        cv2.rectangle(second, (5, 45), (125, 315), (80, 140, 200), -1)
+        region = (0.0, 0.0, 1.0, 1.0)
+        raw = service._compute_ssim(
+            cv2.cvtColor(first, cv2.COLOR_BGR2GRAY),
+            cv2.cvtColor(second, cv2.COLOR_BGR2GRAY),
+        )
+        masked = service._masked_content_ssim(
+            service._prepare_content_frame(first, region),
+            service._prepare_content_frame(second, region),
+        )
+        assert masked > raw
+        assert masked > 0.95
+
+    def test_temporal_no_slide_segment_is_excluded(self, service):
+        cap = MagicMock()
+        cap.isOpened.return_value = True
+        cap.get.side_effect = lambda prop: 1.0 if prop == cv2.CAP_PROP_FPS else 6.0
+        frame = self._right_slide_frame()
+        cap.read.side_effect = [(True, frame)] * 6 + [(False, None)]
+        present = {
+            "layout": "content_right",
+            "region": (0.22, 0.0, 1.0, 1.0),
+            "score": 0.9,
+            "slide_present": True,
+        }
+        absent = {
+            "layout": "no_slide",
+            "region": None,
+            "score": 0.1,
+            "slide_present": False,
+        }
+        progress = []
+        with patch("app.services.slide_detection.cv2.VideoCapture", return_value=cap), \
+             patch.object(service, "_slide_region_observation",
+                          side_effect=[present, present, absent, absent, present, present]), \
+             patch.object(service, "_compute_ssim", return_value=1.0):
+            events, sampled = service.ssim_transition_scan(
+                "/fake.mp4",
+                1.0,
+                "split_panel",
+                progress_callback=lambda done, total: progress.append((done, total)),
+            )
+
+        boundaries = [(event["classification"], event["timestamp"]) for event in events]
+        assert boundaries == [
+            ("slide_start", 0.0),
+            ("slide_end", 2.0),
+            ("slide_start", 4.0),
+        ]
+        slides = service.slide_grouping(events, video_duration=6.0, layout="split_panel")
+        assert [(slide["start_timestamp"], slide["end_timestamp"]) for slide in slides] == [
+            (0.0, 2.0),
+            (4.0, 6.0),
+        ]
+        assert sampled == 6
+        assert progress[-1] == (6, 6)
+
+    def test_real_decoder_tracks_slide_speaker_slide_segments(self, service, tmp_path):
+        """Short encoded fixture exercises decoder, CV scoring and debouncing together."""
+        video = tmp_path / "mixed-layout.avi"
+        writer = cv2.VideoWriter(
+            str(video),
+            cv2.VideoWriter_fourcc(*"FFV1"),
+            1.0,
+            (640, 360),
+        )
+        assert writer.isOpened()
+        for frame in (
+            self._right_slide_frame(),
+            self._right_slide_frame(),
+            self._two_speakers_frame(),
+            self._two_speakers_frame(),
+            self._right_slide_frame(),
+            self._right_slide_frame(),
+        ):
+            writer.write(frame)
+        writer.release()
+
+        events, sampled = service.ssim_transition_scan(
+            str(video),
+            1.0,
+            "split_panel",
+        )
+        boundaries = [
+            (event["classification"], event["timestamp"])
+            for event in events
+            if event["classification"] in ("slide_start", "slide_end")
+        ]
+        assert boundaries == [
+            ("slide_start", 0.0),
+            ("slide_end", 2.0),
+            ("slide_start", 4.0),
+        ]
+        assert sampled == 6
 
 
 class TestSSIMComputation:
@@ -217,12 +367,16 @@ class TestCropContentRegion:
         assert result.shape[0] == 80  # 80% of 100
         assert result.shape[1] == 160  # 80% of 200
 
-    def test_split_panel_uses_left_half(self, service):
-        """Split panel layout should use left half."""
+    def test_split_panel_does_not_assume_content_side(self, service):
+        """Legacy split label must not silently discard a right-side deck."""
         img = np.zeros((100, 200), dtype=np.uint8)
         result = service._crop_content_region(img, "split_panel")
-        assert result.shape[0] == 100
-        assert result.shape[1] == 100  # 50% of 200
+        assert result.shape == (100, 200)
+
+    def test_dynamic_content_side_crops_evidence_based_region(self, service):
+        img = np.zeros((100, 200), dtype=np.uint8)
+        assert service._crop_content_region(img, "content_right").shape == (100, 156)
+        assert service._crop_content_region(img, "content_left").shape == (100, 156)
 
 
 class TestFinalStateCapture:
@@ -492,6 +646,15 @@ class TestSSIMTransitionScan:
         cap.release.return_value = None
         return cap
 
+    @staticmethod
+    def _present_observation(layout="full_frame"):
+        return {
+            "layout": layout,
+            "region": (0.0, 0.0, 1.0, 1.0),
+            "score": 1.0,
+            "slide_present": True,
+        }
+
     def test_cannot_open_video_raises(self, service):
         """Bad video path → SlideDetectionException, not a silent fallback."""
         from app.exceptions import SlideDetectionException
@@ -504,30 +667,37 @@ class TestSSIMTransitionScan:
     def test_identical_frames_produce_no_transitions(self, service):
         """Frames with SSIM=1.0 are classified 'same' and not stored."""
         with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_slide_region_observation", return_value=self._present_observation()), \
              patch.object(service, "_compute_ssim", return_value=1.0):
             transitions, sampled = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
-        assert transitions == []
+        assert [t for t in transitions if t["classification"] in ("transition", "ambiguous")] == []
+        assert transitions[0]["classification"] == "slide_start"
         assert sampled > 0
 
     def test_low_ssim_produces_transition_classification(self, service):
         """SSIM below ssim_threshold (0.85) → 'transition' classification."""
         with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_slide_region_observation", return_value=self._present_observation()), \
              patch.object(service, "_compute_ssim", return_value=0.5):
             transitions, _ = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
-        assert len(transitions) > 0
-        assert all(t["classification"] == "transition" for t in transitions)
+        content = [t for t in transitions if t["classification"] in ("transition", "ambiguous")]
+        assert len(content) > 0
+        assert all(t["classification"] == "transition" for t in content)
 
     def test_ambiguous_ssim_produces_ambiguous_classification(self, service):
         """SSIM in [ssim_ambiguous_low, ssim_ambiguous_high] → 'ambiguous' classification."""
         with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_slide_region_observation", return_value=self._present_observation()), \
              patch.object(service, "_compute_ssim", return_value=0.89):
             transitions, _ = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
-        assert len(transitions) > 0
-        assert all(t["classification"] == "ambiguous" for t in transitions)
+        content = [t for t in transitions if t["classification"] in ("transition", "ambiguous")]
+        assert len(content) > 0
+        assert all(t["classification"] == "ambiguous" for t in content)
 
     def test_frame_skip_limits_frames_sampled(self, service):
         """video_fps=30, sampling_fps=1 → frame_skip=30, exactly 2 frames sampled in a 60-frame clip."""
         with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60, video_fps=30.0)), \
+             patch.object(service, "_slide_region_observation", return_value=self._present_observation()), \
              patch.object(service, "_compute_ssim", return_value=1.0):
             _, sampled = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
         assert sampled == 2
@@ -538,14 +708,18 @@ class TestSSIMTransitionScan:
         SSIM=0.83: above pip_speaker_ssim_ambiguous_high (0.80) → same → no transition stored.
         """
         with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_slide_region_observation", return_value=self._present_observation()), \
              patch.object(service, "_compute_ssim", return_value=0.83):
             full_transitions, _ = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
-        assert len(full_transitions) > 0, "full_frame should flag 0.83 as transition"
+        full_content = [t for t in full_transitions if t["classification"] in ("transition", "ambiguous")]
+        assert len(full_content) > 0, "full_frame should flag 0.83 as transition"
 
         with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_slide_region_observation", return_value=self._present_observation("pip_speaker")), \
              patch.object(service, "_compute_ssim", return_value=0.83):
             pip_transitions, _ = service.ssim_transition_scan("/fake.mp4", 1.0, "pip_speaker")
-        assert len(pip_transitions) == 0, "pip_speaker should treat 0.83 as same-content"
+        pip_content = [t for t in pip_transitions if t["classification"] in ("transition", "ambiguous")]
+        assert len(pip_content) == 0, "pip_speaker should treat 0.83 as same-content"
 
     def test_pip_speaker_grouping_uses_longer_min_duration(self, service):
         """slide_grouping with layout=pip_speaker enforces 20s minimum, not 3s.
