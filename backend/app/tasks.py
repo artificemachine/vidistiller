@@ -19,6 +19,13 @@ from app.core.config import TRANSCRIPT_CONFIDENCE_CAPTIONS, TRANSCRIPT_CONFIDENC
 logger = logging.getLogger(__name__)
 
 
+def _utcnow():
+    """Naive UTC now for SQLite branches (PostgreSQL uses now())."""
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
 def _has_persisted_steps(job) -> bool:
     """Avoid treating test doubles and legacy jobs as the new step workflow."""
     return isinstance(getattr(job, "steps", None), list) and bool(job.steps)
@@ -513,6 +520,34 @@ def _terminalize_capacity_exhausted(db, job_id: int) -> str:
                     job_id,
                 )
                 return "owned"
+            # WP3-hotfix (post-deploy review B1): terminalize the job's
+            # non-terminal steps in the SAME transaction so a failed job
+            # never leaves a dangling pending/failed step (the slides step
+            # of job 293 stayed pending on a failed job). Only steps not
+            # owned by a live claim are touched; a RUNNING step with a claim
+            # is untouched (another incarnation may still complete it).
+            if db.bind.dialect.name == "postgresql":
+                db.execute(
+                    text(
+                        "UPDATE job_steps SET status = 'failed', "
+                        "error_message = 'Job failed: no sidecar capacity available after retries', "
+                        "finished_at = now(), updated_at = now() "
+                        "WHERE job_id = :job_id AND status IN ('pending', 'failed') "
+                        "AND (claim_token IS NULL OR claim_token = '')"
+                    ),
+                    {"job_id": job_id},
+                )
+            else:
+                db.execute(
+                    text(
+                        "UPDATE job_steps SET status = 'failed', "
+                        "error_message = 'Job failed: no sidecar capacity available after retries', "
+                        "finished_at = :now, updated_at = :now "
+                        "WHERE job_id = :job_id AND status IN ('pending', 'failed') "
+                        "AND (claim_token IS NULL OR claim_token = '')"
+                    ),
+                    {"job_id": job_id, "now": _utcnow()},
+                )
             _finish_admission_for_job(db, job_id, failed=True)
         db.commit()
         return "done"

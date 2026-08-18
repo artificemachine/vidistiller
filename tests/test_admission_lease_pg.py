@@ -1485,3 +1485,51 @@ def test_final_exhaustion_co_commits_terminal_and_admission(db_factory):
     assert captions_mock.called, "caption fetch never reached — earlier failure path"
     db.close()
 
+
+
+def test_capacity_exhaustion_terminalizes_pending_steps(db_factory):
+    """WP3-hotfix (post-deploy review B1): a job failed by capacity
+    exhaustion must have its NON-TERMINAL (pending/failed, unclaimed) steps
+    terminalized in the SAME transaction — no dangling pending steps on a
+    failed job (job 293's slides step stayed pending)."""
+    from app.db.models import JobAdmission, JobStep, JobStepStatus, ProcessingJob, ProcessingStatus
+    from app.services.admission import admit_or_queue_job
+    from app.services.job_steps import seed_job_steps
+    from app.tasks import _terminalize_capacity_exhausted
+
+    db = db_factory()
+    user_id = _seed(db, global_limit=10, per_user_limit=10, slots=1)
+    job = _mkjob(db, user_id)
+    # Slide-aware job: slides step exists but is NOT claimed (pending).
+    seed_job_steps(db, job, extract_snapshots=False, is_slide_mode=True)
+    admit_or_queue_job(db, job, exec_uuid="e1")
+    db.commit()
+    job.status = ProcessingStatus.PROCESSING
+    job.celery_task_id = "task-cap"
+    db.commit()
+    job_id = job.id
+
+    disposition = _terminalize_capacity_exhausted(db, job_id)
+    db.commit()
+    assert disposition == "done", disposition
+
+    status = db.execute(
+        text("SELECT status FROM processing_jobs WHERE id = :id"), {"id": job_id}
+    ).scalar()
+    assert status == "failed", status
+    admission = db.get(JobAdmission, job_id)
+    assert admission.state.value in ("finished", "failed"), admission.state
+    # EVERY step must be terminal (completed or failed) — no pending left.
+    steps = db.query(JobStep).filter(JobStep.job_id == job_id).all()
+    assert steps, "no steps seeded"
+    for step in steps:
+        assert step.status in (
+            JobStepStatus.COMPLETED, JobStepStatus.FAILED, JobStepStatus.SKIPPED,
+        ), (
+            f"step {step.name} left non-terminal: {step.status}"
+        )
+    slides = db.query(JobStep).filter(
+        JobStep.job_id == job_id, JobStep.name == "slides"
+    ).first()
+    assert slides is not None and slides.status == JobStepStatus.FAILED, slides
+    db.close()
