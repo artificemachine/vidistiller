@@ -26,7 +26,7 @@ moviepy>=1.0.3,<2.0  # pinned <2.0 because moviepy 2.x caps pillow<12.0; revisit
 pillow>=10.0
 ffmpeg-python>=0.2.0
 scikit-image>=0.26.0
-pytesseract>=0.3.10
+pytesseract>=0.3.13
 
 # Task Queue & Caching
 celery>=5.3.0

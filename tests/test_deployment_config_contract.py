@@ -19,11 +19,30 @@ def test_production_compose_uses_generic_images_and_external_manifest_mount():
     assert "healthcheck:" in compose.split("  pgadmin:", 1)[1]
 
 
+def test_production_compose_forwards_sidecar_config_path_to_api_and_worker():
+    """SIDECAR_CONFIG_PATH must reach both services that seed/route sidecars.
+
+    Regression: the env var and its :/etc/vidistiller:ro mount target were
+    documented in .env.example but never added to either service's
+    `environment:` block, so setting it on the host had no effect — the app
+    would silently fall back to the committed placeholder registry on every
+    deploy, in the one direction (real config -> ignored) that never surfaces
+    as an error.
+    """
+    compose = (ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8")
+
+    assert compose.count("SIDECAR_CONFIG_PATH: ${SIDECAR_CONFIG_PATH:-}") == 2, (
+        "SIDECAR_CONFIG_PATH must be forwarded in both the api and "
+        "celery_worker environment blocks"
+    )
+
+
 def test_example_keeps_operator_specific_routing_values_unset():
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
 
     assert "VLLM_PRIMARY_URL=https://" in example
     assert "LLM_MODEL_PROFILES_PATH=/etc/vidistiller/" in example
+    assert "SIDECAR_CONFIG_PATH=/etc/vidistiller/" in example
     assert "VIDISTILLER_BACKEND_IMAGE_REF=example-org/" in example
 
 
