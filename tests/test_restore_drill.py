@@ -74,15 +74,66 @@ def test_sample_runner_verifies_images_before_running_them():
     assert 'cosign verify --certificate-identity-regexp "$identity"' in script
 
 
+def test_sample_runner_never_places_its_ephemeral_database_secret_in_process_args():
+    """Local process listings must not reveal the isolated database password."""
+    script = (
+        Path(__file__).resolve().parents[1] / "scripts" / "restore_drill_sample.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "PGPASSWORD=" not in script
+    assert 'docker cp "$work/.pgpass" "$database:/tmp/.pgpass"' in script
+    assert '--env-file "$work/migration.env"' in script
+
+
 def test_scheduled_backup_and_restore_use_a_signed_common_bundle_contract():
     root = Path(__file__).resolve().parents[1]
     backup = (root / "scripts" / "backup_to_nas.sh").read_text(encoding="utf-8")
     restore = (root / "scripts" / "restore_drill_sample.sh").read_text(encoding="utf-8")
 
     assert 'cosign sign-blob --yes --key "$BACKUP_SIGNING_KEY"' in backup
+    assert '--bundle "${staging}/SHA256SUMS.bundle"' in backup
     assert 'touch "${staging}/.verified"' in backup
     assert 'cosign verify-blob --key "$BACKUP_SIGNING_PUBLIC_KEY"' in restore
-    assert '"$BACKUP_BUNDLE/SHA256SUMS.sig"' in restore
+    assert '"$BACKUP_BUNDLE/SHA256SUMS.bundle"' in restore
     assert "VERIFY_CHECKSUMS" not in restore
     assert 'require_digest_reference "$POSTGRES_IMAGE"' in restore
     assert 'require_digest_reference "$BACKEND_IMAGE"' in restore
+    assert 'tar -C app-data' in backup
+    assert '"${staging}/app-data.tar"' in backup
+    assert 'tar -C "$work/app-data" -xf "$BACKUP_BUNDLE/app-data.tar"' in restore
+
+
+def test_postgres_restore_image_mirror_is_immutable_and_oidc_signed():
+    """The restore image must have CI provenance, not an operator-created tag."""
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "workflows"
+        / "publish-postgres-mirror.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "postgres@sha256:" in workflow
+    assert "${{ vars.DOCKER_IMAGE_NAMESPACE }}/vidistiller-postgres" in workflow
+    assert "id-token: write" in workflow
+    assert 'cosign sign --yes "${target}@${digest}"' in workflow
+    assert 'cosign verify --certificate-identity-regexp' in workflow
+
+
+def test_scheduled_restore_drill_uses_latest_verified_backup_and_weekly_timer():
+    root = Path(__file__).resolve().parents[1]
+    runner = (root / "scripts" / "run_restore_drill.sh").read_text(encoding="utf-8")
+    service = (
+        root / "scripts" / "systemd" / "vidistiller-restore-drill.service"
+    ).read_text(encoding="utf-8")
+    timer = (
+        root / "scripts" / "systemd" / "vidistiller-restore-drill.timer"
+    ).read_text(encoding="utf-8")
+
+    assert "-name 'backup-*'" in runner
+    assert '"$BACKUP_BUNDLE/.verified"' in runner
+    assert 'VIDISTILLER_BACKEND_IMAGE_REF' in runner
+    assert "exec env " in runner
+    assert "/usr/local/sbin/vidistiller-restore-drill" in runner
+    assert "ExecStart=/usr/local/sbin/vidistiller-restore-drill-scheduled" in service
+    assert "OnCalendar=Sun *-*-* 04:00:00 UTC" in timer
+    assert "Persistent=true" in timer

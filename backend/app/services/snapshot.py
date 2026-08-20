@@ -36,6 +36,7 @@ class SnapshotService:
         video_path: str,
         interval: float = 5.0,
         output_dir: Optional[str] = None,
+        progress_cb=None,
     ) -> List[Dict]:
         """
         Extract frames at regular intervals from video.
@@ -44,6 +45,7 @@ class SnapshotService:
             video_path: Path to video file
             interval: Seconds between frames (default: 5s)
             output_dir: Directory to save frames (defaults to temp)
+            progress_cb: Optional callable(done, total) invoked periodically
 
         Returns:
             List of frame metadata dicts with:
@@ -101,6 +103,9 @@ class SnapshotService:
                         "height": height,
                         "file_size": file_size,
                     })
+                    if progress_cb is not None:
+                        total_est = max(1, int(cap.get(cv2.CAP_PROP_FRAME_COUNT) / max(frame_interval, 1)))
+                        progress_cb(len(extracted_frames), total_est)
 
                 frame_count += 1
 

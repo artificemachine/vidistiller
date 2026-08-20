@@ -14,34 +14,33 @@ import inspect
 
 
 def test_summarize_transcript_task_uses_task_aware_resolver() -> None:
-    """The celery task body must call the task-aware resolver.
+    """The celery task body must resolve its LLM through the LEASED sidecar.
 
-    Static check rather than a full Celery run — exercises the task source
-    enough to catch the regression without dragging in DB/job fixtures.
+    Historical regression (PR #167): the task carried inline resolution that
+    bypassed shared helpers and could request a hardcoded model name.
+    Review Round 2 N3 hardened this further: summarization is now bound to
+    the sidecar slot it leases — the provider and model come from
+    ``_resolve_provider_for_slot`` (registry endpoint + live served model),
+    and the generic ``_resolve_job_llm_config`` route is deliberately no
+    longer used for the text provider.
     """
+    import inspect
+
     from app.tasks import summarize_transcript_task
 
     source = inspect.getsource(summarize_transcript_task)
-    assert "_resolve_job_llm_config" in source, (
-        "summarize_transcript_task no longer uses task-aware resolution — "
-        "fleet capability routing is bypassed."
+    # Lease-bound provider resolution (Review Round 2 N3): the task must
+    # resolve through the leased slot, not the generic fleet resolver.
+    assert "_resolve_provider_for_slot" in source, (
+        "summarize_transcript_task no longer binds its provider to the "
+        "leased sidecar — fleet capability binding is bypassed."
     )
-    assert "LLMTask.LONG_ANALYSIS" in source
-    assert "DEFAULT_MODELS.get(\"vllm\", \"qwen3-32b-awq\")" not in source, (
-        "summarize_transcript_task still carries the pre-fix inline fallback "
-        "to qwen3-32b-awq."
-    )
-    # The LLMService call must use the resolved model and not the old
-    # `model_name` local (which no longer exists in this scope).
-    assert "model_name=model_name" not in source, (
-        "summarize_transcript_task still passes the stale `model_name` "
-        "local into LLMService — must use the resolved model from "
-        "resolve_user_llm."
-    )
-    assert "model_name=_resolved_model" in source, (
-        "summarize_transcript_task should pass the resolved model into "
-        "LLMService via _resolved_model."
-    )
+    # The text provider must NOT fall back to the generic user/fleet resolver.
+    assert "resolved = _resolve_job_llm_config(" not in source
+    # No inline hardcoded model fallback may remain.
+    assert "DEFAULT_MODELS.get(\"vllm\", \"qwen3-32b-awq\")" not in source
+    assert "model_name=model_name" not in source
+    assert "model_name=_resolved_model" in source
 
 
 def test_summarize_task_does_not_mark_failed_when_document_exists() -> None:

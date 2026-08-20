@@ -395,6 +395,24 @@ class JobCreate(BaseModel):
         default=False,
         description="Bypass the duplicate-video check and create the job anyway",
     )
+    sidecar_preference: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="Preferred sidecar (registered id) or 'auto'. Server-side registry only — never a URL (WP3).",
+    )
+
+    @field_validator("sidecar_preference")
+    @classmethod
+    def normalize_sidecar_preference(cls, v):
+        if v is None or v.strip().lower() in ("", "auto"):
+            return None
+        pref = v.strip()
+        # Registry ids are alphanumeric words with dashes/underscores only.
+        if "://" in pref or "/" in pref or not all(
+            c.isalnum() or c in "-_" for c in pref
+        ):
+            raise ValueError("sidecar_preference must be 'auto' or a registered sidecar id")
+        return pref
 
     @field_validator("video_url")
     @classmethod
@@ -433,6 +451,20 @@ class JobStepResponse(BaseSchema):
     metrics: dict = Field(default_factory=dict, description="Non-secret step metrics")
 
 
+class ProgressEtaResponse(BaseSchema):
+    """Calibrated progress + ETA for a job (WP5, Review Round 2 F8).
+
+    ``progress`` is the monotonic 0..100 weighted value; ``eta_*`` is an
+    estimated range with a confidence label (high/medium/low/cold) and the
+    basis of the estimate. Cold/low estimates are never falsely precise.
+    """
+    progress: Optional[int] = Field(None, ge=0, le=100, description="Overall monotonic progress 0..100")
+    eta_low_seconds: Optional[float] = Field(None, description="ETA lower bound (seconds remaining)")
+    eta_high_seconds: Optional[float] = Field(None, description="ETA upper bound (seconds remaining)")
+    eta_confidence: Optional[str] = Field(None, description="high|medium|low|cold")
+    eta_basis: Optional[str] = Field(None, description="Calibration basis (e.g. '6 historical slide_aware jobs')")
+
+
 class JobStatusResponse(BaseSchema):
     """Lightweight job status response for polling."""
     job_id: str = Field(..., description="Unique job identifier (UUID)")
@@ -448,6 +480,16 @@ class JobStatusResponse(BaseSchema):
     created_at: datetime = Field(..., description="Job creation timestamp")
     updated_at: datetime = Field(..., description="Last status update timestamp")
     steps: List[JobStepResponse] = Field(default_factory=list, description="Persistent processing steps")
+    # WP2/WP5: visible admission state and calibrated progress/ETA.
+    admission_state: Optional[str] = Field(None, description="queued/admitted/finished/failed")
+    queue_reason: Optional[str] = Field(None, description="Why the job is queued, when queued")
+    queue_position: Optional[int] = Field(None, description="1-based queue position when queued")
+    sidecar_preference: Optional[str] = Field(None, description="Requested sidecar registered id, when set")
+    progress: Optional[int] = Field(None, ge=0, le=100, description="Overall monotonic progress 0..100")
+    eta_low_seconds: Optional[float] = Field(None, description="ETA lower bound (seconds remaining)")
+    eta_high_seconds: Optional[float] = Field(None, description="ETA upper bound (seconds remaining)")
+    eta_confidence: Optional[str] = Field(None, description="high|medium|low|cold")
+    eta_basis: Optional[str] = Field(None, description="Calibration basis")
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -463,7 +505,12 @@ class JobStatusResponse(BaseSchema):
                 "video_title": "Sample Tutorial Video",
                 "user_id": 1,
                 "created_at": "2024-01-20T14:30:00",
-                "updated_at": "2024-01-20T14:35:00"
+                "updated_at": "2024-01-20T14:35:00",
+                "admission_state": "admitted",
+                "progress": 42,
+                "eta_low_seconds": 210.0,
+                "eta_high_seconds": 380.0,
+                "eta_confidence": "medium",
             }
         }
     )
@@ -492,6 +539,17 @@ class JobResponse(BaseSchema):
     documents: List[DocumentResponse] = Field(default_factory=list, description="Generated documents")
     slides: List[SlideResponse] = Field(default_factory=list, description="Detected slides (slide_aware mode)")
     steps: List[JobStepResponse] = Field(default_factory=list, description="Persistent processing steps")
+    # WP2/WP5: admission state and calibrated progress/ETA (same contract as
+    # JobStatusResponse so list/status/detail agree — Review Round 2 F8).
+    admission_state: Optional[str] = Field(None, description="queued/admitted/finished/failed")
+    queue_reason: Optional[str] = Field(None, description="Why the job is queued, when queued")
+    queue_position: Optional[int] = Field(None, description="1-based queue position when queued")
+    sidecar_preference: Optional[str] = Field(None, description="Requested sidecar registered id, when set")
+    progress: Optional[int] = Field(None, ge=0, le=100, description="Overall monotonic progress 0..100")
+    eta_low_seconds: Optional[float] = Field(None, description="ETA lower bound (seconds remaining)")
+    eta_high_seconds: Optional[float] = Field(None, description="ETA upper bound (seconds remaining)")
+    eta_confidence: Optional[str] = Field(None, description="high|medium|low|cold")
+    eta_basis: Optional[str] = Field(None, description="Calibration basis")
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -800,3 +858,50 @@ class ValidationErrorResponse(BaseModel):
             }
         }
     )
+
+
+# ==============================================================================
+# OPS SCHEMAS (WP4) — sanitized, allowlisted operator DTOs
+# ==============================================================================
+
+class OperatorJobRow(BaseSchema):
+    """One row of the global operations view.
+
+    Allowlisted by construction: owner identity, status, admission/queue
+    state, sidecar, elapsed time, progress. Never includes source URLs,
+    transcripts, output paths, tokens or credentials (Review Round 1
+    Finding 11).
+    """
+    job_id: str = Field(..., description="Public job UUID")
+    owner_id: Optional[int] = Field(None, description="Job owner user id (operators only)")
+    owner_username: Optional[str] = Field(None, description="Job owner username (operators only)")
+    status: str = Field(..., description="Processing status")
+    error_message: Optional[str] = Field(None, description="Sanitized failure category (not raw error)")
+    admission_state: str = Field(..., description="queued/admitted/finished/failed")
+    queue_reason: Optional[str] = Field(None, description="Why the job is queued, when queued")
+    queue_position: Optional[int] = Field(None, description="1-based position in the queue when queued")
+    sidecar_id: Optional[str] = Field(None, description="Assigned sidecar registered id")
+    model: Optional[str] = Field(None, description="Assigned model/sidecar label")
+    elapsed_seconds: Optional[float] = Field(None, description="Elapsed time (or total for terminal jobs)")
+    progress: Optional[int] = Field(None, description="Overall monotonic progress 0..100")
+    eta_low_seconds: Optional[float] = Field(None, description="ETA lower bound (seconds remaining)")
+    eta_high_seconds: Optional[float] = Field(None, description="ETA upper bound (seconds remaining)")
+    eta_confidence: Optional[str] = Field(None, description="high|medium|low|cold")
+    processing_mode: Optional[str] = Field(None, description="standard or slide_aware")
+    created_at: Optional[datetime] = Field(None, description="Job creation time")
+
+
+class SidecarStatusRow(BaseSchema):
+    """Live sidecar telemetry for operators (WP3)."""
+    registered_id: str
+    label: str
+    healthy: bool
+    served_models: List[str] = Field(default_factory=list)
+    declared_model: Optional[str] = None
+    running_requests: int = 0
+    waiting_requests: int = 0
+    reserved_slots: int = 0
+    total_slots: int = 0
+    vram_used_mib: Optional[int] = None
+    vram_total_mib: Optional[int] = None
+    stale: bool = False

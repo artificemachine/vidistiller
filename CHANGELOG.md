@@ -697,3 +697,51 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(migrations): create the PostgreSQL job-step enum only once during Alembic upgrade.
+
+### Fixed
+- test(e2e): select visually hidden LLM provider radios deterministically, eliminating a flaky Settings-page assertion in CI.
+
+### Fixed
+- test(e2e): activate the visible provider-card label, rather than its screen-reader-only radio input, and assert the selected state before checking conditional fields.
+
+### Added
+- security(backups): publish an immutable PostgreSQL restore-image mirror signed by this repository's GitHub Actions OIDC identity; the restore drill can now verify its database image provenance without trusting an unsigned upstream tag.
+
+### Fixed
+- fix(backups): resolve the mirrored PostgreSQL manifest digest through Buildx's manifest field before signing it, so the restore image workflow signs the exact pushed reference.
+
+### Changed
+- perf(backups): archive application media as a single `app-data.tar` before copying to the NAS, then extract it only inside the local isolated restore drill. This preserves the signed bundle contract while avoiding NFS metadata bottlenecks from thousands of small artifacts.
+
+### Fixed
+- fix(backups): use Cosign's current signed bundle format for backup checksum attestations and verify that bundle during restore, preserving fail-closed integrity checks with Cosign v3.
+
+### Security
+- security(backups): keep the restore drill's generated database credential in temporary local env/password files instead of Docker command arguments, preventing local process listings from exposing it during the isolated restore.
+
+### Added
+- ops(backups): schedule a weekly isolated NAS restore drill that selects the newest signed verified bundle and revalidates immutable, Cosign-verified restore images.
+
+### Security
+- security(ci): add CodeQL static analysis for Python and TypeScript, running on push, pull request, and a weekly schedule. Actions are SHA-pinned and the workflow declares least-privilege permissions explicitly.
+
+### Fixed
+- test(media-stress): pin REDIS_URL for the spawned Uvicorn subprocess. The fixture forwarded DATABASE_URL but not REDIS_URL, so the server fell back to .env, whose REDIS_URL uses the compose-internal hostname and does not resolve from the host. The rate limiter then failed closed and every login returned 400 "Rate limiting is temporarily unavailable", surfacing as an opaque fixture error. Both host-facing test defaults now use 127.0.0.1 rather than localhost, since macOS resolves localhost to ::1 first while the container runtime publishes IPv4 only.
+
+### Security
+- security(api): stop serving /docs, /redoc and /openapi.json when ENVIRONMENT=production. Publishing the full schema handed anyone who asked a complete route and payload map. Non-production environments are unchanged, and an operator who deliberately wants public schema in production opts in via API_DOCS_ENABLED. Only an exact "production" disables them, so a typo in ENVIRONMENT cannot quietly change behaviour.
+- security(sidecars): the committed sidecar registry no longer describes real hosts. It previously carried live fleet topology (host identifiers and GPU inventory in the labels) in a public repository; addresses already used the RFC 5737 documentation range but the labels did not. The committed file is now an explicit placeholder, and deployments point SIDECAR_CONFIG_PATH at a registry kept outside the repository so real topology never enters version control.
+
+### Removed
+- docs(audits): remove docs/audits/ (12 files, 1483 lines) — dated self-audit reports (job-ready, portfolio-ready, golive, and their progress trackers) that accumulated across three assessment runs in July. Their headline findings are now stale rather than live: the sharp@0.34.5 CVE regression they flagged is patched (^0.35.0), docs/README.my.notes.md (the raw AI-transcript finding) is no longer tracked, the Alembic-vs-startup-create_all dual schema-management path they rated CRITICAL is resolved, and the unconditional /docs+/openapi.json exposure they carried forward across every re-run is gated in production as of this same change set. What remained was 155KB of redundant, overlapping snapshots of the same audit run, not curated documentation — kept nowhere else, but git history preserves the originals if ever needed. Also removes the now-unused `docs/audits/.*` gitleaks allowlist entry (added for a real redaction incident in this directory in July: personal emails and an operator IPv4 were once committed there); the entry has no remaining target.
+- 2026-08-17: docs(bulletproof-report): annotate the 2 citations into the just-removed docs/audits/ directory (2026-07-21-portfolio-ready.md, 2026-07-21-job-ready.md) with a removal note and the deleting commit, so the report's claims stay traceable without pointing at paths that no longer resolve. The report's own docs/audits/*.md scope-exclusion line is unaffected — it describes a policy, not a citation to a specific file.
+
+### Added
+- feat: stability, capacity, progress and multi-sidecar control surface (#210). WP1: media authorization now runs in a short-lived session closed before the file response streams, fixing the 2026-08-16 incident where a gallery burst pinned 60 idle-in-transaction connections; configurable pool sizing plus an application-level idle-in-transaction timeout guard; a dedicated bounded probe engine for `/readyz`; Prometheus `/metrics` for pool, latency, auth, and idle-tx. WP2: explicit PostgreSQL-backed admission control and leases — admission counters, job admissions with a visible queue reason, per-incarnation resource slots with generation fencing and quarantine reclamation, a lease-events audit trail, and an at-least-once task outbox; a periodic scheduler off the event loop; Celery visibility timeout raised past the hard limit with reject-on-worker-lost. WP3: a server-side, allowlisted sidecar registry with SSRF-safe URLs, per-job sidecar preference, and telemetry-gated slot acquisition. WP4: a global ops view gated by a DB-backed, fail-closed operator role, with a sanitized `/api/ops/jobs` and `/api/ops/sidecars`. WP5: monotonic progress from real step counters and a calibrated ETA range with cold-start labeling. WP6: a host systemd watchdog, Grafana dashboard, and operator runbook.
+- chore(release): bump `pyproject.toml` version from 1.16.1 to 1.16.2 and record the entry above. Tag `v1.16.2` was already pushed pointing at `ea6b67f` (the #210 merge commit) without a matching version bump or CHANGELOG entry — the same class of gap this repo's own history already has a precedent for correcting retroactively (see the 1.12.21 entry). Docker Hub publish failed at that commit on an invalid/expired token (`DOCKER_HUB_TOKEN`, unrelated to this bump), so `Deploy → staging` and `Deploy → production` were both skipped; production remains on `9464fdc` until the token is rotated and the workflow re-run.
+
+### Fixed
+- fix(deploy): forward `SIDECAR_CONFIG_PATH` into the `api` and `celery_worker` service environments in `docker-compose.prod.yml`. The env var was documented in `.env.example` and read by `load_sidecar_config`, but never added to either service's `environment:` block, so setting it on the host had no effect — production would silently fall back to the committed placeholder registry on every deploy. Reuses the existing `LLM_MODEL_PROFILES_HOST_DIR:-./config` mount at `/etc/vidistiller:ro` already present on both services; no new volume needed. `.env.example`'s comment now spells out that the real `sidecars.json` belongs in that same host directory.
+
+### Fixed
+- docs(changelog): correct a literal unresolved merge-conflict block left in this file's v1.13.2 entry (lines 560-563 as of this commit: `<<<<<<< HEAD`, an empty `=======` side, and `>>>>>>> 0dcd335 (chore(release): bump to v1.13.2)`), introduced by commit `f8c5a7b` (PR #171) and sitting in history since. No information was lost — the same moviepy/pillow entry the conflicted block half-duplicated is present cleanly two lines below it (the real "### Changed" / moviepy-pin entry that follows). Per this file's append-only rule, the broken lines are left as-is rather than edited; this entry documents what they are so a future reader isn't left wondering whether the markers are load-bearing.

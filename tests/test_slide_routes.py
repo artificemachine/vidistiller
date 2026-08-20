@@ -129,6 +129,34 @@ from app.db.models import ProcessingJob, ProcessingStatus
 
 def _mk_slide_job(test_db, test_user, video_file_path="/tmp/fake.mp4"):
     """Create a minimal slide-aware ProcessingJob for task unit tests."""
+    from app.db.models import ResourceSlot, Sidecar
+    from app.services.sidecar import SidecarTelemetry, _telemetry_cache, _telemetry_lock
+
+    if test_db.query(Sidecar).filter(Sidecar.registered_id == "primary").first() is None:
+        test_db.add(
+            Sidecar(
+                registered_id="primary",
+                label="Primary",
+                base_url="http://test.invalid:8000",
+                capabilities=["text"],
+            )
+        )
+        test_db.flush()
+    # Populate the telemetry cache so acquire_slot's capacity gate passes
+    # (Review Round 2 N4): healthy, fresh, serving a model.
+    import time as _time
+
+    with _telemetry_lock:
+        _telemetry_cache["primary"] = SidecarTelemetry(
+            registered_id="primary",
+            label="Primary",
+            base_url="http://test.invalid:8000",
+            declared_model="test-model",
+            capabilities=["text"],
+            healthy=True,
+            served_models=["test-model"],
+            observed_at=_time.time(),
+        )
     job = ProcessingJob(
         job_id=f"slide-test-{os.urandom(4).hex()}",
         status=ProcessingStatus.PENDING,
@@ -138,6 +166,11 @@ def _mk_slide_job(test_db, test_user, video_file_path="/tmp/fake.mp4"):
         user_id=test_user.id,
     )
     test_db.add(job)
+    # WP2 (Review Round 2 F3): process_slides requires a sidecar slot lease;
+    # seed one free slot so the task reaches the pipeline under test.
+    existing = test_db.query(ResourceSlot).filter(ResourceSlot.sidecar_id == "primary").count()
+    if existing == 0:
+        test_db.add(ResourceSlot(sidecar_id="primary", slot_index=0))
     test_db.commit()
     test_db.refresh(job)
     return job

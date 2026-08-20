@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import SidecarSelector from '@/components/SidecarSelector';
 
 interface VideoSubmissionProps {
   onSuccess?: (jobId: string) => void;
@@ -19,6 +20,7 @@ export default function VideoSubmission({ onSuccess }: VideoSubmissionProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [duplicate, setDuplicate] = useState<ExistingJob | null>(null);
+  const [sidecarPreference, setSidecarPreference] = useState('auto');
   const router = useRouter();
 
   const submitJob = async (force: boolean) => {
@@ -30,7 +32,13 @@ export default function VideoSubmission({ onSuccess }: VideoSubmissionProps) {
       const response = await fetch(`${apiUrl}/jobs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_url: url, force }),
+        body: JSON.stringify({
+          video_url: url,
+          force,
+          ...(sidecarPreference && sidecarPreference !== 'auto'
+            ? { sidecar_preference: sidecarPreference }
+            : {}),
+        }),
       });
 
       if (response.status === 409) {
@@ -81,6 +89,10 @@ export default function VideoSubmission({ onSuccess }: VideoSubmissionProps) {
       </div>
 
       {error && <div className="text-red-500 mb-4">{error}</div>}
+
+      <div className="mb-4">
+        <SidecarSelector value={sidecarPreference} onChange={setSidecarPreference} disabled={loading} />
+      </div>
 
       {duplicate && (
         <div

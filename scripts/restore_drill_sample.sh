@@ -67,12 +67,16 @@ verify_image "$BACKEND_IMAGE" "$COSIGN_BACKEND_IDENTITY"
     echo "Missing checksum manifest: $BACKUP_BUNDLE/SHA256SUMS" >&2
     exit 1
 }
-[[ -f "$BACKUP_BUNDLE/SHA256SUMS.sig" ]] || {
-    echo "Missing signed checksum manifest: $BACKUP_BUNDLE/SHA256SUMS.sig" >&2
+[[ -f "$BACKUP_BUNDLE/SHA256SUMS.bundle" ]] || {
+    echo "Missing signed checksum bundle: $BACKUP_BUNDLE/SHA256SUMS.bundle" >&2
     exit 1
 }
 [[ -f "$DATABASE_DUMP" ]] || {
     echo "Missing PostgreSQL dump" >&2
+    exit 1
+}
+[[ -f "$BACKUP_BUNDLE/app-data.tar" ]] || {
+    echo "Missing application artifact archive" >&2
     exit 1
 }
 
@@ -94,6 +98,10 @@ db_name="restore_drill"
 # Ephemeral database credential for the isolated container; it is generated only at
 # runtime and never written to the bundle, report, or application logs.
 drill_db_auth="$(openssl rand -hex 24)"
+printf 'POSTGRES_USER=%s\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=%s\n' \
+    "$db_user" "$drill_db_auth" "$db_name" > "$work/postgres.env"
+printf '*:*:*:%s:%s\n' "$db_user" "$drill_db_auth" > "$work/.pgpass"
+chmod 600 "$work/postgres.env" "$work/.pgpass"
 
 cleanup() {
     docker rm -f "$database" >/dev/null 2>&1 || true
@@ -103,18 +111,20 @@ cleanup() {
 trap cleanup EXIT
 
 cosign verify-blob --key "$BACKUP_SIGNING_PUBLIC_KEY" \
-    --signature "$BACKUP_BUNDLE/SHA256SUMS.sig" "$BACKUP_BUNDLE/SHA256SUMS" >/dev/null
+    --bundle "$BACKUP_BUNDLE/SHA256SUMS.bundle" "$BACKUP_BUNDLE/SHA256SUMS" >/dev/null
 (cd "$BACKUP_BUNDLE" && sha256sum -c SHA256SUMS --quiet)
+mkdir -p "$work/app-data"
+tar -C "$work/app-data" -xf "$BACKUP_BUNDLE/app-data.tar"
 
 docker network create --internal "$network" >/dev/null
 docker run -d --name "$database" --network "$network" \
-    -e "POSTGRES_USER=$db_user" \
-    -e "POSTGRES_PASSWORD=$drill_db_auth" \
-    -e "POSTGRES_DB=$db_name" \
+    --env-file "$work/postgres.env" \
     "$POSTGRES_IMAGE" >/dev/null
+docker cp "$work/.pgpass" "$database:/tmp/.pgpass"
+docker exec "$database" chmod 600 /tmp/.pgpass
 
 for attempt in $(seq 1 30); do
-    if docker exec -e "PGPASSWORD=$drill_db_auth" "$database" \
+    if docker exec "$database" sh -c 'PGPASSFILE=/tmp/.pgpass exec "$@"' -- \
         psql -U "$db_user" -d "$db_name" -c 'SELECT 1' >/dev/null 2>&1; then
         break
     fi
@@ -125,20 +135,22 @@ for attempt in $(seq 1 30); do
     sleep 1
 done
 
-docker exec -i -e "PGPASSWORD=$drill_db_auth" "$database" \
+docker exec -i "$database" sh -c 'PGPASSFILE=/tmp/.pgpass exec "$@"' -- \
     pg_restore -U "$db_user" -d "$db_name" --exit-on-error --no-owner --no-privileges \
     < "$DATABASE_DUMP"
 
 database_scheme="postgresql"
 database_url="${database_scheme}://${db_user}:${drill_db_auth}@${database}:5432/${db_name}"
+printf 'DATABASE_URL=%s\n' "$database_url" > "$work/migration.env"
+chmod 600 "$work/migration.env"
 docker run --rm --network "$network" \
-    -e "DATABASE_URL=$database_url" \
+    --env-file "$work/migration.env" \
     -v "$APP_ROOT/migrations:/app/migrations:ro" \
     -v "$APP_ROOT/alembic.ini:/app/alembic.ini:ro" \
     "$BACKEND_IMAGE" sh -c 'cd /app && alembic upgrade head'
 
 psql() {
-    docker exec -e "PGPASSWORD=$drill_db_auth" "$database" \
+    docker exec "$database" sh -c 'PGPASSFILE=/tmp/.pgpass exec "$@"' -- \
         psql -U "$db_user" -d "$db_name" -At "$@"
 }
 
@@ -164,15 +176,12 @@ case "$snapshot_path" in
         ;;
 esac
 
-source_snapshot="$BACKUP_BUNDLE/app-data/$backup_snapshot_path"
 restored_snapshot="$work/app-data/$backup_snapshot_path"
-[[ -f "$source_snapshot" ]] || {
+[[ -f "$restored_snapshot" ]] || {
     echo "Snapshot referenced by restored database is absent from bundle" >&2
     exit 1
 }
-mkdir -p "$(dirname "$restored_snapshot")" "$work/exports"
-cp "$source_snapshot" "$restored_snapshot"
-cmp -s "$source_snapshot" "$restored_snapshot"
+mkdir -p "$work/exports"
 
 export_path="$work/exports/${job_id}.json"
 psql -c "SELECT json_build_object('job_id', j.job_id, 'transcript', (SELECT t.full_text FROM transcripts t WHERE t.job_id = j.id ORDER BY t.id LIMIT 1), 'snapshot_count', (SELECT count(*) FROM snapshots s WHERE s.job_id = j.id), 'document_count', (SELECT count(*) FROM documents d WHERE d.job_id = j.id)) FROM processing_jobs j WHERE j.id = ${job_pk}" > "$export_path"

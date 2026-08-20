@@ -1,0 +1,18 @@
+[Unit]
+Description=Vidistiller API watchdog (least-privilege, no Docker socket)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Root-owned fixed-argument helper. It restarts only the fixed api service of
+# the fixed compose project; no caller-supplied arguments ever reach docker.
+ExecStart=/opt/vidistiller/scripts/systemd/vidistiller-watchdog.sh
+# Hard safety caps even if the script misbehaves.
+TimeoutStartSec=120
+NoNewPrivileges=no
+# The helper needs docker CLI access as root; it never mounts the socket into
+# a container and accepts no arguments, so the surface stays minimal.
+
+[Install]
+WantedBy=multi-user.target
