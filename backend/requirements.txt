@@ -41,7 +41,7 @@ pytest-cov>=4.1.0
 fastapi-mail>=1.4.0
 
 # Utilities
-python-dotenv>=1.0.0
+python-dotenv>=1.2.2
 python-jose>=3.3.0
 passlib>=1.7.4,<2.0.0
 argon2-cffi>=21.3.0
