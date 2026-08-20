@@ -1,32 +1,40 @@
 {
+  "_comment": [
+    "Placeholder sidecar registry. This file ships in a public repository, so it",
+    "describes example hosts only: addresses use the RFC 5737 documentation range",
+    "(192.0.2.0/24) and labels are generic by role.",
+    "Real deployments must NOT edit this file. Point SIDECAR_CONFIG_PATH at a",
+    "registry kept outside the repository instead, so host names, addresses and",
+    "hardware inventory never enter version control."
+  ],
   "sidecars": [
     {
       "registered_id": "primary",
-      "label": "Primary (VM913 · 8×RTX 3090)",
+      "label": "Primary (text)",
       "base_url": "http://192.0.2.36:8000",
       "capabilities": ["text"],
-      "declared_model": "qwen3.8-27b",
+      "declared_model": "example-text-model",
       "enabled": true
     },
     {
       "registered_id": "secondary",
-      "label": "Secondary (VM903 · 2×RTX 3090)",
+      "label": "Secondary (text)",
       "base_url": "http://192.0.2.16:8000",
       "capabilities": ["text"],
-      "declared_model": "gemma4-31b-awq",
+      "declared_model": "example-text-model-alt",
       "enabled": true
     },
     {
       "registered_id": "vision",
-      "label": "Vision (VM901 · 2×RTX 3080)",
+      "label": "Vision",
       "base_url": "http://192.0.2.10:8100",
       "capabilities": ["vision"],
-      "declared_model": "qwen25-15b",
+      "declared_model": "example-vision-model",
       "enabled": true
     },
     {
       "registered_id": "aux",
-      "label": "Aux (VM2900 · RTX 3090)",
+      "label": "Auxiliary (text)",
       "base_url": "http://192.0.2.20:8100",
       "capabilities": ["text"],
       "declared_model": null,

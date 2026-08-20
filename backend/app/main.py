@@ -155,14 +155,37 @@ async def lifespan(app: FastAPI):
         scheduler_task.cancel()
 
 
+def _api_doc_urls() -> dict[str, str | None]:
+    """Return the docs/redoc/openapi URLs, disabled in production by default.
+
+    Serving the full schema publicly hands an attacker a complete route and
+    payload map for free. It stays on everywhere except production so local and
+    staging work is unaffected, and an operator who genuinely wants it in
+    production has to say so by name via API_DOCS_ENABLED.
+
+    Only an exact "production" disables the docs: an unrecognised ENVIRONMENT
+    keeps them served, so a typo can never quietly change behaviour in either
+    direction without being noticed.
+    """
+    environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+    explicitly_enabled = os.getenv("API_DOCS_ENABLED", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    if environment == "production" and not explicitly_enabled:
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {
+        "docs_url": "/docs",
+        "redoc_url": "/redoc",
+        "openapi_url": "/openapi.json",
+    }
+
+
 app = FastAPI(
     title="Vidistiller API",
     description="Turn any video into structured documentation",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
     lifespan=lifespan,
+    **_api_doc_urls(),
 )
 
 # Add CORS middleware
