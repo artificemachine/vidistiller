@@ -767,3 +767,6 @@ All notable changes to this project will be documented in this file.
 
 ### Security
 - security(video): treat extractor source IDs as literal filename prefixes, preventing glob metacharacters from changing downloaded-file selection or partial-file cleanup.
+
+### Fixed
+- fix(deploy): disable pgAdmin's optional Postfix startup so its non-root container remains compatible with the VM's Docker-wide `no-new-privileges` policy.

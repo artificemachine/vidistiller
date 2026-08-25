@@ -37,6 +37,13 @@ def test_production_compose_forwards_sidecar_config_path_to_api_and_worker():
     )
 
 
+def test_production_pgadmin_disables_optional_postfix_under_no_new_privileges():
+    compose = (ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8")
+    pgadmin = compose.split("  pgadmin:", 1)[1]
+
+    assert 'PGADMIN_DISABLE_POSTFIX: "true"' in pgadmin
+
+
 def test_example_keeps_operator_specific_routing_values_unset():
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
 
