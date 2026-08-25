@@ -170,3 +170,29 @@ class TestCaptureSnapshot:
             "timestamp": -1.0,
         }, headers=auth_headers)
         assert resp.status_code == 422
+
+    def test_download_failure_is_retryable_without_leaking_provider_error(
+        self, client: TestClient, test_db: Session, auth_headers, test_user
+    ):
+        job = ProcessingJob(
+            job_id="capture-download-retryable",
+            status=ProcessingStatus.COMPLETED,
+            video_url="https://www.youtube.com/watch?v=retry123456",
+            user_id=test_user.id,
+        )
+        test_db.add(job)
+        test_db.commit()
+
+        with patch("app.services.video.VideoService") as video_service:
+            video_service.return_value.download_video.side_effect = RuntimeError(
+                "signed CDN URL and internal provider details"
+            )
+            resp = client.post(
+                "/api/snapshots/capture",
+                json={"job_id": job.job_id, "timestamp": 5.0},
+                headers=auth_headers,
+            )
+
+        assert resp.status_code == 503
+        assert resp.headers["retry-after"] == "30"
+        assert "internal provider details" not in resp.json()["detail"]

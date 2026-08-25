@@ -1,5 +1,7 @@
 # Vidistiller
 
+## Overview
+
 **Turn any video into structured documentation.**
 
 Vidistiller is a local-first, source-agnostic video-to-documentation engine. Paste a URL from YouTube, Vimeo, Twitch, X, Reddit, Rumble, or any direct MP4 link — Vidistiller distills the video down to what matters: the spoken words, the slides, the structure. Hours of watching become minutes of reading.
@@ -96,6 +98,14 @@ The diagram below shows how every component connects at runtime.
 
 ---
 
+## Transcript Mode
+
+Transcript Mode creates the transcript and captures snapshots automatically by default. Use the adjacent **snapshots on/off** control before submitting a URL when you do not want automatic frame extraction. Presentation Mode always disables regular snapshots because its slide pipeline produces the visual artifacts instead.
+
+Job progress counts only automatic stages that apply to the selected mode. Optional summarize/export actions and skipped stages do not inflate the percentage, and completed or terminal jobs do not retain a stale ETA.
+
+---
+
 ## Presentation Mode (Slide Detection)
 
 For **presentation-style videos** (tech talks, lectures, tutorials with slides), enable **Presentation Mode** to automatically detect and extract slides.
@@ -104,12 +114,12 @@ For **presentation-style videos** (tech talks, lectures, tutorials with slides),
 
 When Presentation Mode is toggled on before submitting a URL, the pipeline adds a slide detection phase after transcription:
 
-1. **Layout Detection** — Classifies the video as `full_frame`, `pip_speaker` (picture-in-picture), or `split_panel`
-2. **SSIM Transition Scan** — Compares consecutive frames using Structural Similarity Index to find slide changes
+1. **Dynamic Content Detection** — Locates the likely slide region in each sampled frame and detects speaker-only intervals
+2. **Masked SSIM Transition Scan** — Compares slide content while masking presenter motion and reports scan progress
 3. **LLM Ambiguity Classification** — For borderline transitions (SSIM 0.85–0.93), the LLM classifies them as real transitions or incremental builds
-4. **Slide Grouping** — Merges transitions into distinct slides with enforced minimum duration (3s)
+4. **Segmented Slide Grouping** — Builds slides only inside slide-present time ranges, excluding speaker-only gaps
 5. **Final State Capture** — Extracts the last frame of each slide and saves it as a JPEG
-6. **OCR** — Runs Tesseract on each slide image to extract on-screen text
+6. **Region-aware OCR** — Crops to slide content and masks residual presenter regions before extracting text
 7. **Transcript Alignment** — Maps spoken words to each slide by matching timestamp ranges
 
 ### What you get
@@ -215,6 +225,10 @@ Self-contained Python modules that encapsulate the core processing logic, all lo
 | `snapshot.py` | Uses FFmpeg to extract key frames at configurable intervals |
 | `llm.py` | Sends transcript + snapshots to LLM (Ollama, OpenAI, or Anthropic), returns structured documentation |
 
+Video downloads use fresh yt-dlp extraction retries and clean partial files between attempts. Exhausted automatic retries fail the job and its unowned dependent stages instead of leaving a false completion; on-demand snapshot capture reports temporary source failures as HTTP 503 with `Retry-After: 30`.
+
+Sidecar telemetry is published by the API scheduler to Redis and read through by Celery workers. Capacity decisions use prefetched, fail-closed snapshots before database locks so workers never perform sidecar network I/O while holding a row lock.
+
 ### `migrations/` — Database Migrations (Alembic)
 
 [Alembic](https://alembic.sqlalchemy.org/) manages database schema changes. Each file in `versions/` is a migration script with `upgrade()` and `downgrade()` functions, ensuring every environment (local, CI, production) has an identical database schema.
@@ -301,7 +315,7 @@ Automatically merged with `docker-compose.yml` by Docker Compose. Use this for p
 
 ---
 
-## Getting Started
+## Quickstart
 
 1. **Clone the repository** and copy the environment template:
    ```bash
