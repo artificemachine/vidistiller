@@ -764,3 +764,6 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump project and frontend versions to 1.17.0.
+
+### Security
+- security(video): treat extractor source IDs as literal filename prefixes, preventing glob metacharacters from changing downloaded-file selection or partial-file cleanup.

@@ -111,6 +111,54 @@ def test_video_download_retries_with_fresh_extractor(tmp_path):
     sleep.assert_called_once_with(1.0)
 
 
+def test_video_download_matches_source_id_literally(tmp_path):
+    from app.core.source_type import SourceType
+    from app.services import video as video_mod
+
+    class FakeYoutubeDL:
+        def __init__(self, options):
+            self.options = options
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def download(self, urls):
+            (tmp_path / "[id].mp4").write_bytes(b"video")
+
+    service = video_mod.VideoService.__new__(video_mod.VideoService)
+    with patch.object(
+        video_mod.VideoSourceResolver,
+        "resolve",
+        return_value=(SourceType.YOUTUBE, "[id]"),
+    ), patch.object(video_mod.yt_dlp, "YoutubeDL", FakeYoutubeDL), patch.object(
+        video_mod.time, "sleep"
+    ) as sleep:
+        path, size = service.download_video(
+            "https://www.youtube.com/watch?v=literal", str(tmp_path), "720p"
+        )
+
+    assert Path(path).name == "[id].mp4"
+    assert size == 5
+    sleep.assert_not_called()
+
+
+def test_partial_cleanup_treats_source_id_as_literal(tmp_path):
+    from app.services.video import VideoService
+
+    literal_partial = tmp_path / "[id].mp4.part"
+    glob_match_partial = tmp_path / "i.mp4.part"
+    literal_partial.write_bytes(b"literal")
+    glob_match_partial.write_bytes(b"unrelated")
+
+    VideoService._cleanup_partial_video_downloads(tmp_path, "[id]")
+
+    assert not literal_partial.exists()
+    assert glob_match_partial.exists()
+
+
 def test_download_exhaustion_fails_job_and_unowned_dependent_steps(test_db, test_user):
     job = ProcessingJob(
         job_id="download-exhausted-regression",

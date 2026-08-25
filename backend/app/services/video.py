@@ -201,9 +201,10 @@ class VideoService:
 
                 video_files = [
                     candidate
-                    for candidate in Path(output_path).glob(f"{source_id}.*")
-                    if candidate.is_file()
-                    and not candidate.name.endswith((".part", ".ytdl", ".temp"))
+                    for candidate in self._source_download_files(
+                        Path(output_path), source_id
+                    )
+                    if not candidate.name.endswith((".part", ".ytdl", ".temp"))
                 ]
                 if not video_files:
                     raise VideoProcessingException("Video file was not created")
@@ -239,14 +240,21 @@ class VideoService:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _source_download_files(output_path: Path, source_id: str) -> list[Path]:
+        """Return files whose names begin with the literal source ID."""
+        filename_prefix = f"{source_id}."
+        return [
+            candidate
+            for candidate in output_path.iterdir()
+            if candidate.is_file() and candidate.name.startswith(filename_prefix)
+        ]
+
+    @staticmethod
     def _cleanup_partial_video_downloads(output_path: Path, source_id: str) -> None:
         """Remove only yt-dlp partials for this source before a fresh retry."""
-        for candidate in output_path.glob(f"{source_id}.*"):
+        for candidate in VideoService._source_download_files(output_path, source_id):
             if candidate.name.endswith((".part", ".ytdl", ".temp")):
-                try:
-                    candidate.unlink()
-                except FileNotFoundError:
-                    pass
+                candidate.unlink(missing_ok=True)
 
     def _parse_date(self, date_str: Optional[str]) -> Optional[str]:
         if not date_str:
