@@ -770,3 +770,11 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - fix(deploy): disable pgAdmin's optional Postfix startup so its non-root container remains compatible with the VM's Docker-wide `no-new-privileges` policy.
+
+## [1.17.1] — 2026-08-25
+
+### Fixed
+- fix(ui): preserve Tailwind spacing utilities by removing the global universal margin and padding reset, which overrode the utility layer and left desktop layouts compressed and left-aligned.
+
+### Changed
+- chore(release): bump project and frontend versions to 1.17.1.
