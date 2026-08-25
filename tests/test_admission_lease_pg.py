@@ -104,7 +104,12 @@ def _seed(db, global_limit: int = 1, per_user_limit: int = 1, slots: int = 1):
     # Telemetry cache so acquire_slot's capacity gate passes (N4).
     import time as _time
 
-    from app.services.sidecar import SidecarTelemetry, _telemetry_cache, _telemetry_lock
+    from app.services.sidecar import (
+        SidecarTelemetry,
+        _telemetry_cache,
+        _telemetry_local_ts,
+        _telemetry_lock,
+    )
 
     with _telemetry_lock:
         _telemetry_cache["primary"] = SidecarTelemetry(
@@ -117,6 +122,7 @@ def _seed(db, global_limit: int = 1, per_user_limit: int = 1, slots: int = 1):
             served_models=["test-model"],
             observed_at=_time.time(),
         )
+        _telemetry_local_ts["primary"] = _time.monotonic()
     existing_slots = (
         db.query(ResourceSlot)
         .filter(ResourceSlot.sidecar_id == "primary")
@@ -1481,4 +1487,3 @@ def test_final_exhaustion_co_commits_terminal_and_admission(db_factory):
     assert step.status == JobStepStatus.FAILED, f"step not failed: {step.status}"
     assert captions_mock.called, "caption fetch never reached — earlier failure path"
     db.close()
-

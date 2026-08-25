@@ -217,12 +217,37 @@ class TestCropContentRegion:
         assert result.shape[0] == 80  # 80% of 100
         assert result.shape[1] == 160  # 80% of 200
 
-    def test_split_panel_uses_left_half(self, service):
-        """Split panel layout should use left half."""
+    def test_split_panel_defers_to_dynamic_region_detection(self, service):
+        """Legacy split-panel fallback must not assume which side is content."""
         img = np.zeros((100, 200), dtype=np.uint8)
         result = service._crop_content_region(img, "split_panel")
         assert result.shape[0] == 100
-        assert result.shape[1] == 100  # 50% of 200
+        assert result.shape[1] == 200
+
+    def test_normalized_crop_supports_dynamic_slide_regions(self, service):
+        img = np.zeros((100, 200, 3), dtype=np.uint8)
+
+        result = service._crop_normalized(img, (0.25, 0.1, 0.75, 0.9))
+
+        assert result.shape == (80, 100, 3)
+
+
+class TestSegmentedSlideGrouping:
+    def test_excludes_speaker_only_gap_between_slide_segments(self, service):
+        transitions = [
+            {"timestamp": 10.0, "classification": "slide_start", "layout_type": "content_right", "content_region": (0.22, 0.0, 1.0, 1.0)},
+            {"timestamp": 20.0, "classification": "transition", "ssim": 0.5},
+            {"timestamp": 30.0, "classification": "slide_end"},
+            {"timestamp": 50.0, "classification": "slide_start", "layout_type": "content_left", "content_region": (0.0, 0.0, 0.78, 1.0)},
+            {"timestamp": 70.0, "classification": "slide_end"},
+        ]
+
+        slides = service._segmented_slide_grouping(
+            transitions, video_duration=80.0, default_layout="full_frame"
+        )
+
+        ranges = [(slide["start_timestamp"], slide["end_timestamp"]) for slide in slides]
+        assert ranges == [(10.0, 20.0), (20.0, 30.0), (50.0, 70.0)]
 
 
 class TestFinalStateCapture:
@@ -492,6 +517,15 @@ class TestSSIMTransitionScan:
         cap.release.return_value = None
         return cap
 
+    @staticmethod
+    def _slide_observation():
+        return {
+            "layout": "full_frame",
+            "region": (0.0, 0.0, 1.0, 1.0),
+            "score": 1.0,
+            "slide_present": True,
+        }
+
     def test_cannot_open_video_raises(self, service):
         """Bad video path → SlideDetectionException, not a silent fallback."""
         from app.exceptions import SlideDetectionException
@@ -512,18 +546,20 @@ class TestSSIMTransitionScan:
     def test_low_ssim_produces_transition_classification(self, service):
         """SSIM below ssim_threshold (0.85) → 'transition' classification."""
         with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_slide_region_observation", return_value=self._slide_observation()), \
              patch.object(service, "_compute_ssim", return_value=0.5):
             transitions, _ = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
-        assert len(transitions) > 0
-        assert all(t["classification"] == "transition" for t in transitions)
+        content = [t for t in transitions if t["classification"] == "transition"]
+        assert len(content) > 0
 
     def test_ambiguous_ssim_produces_ambiguous_classification(self, service):
         """SSIM in [ssim_ambiguous_low, ssim_ambiguous_high] → 'ambiguous' classification."""
         with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_slide_region_observation", return_value=self._slide_observation()), \
              patch.object(service, "_compute_ssim", return_value=0.89):
             transitions, _ = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
-        assert len(transitions) > 0
-        assert all(t["classification"] == "ambiguous" for t in transitions)
+        content = [t for t in transitions if t["classification"] == "ambiguous"]
+        assert len(content) > 0
 
     def test_frame_skip_limits_frames_sampled(self, service):
         """video_fps=30, sampling_fps=1 → frame_skip=30, exactly 2 frames sampled in a 60-frame clip."""
@@ -538,14 +574,20 @@ class TestSSIMTransitionScan:
         SSIM=0.83: above pip_speaker_ssim_ambiguous_high (0.80) → same → no transition stored.
         """
         with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_slide_region_observation", return_value=self._slide_observation()), \
              patch.object(service, "_compute_ssim", return_value=0.83):
             full_transitions, _ = service.ssim_transition_scan("/fake.mp4", 1.0, "full_frame")
-        assert len(full_transitions) > 0, "full_frame should flag 0.83 as transition"
+        assert any(t["classification"] == "transition" for t in full_transitions), (
+            "full_frame should flag 0.83 as transition"
+        )
 
         with patch("app.services.slide_detection.cv2.VideoCapture", return_value=self._make_cap(60)), \
+             patch.object(service, "_slide_region_observation", return_value=self._slide_observation()), \
              patch.object(service, "_compute_ssim", return_value=0.83):
             pip_transitions, _ = service.ssim_transition_scan("/fake.mp4", 1.0, "pip_speaker")
-        assert len(pip_transitions) == 0, "pip_speaker should treat 0.83 as same-content"
+        assert not any(t["classification"] in ("transition", "ambiguous") for t in pip_transitions), (
+            "pip_speaker should treat 0.83 as same-content"
+        )
 
     def test_pip_speaker_grouping_uses_longer_min_duration(self, service):
         """slide_grouping with layout=pip_speaker enforces 20s minimum, not 3s.

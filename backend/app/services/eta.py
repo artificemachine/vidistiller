@@ -32,6 +32,8 @@ STEP_WEIGHTS = {
     "summarize": 20,
     "export": 5,
 }
+AUTOMATIC_STEP_NAMES = frozenset({"download", "transcribe", "snapshots", "slides"})
+ON_DEMAND_STEP_NAMES = frozenset({"summarize", "export"})
 MIN_HISTORY_SAMPLES = 3
 
 
@@ -56,11 +58,18 @@ def overall_progress(job: ProcessingJob) -> Optional[int]:
         return None
     if job.status == ProcessingStatus.COMPLETED:
         return 100
-    total_weight = sum(STEP_WEIGHTS.get(step.name, 10) for step in job.steps)
+    applicable_steps = [
+        step
+        for step in job.steps
+        if step.name in AUTOMATIC_STEP_NAMES
+        and step.status != JobStepStatus.SKIPPED
+    ]
+    total_weight = sum(STEP_WEIGHTS.get(step.name, 10) for step in applicable_steps)
     if total_weight == 0:
-        return None
+        return 0
     weighted = sum(
-        (step.percent or 0) * STEP_WEIGHTS.get(step.name, 10) for step in job.steps
+        (step.percent or 0) * STEP_WEIGHTS.get(step.name, 10)
+        for step in applicable_steps
     )
     progress = weighted // total_weight
     if job.status in (ProcessingStatus.FAILED, ProcessingStatus.CANCELLED):
@@ -119,6 +128,27 @@ def estimate_eta(
     fewer than ``MIN_HISTORY_SAMPLES`` completed jobs are available, return
     a labeled cold estimate. Never returns a single falsely precise number.
     """
+    has_running_on_demand_step = any(
+        step.name in ON_DEMAND_STEP_NAMES
+        and step.status == JobStepStatus.RUNNING
+        for step in job.steps
+    )
+    if (
+        job.status
+        in (
+            ProcessingStatus.COMPLETED,
+            ProcessingStatus.FAILED,
+            ProcessingStatus.CANCELLED,
+        )
+        and not has_running_on_demand_step
+    ):
+        return EtaEstimate(
+            eta_low_seconds=None,
+            eta_high_seconds=None,
+            confidence="cold",
+            basis="job is terminal",
+        )
+
     mode = job.processing_mode or "standard"
     history = _historical_stage_durations(db, mode, sidecar)
 
@@ -147,6 +177,11 @@ def estimate_eta(
     remaining_seconds: list[float] = []
     remaining_p90: list[float] = []
     for step in job.steps:
+        if (
+            step.name in ON_DEMAND_STEP_NAMES
+            and step.status == JobStepStatus.PENDING
+        ):
+            continue
         if step.status in (
             JobStepStatus.COMPLETED,
             JobStepStatus.SKIPPED,
@@ -163,12 +198,12 @@ def estimate_eta(
         remaining_p90.append(p90.get(step.name, median * 1.5) * fraction_remaining)
 
     if not remaining_seconds:
-        # Only running stages without history: report as cold, not fabricated.
+        # No automatic work remains and no on-demand action is running.
         return EtaEstimate(
             eta_low_seconds=None,
             eta_high_seconds=None,
             confidence="cold",
-            basis="no calibrated history for remaining stages",
+            basis="no automatic work remaining",
         )
 
     total_median = sum(remaining_seconds)

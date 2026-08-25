@@ -19,6 +19,13 @@ from app.core.config import TRANSCRIPT_CONFIDENCE_CAPTIONS, TRANSCRIPT_CONFIDENC
 logger = logging.getLogger(__name__)
 
 
+def _utcnow():
+    """Naive UTC now for SQLite branches (PostgreSQL uses now())."""
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
 def _has_persisted_steps(job) -> bool:
     """Avoid treating test doubles and legacy jobs as the new step workflow."""
     return isinstance(getattr(job, "steps", None), list) and bool(job.steps)
@@ -173,17 +180,29 @@ def _mark_stage_delivered(db, job_id: int, stage: str) -> None:
         db.rollback()
 
 
-def _lease_slot_for_job(db, job, exec_uuid: str):
-    """Acquire a sidecar slot for a job under its fencing token (WP2)."""
+def _lease_slot_for_job(db, job, exec_uuid: str, telemetry_snapshot=None):
+    """Acquire a sidecar slot for a job under its fencing token (WP2).
+
+    ``telemetry_snapshot`` is the precomputed result of
+    prefetch_sidecar_telemetry() taken by the caller BEFORE any DB write
+    (WP3-hotfix: lock-held code must never initiate Redis I/O itself).
+    """
     from app.services.lease import acquire_slot
 
     preference = getattr(job, "sidecar_preference", None)
     if preference and preference != "auto":
-        return acquire_slot(db, job, exec_uuid=exec_uuid, preferred_sidecar=preference)
-    return acquire_slot(db, job, exec_uuid=exec_uuid)
+        return acquire_slot(
+            db, job,
+            exec_uuid=exec_uuid,
+            preferred_sidecar=preference,
+            telemetry_snapshot=telemetry_snapshot,
+        )
+    return acquire_slot(
+        db, job, exec_uuid=exec_uuid, telemetry_snapshot=telemetry_snapshot
+    )
 
 
-def _resolve_provider_for_slot(db, slot):
+def _resolve_provider_for_slot(db, slot, telemetry_snapshot=None):
     """Build the LLM provider bound to the LEASED sidecar (Review Round 2 F6).
 
     Uses the registry endpoint of the leased sidecar plus the model the
@@ -193,13 +212,28 @@ def _resolve_provider_for_slot(db, slot):
     N3/N8).
     """
     from app.services.llm_providers import build_provider
-    from app.services.sidecar import cached_sidecar_telemetry, get_sidecar
+    from app.services.sidecar import (
+        get_sidecar,
+        prefetch_sidecar_telemetry,
+    )
+
+    # WP3-hotfix: consume the caller's precomputed telemetry snapshot (taken
+    # BEFORE any DB write). If none was supplied (standalone callers/tests),
+    # prefetch here — but note lock-held production paths always pass one so
+    # no network I/O occurs under a DB transaction/row lock (Review Round 2
+    # F7 invariant). The snapshot (not a read-through getter) is what binds
+    # the provider to the leased sidecar's live served model across the
+    # process boundary.
+    telemetry_snapshot = (
+        telemetry_snapshot if telemetry_snapshot is not None
+        else prefetch_sidecar_telemetry(db)
+    )
 
     sidecar = get_sidecar(db, slot.sidecar_id)
     if sidecar is None:
         logger.warning("leased sidecar %s missing from registry", slot.sidecar_id)
         return None, None
-    telemetry = cached_sidecar_telemetry(slot.sidecar_id)
+    telemetry = telemetry_snapshot.get(slot.sidecar_id)
     if telemetry is None or not telemetry.healthy or telemetry.stale:
         logger.warning(
             "leased sidecar %s has no fresh healthy telemetry; treating as no capacity",
@@ -486,6 +520,34 @@ def _terminalize_capacity_exhausted(db, job_id: int) -> str:
                     job_id,
                 )
                 return "owned"
+            # WP3-hotfix (post-deploy review B1): terminalize the job's
+            # non-terminal steps in the SAME transaction so a failed job
+            # never leaves a dangling pending/failed step (the slides step
+            # of job 293 stayed pending on a failed job). Only steps not
+            # owned by a live claim are touched; a RUNNING step with a claim
+            # is untouched (another incarnation may still complete it).
+            if db.bind.dialect.name == "postgresql":
+                db.execute(
+                    text(
+                        "UPDATE job_steps SET status = 'failed', "
+                        "error_message = 'Job failed: no sidecar capacity available after retries', "
+                        "finished_at = now(), updated_at = now() "
+                        "WHERE job_id = :job_id AND status IN ('pending', 'failed') "
+                        "AND (claim_token IS NULL OR claim_token = '')"
+                    ),
+                    {"job_id": job_id},
+                )
+            else:
+                db.execute(
+                    text(
+                        "UPDATE job_steps SET status = 'failed', "
+                        "error_message = 'Job failed: no sidecar capacity available after retries', "
+                        "finished_at = :now, updated_at = :now "
+                        "WHERE job_id = :job_id AND status IN ('pending', 'failed') "
+                        "AND (claim_token IS NULL OR claim_token = '')"
+                    ),
+                    {"job_id": job_id, "now": _utcnow()},
+                )
             _finish_admission_for_job(db, job_id, failed=True)
         db.commit()
         return "done"
@@ -493,6 +555,56 @@ def _terminalize_capacity_exhausted(db, job_id: int) -> str:
         logger.warning("capacity-exhausted terminalize failed for job %s: %s", job_id, exc)
         db.rollback()
         return "owned"  # conservative: do not mutate on error
+
+
+def _terminalize_download_exhausted(db, job_id: int, error: str) -> str:
+    """Fail an active job and every unowned dependent step atomically.
+
+    Video-backed artifacts are part of the requested conversion. Exhausting
+    the durable download retries must therefore never produce a false
+    ``completed`` job with pending slides/snapshots.
+    """
+    try:
+        from app.db.models import JobStepStatus, ProcessingJob, ProcessingStatus
+
+        if db.bind.dialect.name == "postgresql":
+            row = db.execute(
+                text("SELECT status FROM processing_jobs WHERE id = :job_id FOR UPDATE"),
+                {"job_id": job_id},
+            ).first()
+            if row is None:
+                return "already"
+
+        job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+        if job is None:
+            return "already"
+        if job.status not in (ProcessingStatus.PENDING, ProcessingStatus.PROCESSING):
+            return "already"
+        if any(
+            step.status == JobStepStatus.RUNNING and step.claim_token
+            for step in job.steps
+        ):
+            db.rollback()
+            return "owned"
+
+        message = f"Video download failed after retries: {error}"[:1024]
+        job.status = ProcessingStatus.FAILED
+        job.error_message = message
+        job.celery_task_id = None
+        if job.processing_mode == "slide_aware":
+            job.slide_status = "failed"
+        for step in job.steps:
+            if step.status in (JobStepStatus.PENDING, JobStepStatus.FAILED) and not step.claim_token:
+                step.status = JobStepStatus.FAILED
+                step.error_message = message
+                step.finished_at = _utcnow()
+        _finish_admission_for_job(db, job_id, failed=True)
+        db.commit()
+        return "done"
+    except Exception as exc:
+        logger.warning("download-exhausted terminalization failed for job %s: %s", job_id, exc)
+        db.rollback()
+        return "owned"
 
 
 # ==============================================================================
@@ -717,6 +829,7 @@ def process_video_download(self, job_id: int):
         claimed = claim_step(db, job.id, "download", exec_uuid)
         if claimed is None:
             return {"job_id": job_id, "status": "skipped"}
+        _mark_stage_delivered(db, job_id, "download")
         # P10-NEW-20: commit the claim promptly so the job-row lock is not
         # held across the network/file work below (which would block
         # cancellation and terminalization for the download duration).
@@ -732,7 +845,30 @@ def process_video_download(self, job_id: int):
         except Exception as exc:
             fail_step(db, job.id, "download", exec_uuid, str(exc))
             db.commit()
-            raise self.retry(exc=exc, countdown=30)
+            if self.request.retries < self.max_retries:
+                countdown = 30 * (2 ** self.request.retries)
+                _add_log(
+                    db,
+                    job_id,
+                    f"Video download failed; automatic retry in {countdown}s",
+                    "warning",
+                    "video_download",
+                )
+                raise self.retry(exc=exc, countdown=countdown)
+            disposition = _terminalize_download_exhausted(db, job_id, str(exc))
+            if disposition == "done":
+                _add_log(
+                    db,
+                    job_id,
+                    "Video download failed after automatic retries; job failed",
+                    "error",
+                    "video_download",
+                )
+            return {
+                "job_id": job_id,
+                "status": "failed" if disposition == "done" else "skipped",
+                "reason": "video download retries exhausted",
+            }
         job.video_file_path = video_path
         # P11-NEW-23: the claim was committed before the slow network/file
         # work; revalidate the job's terminal state under a fresh lock so a
@@ -994,7 +1130,9 @@ def process_transcript(self, job_id: int):
                 {"source": source, "language": detected_language, "characters": len(transcript_text)},
             )
 
-        # 7. Download video for snapshot capture (non-fatal)
+        # 7. Download video for snapshot/slide capture. A transient failure
+        # is handed to the durable download-only task; do not re-transcribe
+        # and never report a false completed conversion.
         download_claim = (
             claim_step(db, job.id, "download", exec_uuid)
             if steps_enabled
@@ -1041,8 +1179,42 @@ def process_transcript(self, job_id: int):
             except Exception as e:
                 if download_claim:
                     fail_step(db, job.id, "download", exec_uuid, str(e))
-                _add_log(db, job_id, f"Video download failed (non-fatal): {e}", "warning", "video_download")
-                logger.warning(f"Video download failed (non-fatal): {e}")
+                    job.celery_task_id = None
+                    from app.services.admission import enqueue_first_stage
+
+                    enqueue_first_stage(
+                        db,
+                        job.id,
+                        _mint_exec_uuid(),
+                        stage="download",
+                    )
+                    db.commit()
+                    _add_log(
+                        db,
+                        job_id,
+                        "Video download failed; durable recovery queued",
+                        "warning",
+                        "video_download",
+                    )
+                    try:
+                        from app.services.dispatch import publish_outbox
+
+                        publish_outbox(db, job_id=job.id)
+                        db.commit()
+                    except Exception as dispatch_exc:
+                        logger.warning(
+                            "download recovery publish failed for job %s; outbox will retry: %s",
+                            job_id,
+                            dispatch_exc,
+                        )
+                        db.rollback()
+                    return {
+                        "status": "download_retrying",
+                        "source": source,
+                        "length": len(transcript_text),
+                    }
+                _add_log(db, job_id, f"Video download failed: {e}", "error", "video_download")
+                logger.warning("Video download failed for legacy job %s: %s", job_id, e)
 
         # 9. If slide_aware mode and video downloaded, dispatch slide processing
         if job.processing_mode == ProcessingMode.SLIDE_AWARE.value and job.video_file_path:
@@ -1357,13 +1529,20 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
         db.refresh(job, ["celery_task_id", "summarize_status"])
         db.commit()
         _add_log(db, job_id, "Starting LLM summarization...", "info", "summarize")
+        # WP3-hotfix: prefetch the telemetry snapshot BEFORE the outbox
+        # delivered-UPDATE below — the snapshot is then passed through
+        # acquire_slot/_resolve_provider_for_slot so no Redis I/O occurs
+        # while the outbox row (or any later row) is locked.
+        from app.services.sidecar import prefetch_sidecar_telemetry
+
+        telemetry_snapshot = prefetch_sidecar_telemetry(db)
         _mark_stage_delivered(db, job_id, "summarize")
 
         # WP2/WP3 (Review Round 2 F3/F6/N3): summarization performs external
         # LLM work and therefore REQUIRES a sidecar slot lease under this
         # incarnation's exec_uuid. No slot -> visible capacity reason and a
         # bounded retry, never unleased sidecar work.
-        slot = _lease_slot_for_job(db, job, exec_uuid)
+        slot = _lease_slot_for_job(db, job, exec_uuid, telemetry_snapshot)
         if slot is None:
             _record_capacity_queue_reason(db, job)
             logger.info(
@@ -1531,7 +1710,7 @@ def summarize_transcript_task(self, job_id: int, force: bool = False, force_gene
             logger.error("Summarize: leased sidecar %s missing from registry", slot.sidecar_id)
             _release_summarize_claim(db, job_id, exec_uuid)
             raise SidecarCapacityExhausted(job_id)
-        provider, _model = _resolve_provider_for_slot(db, slot)
+        provider, _model = _resolve_provider_for_slot(db, slot, telemetry_snapshot)
         if provider is None:
             logger.error(
                 "Summarize: could not build provider for leased sidecar %s", slot.sidecar_id
@@ -2041,7 +2220,14 @@ def process_slides(self, job_id: int):
         # leaves a RUNNING claim owned by a dead incarnation. No slot -> the
         # job waits visibly (admission reason recorded) and the task retries
         # with a bounded countdown; it never runs unleased.
-        slot = _lease_slot_for_job(db, job, exec_uuid)
+        # WP3-hotfix: prefetch the telemetry snapshot BEFORE any DB write
+        # below (job-row update / step claim / outbox delivered) and pass it
+        # through acquire_slot and provider resolution, so no Redis I/O
+        # occurs while DB row locks are held.
+        from app.services.sidecar import prefetch_sidecar_telemetry
+
+        telemetry_snapshot = prefetch_sidecar_telemetry(db)
+        slot = _lease_slot_for_job(db, job, exec_uuid, telemetry_snapshot)
         if slot is None:
             _record_capacity_queue_reason(db, job)
             logger.info(
@@ -2079,7 +2265,7 @@ def process_slides(self, job_id: int):
         # Bind the LLM provider to the LEASED sidecar (registry endpoint +
         # live served model), not the generic fleet resolver — the selected
         # registry sidecar is the one the lease authorizes (Review Round 2 F6).
-        provider, llm_model = _resolve_provider_for_slot(db, slot)
+        provider, llm_model = _resolve_provider_for_slot(db, slot, telemetry_snapshot)
         if provider is None:
             _add_log(db, job_id, "No LLM provider available; slide disambiguation will be skipped", "warning", "slide_detect")
 

@@ -68,6 +68,25 @@ def test_progress_without_steps_is_none():
     assert overall_progress(job) is None
 
 
+def test_standard_progress_excludes_skipped_and_on_demand_steps():
+    """Only automatic work applicable to this conversion belongs in progress."""
+    job = ProcessingJob(
+        job_id="standard-progress",
+        status=ProcessingStatus.PROCESSING,
+        processing_mode="standard",
+    )
+    job.steps = [
+        JobStep(name="download", status=JobStepStatus.RUNNING, percent=0),
+        JobStep(name="transcribe", status=JobStepStatus.COMPLETED, percent=100),
+        JobStep(name="snapshots", status=JobStepStatus.PENDING, percent=0),
+        JobStep(name="slides", status=JobStepStatus.SKIPPED, percent=100),
+        JobStep(name="summarize", status=JobStepStatus.PENDING, percent=0),
+        JobStep(name="export", status=JobStepStatus.PENDING, percent=0),
+    ]
+
+    assert overall_progress(job) == 44
+
+
 # ---------------------------------------------------------------------------
 # ETA calibration fixtures
 # ---------------------------------------------------------------------------
@@ -117,6 +136,40 @@ def test_eta_cold_start_when_insufficient_history(test_db):
     assert estimate.confidence == "cold"
     assert estimate.eta_low_seconds is None
     assert estimate.eta_high_seconds is None
+
+
+def test_eta_is_empty_for_terminal_job(test_db):
+    _seed_history(test_db, mode="standard")
+    job = _job_with_steps(ProcessingStatus.COMPLETED, mode="standard")
+
+    estimate = estimate_eta(test_db, job)
+
+    assert estimate.eta_low_seconds is None
+    assert estimate.eta_high_seconds is None
+    assert estimate.basis == "job is terminal"
+
+
+def test_eta_ignores_pending_on_demand_steps(test_db):
+    _seed_history(test_db, mode="standard")
+    job = ProcessingJob(
+        job_id="automatic-work-done",
+        status=ProcessingStatus.PROCESSING,
+        processing_mode="standard",
+    )
+    job.steps = [
+        JobStep(name="download", status=JobStepStatus.COMPLETED, percent=100),
+        JobStep(name="transcribe", status=JobStepStatus.COMPLETED, percent=100),
+        JobStep(name="snapshots", status=JobStepStatus.COMPLETED, percent=100),
+        JobStep(name="slides", status=JobStepStatus.SKIPPED, percent=100),
+        JobStep(name="summarize", status=JobStepStatus.PENDING, percent=0),
+        JobStep(name="export", status=JobStepStatus.PENDING, percent=0),
+    ]
+
+    estimate = estimate_eta(test_db, job)
+
+    assert estimate.eta_low_seconds is None
+    assert estimate.eta_high_seconds is None
+    assert estimate.basis == "no automatic work remaining"
 
 
 def test_eta_calibrated_range_with_confidence(test_db):

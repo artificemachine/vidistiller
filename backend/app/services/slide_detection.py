@@ -28,9 +28,174 @@ logger = logging.getLogger(__name__)
 class SlideDetectionService:
     """Service that detects slides in presentation-style videos."""
 
+    # Candidate regions are intentionally asymmetric as well as half-frame:
+    # common interview/masterclass layouts reserve roughly 20-30% for a
+    # presenter and put the actual deck in the remaining 70-80%.
+    _CONTENT_CANDIDATES = (
+        ("content_right", (0.22, 0.0, 1.0, 1.0)),
+        ("content_left", (0.0, 0.0, 0.78, 1.0)),
+        ("content_right", (0.45, 0.0, 1.0, 1.0)),
+        ("content_left", (0.0, 0.0, 0.55, 1.0)),
+        ("full_frame", (0.0, 0.0, 1.0, 1.0)),
+    )
+
     def __init__(self) -> None:
         self.settings = get_settings()
         self.slide_settings = self.settings.slide_detection
+
+    def _setting(self, name: str, default):
+        """Return a concrete slide setting, tolerating legacy test doubles."""
+        value = getattr(self.slide_settings, name, default)
+        return value if isinstance(value, type(default)) else default
+
+    @staticmethod
+    def _crop_normalized(frame: np.ndarray, region) -> np.ndarray:
+        """Crop ``frame`` using a normalized ``(x0, y0, x1, y1)`` region."""
+        if not region:
+            return frame
+        h, w = frame.shape[:2]
+        x0, y0, x1, y1 = region
+        left = max(0, min(w - 1, int(round(float(x0) * w))))
+        top = max(0, min(h - 1, int(round(float(y0) * h))))
+        right = max(left + 1, min(w, int(round(float(x1) * w))))
+        bottom = max(top + 1, min(h, int(round(float(y1) * h))))
+        return frame[top:bottom, left:right]
+
+    @staticmethod
+    def _resize_max_width(frame: np.ndarray, max_width: int) -> np.ndarray:
+        """Reduce a frame before CV work while preserving its aspect ratio."""
+        h, w = frame.shape[:2]
+        if w <= max_width:
+            return frame
+        scale = max_width / float(w)
+        return cv2.resize(
+            frame,
+            (max_width, max(1, int(round(h * scale)))),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    @staticmethod
+    def _skin_mask(frame: np.ndarray) -> np.ndarray:
+        """Cheap human-motion mask used to keep faces out of SSIM and OCR."""
+        if frame.ndim != 3:
+            return np.zeros(frame.shape[:2], dtype=np.uint8)
+        ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
+        cr = ycrcb[:, :, 1]
+        cb = ycrcb[:, :, 2]
+        mask = (
+            (cr >= 133)
+            & (cr <= 173)
+            & (cb >= 77)
+            & (cb <= 127)
+        ).astype(np.uint8)
+        kernel = np.ones((5, 5), dtype=np.uint8)
+        mask = cv2.dilate(mask, kernel, iterations=1)
+
+        # Reject tiny compression speckles. Keep large regions: close-up faces
+        # in speaker-only segments are intentionally strong negative evidence.
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        filtered = np.zeros_like(mask)
+        minimum = max(8, int(mask.size * 0.001))
+        for component in range(1, count):
+            area = int(stats[component, cv2.CC_STAT_AREA])
+            if area >= minimum:
+                filtered[labels == component] = 1
+        return filtered
+
+    def _prepare_ocr_frame(self, frame: np.ndarray, region) -> np.ndarray:
+        """Crop to slide content and blank residual presenter skin regions."""
+        content = self._crop_normalized(frame, region).copy()
+        mask = self._skin_mask(content)
+        if np.any(mask):
+            content[mask > 0] = 255
+        return content
+
+    def _slide_region_observation(self, frame: np.ndarray) -> Dict:
+        """Locate likely slide content in one sampled frame.
+
+        The score favours structured, sharp, low-skin regions and can return
+        ``no_slide``.  This deliberately distinguishes a deck-on-the-right
+        frame from a two-presenter split screen without OCR or an LLM call.
+        """
+        analysis_width = int(self._setting("layout_analysis_width", 320))
+        presence_threshold = float(self._setting("slide_presence_score", 0.45))
+        best: Optional[Dict] = None
+
+        for layout, region in self._CONTENT_CANDIDATES:
+            cropped = self._crop_normalized(frame, region)
+            reduced = self._resize_max_width(cropped, analysis_width)
+            if reduced.size == 0:
+                continue
+
+            gray = cv2.cvtColor(reduced, cv2.COLOR_BGR2GRAY)
+            edges = cv2.Canny(gray, 60, 160)
+            edge_density = float(np.count_nonzero(edges)) / float(edges.size)
+            detail = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+            skin_ratio = float(np.count_nonzero(self._skin_mask(reduced))) / float(gray.size)
+            area = max(0.0, (region[2] - region[0]) * (region[3] - region[1]))
+
+            # Normalized on real masterclass frames: slides exhibit dense text/
+            # line structure and little skin; speaker-only panels have lower
+            # edge/detail scores and a much larger skin fraction.
+            score = (
+                0.45 * min(edge_density / 0.08, 1.0)
+                + 0.25 * min(detail / 1000.0, 1.0)
+                + 0.15 * area
+                - 0.55 * min(skin_ratio / 0.12, 1.0)
+            )
+            candidate = {
+                "layout": layout,
+                "region": region,
+                "score": max(0.0, min(1.0, score)),
+                "slide_present": score >= presence_threshold,
+            }
+            if best is None or candidate["score"] > best["score"]:
+                best = candidate
+
+        if best is None or not best["slide_present"]:
+            return {
+                "layout": "no_slide",
+                "region": None,
+                "score": 0.0 if best is None else best["score"],
+                "slide_present": False,
+            }
+        return best
+
+    def _prepare_content_frame(self, frame: np.ndarray, region) -> Tuple[np.ndarray, np.ndarray]:
+        """Return reduced grayscale content plus an expanded human/skin mask."""
+        cropped = self._crop_normalized(frame, region)
+        reduced = self._resize_max_width(
+            cropped,
+            int(self._setting("scan_max_width", 640)),
+        )
+        gray = cv2.cvtColor(reduced, cv2.COLOR_BGR2GRAY)
+        return gray, self._skin_mask(reduced)
+
+    def _masked_content_ssim(
+        self,
+        previous: Tuple[np.ndarray, np.ndarray],
+        current: Tuple[np.ndarray, np.ndarray],
+    ) -> float:
+        """Compare content while neutralizing pixels likely to be human motion."""
+        prev_gray, prev_skin = previous
+        gray, skin = current
+        if gray.shape != prev_gray.shape:
+            gray = cv2.resize(gray, (prev_gray.shape[1], prev_gray.shape[0]), interpolation=cv2.INTER_AREA)
+            skin = cv2.resize(skin, (prev_gray.shape[1], prev_gray.shape[0]), interpolation=cv2.INTER_NEAREST)
+        if prev_skin.shape != prev_gray.shape:
+            prev_skin = cv2.resize(
+                prev_skin,
+                (prev_gray.shape[1], prev_gray.shape[0]),
+                interpolation=cv2.INTER_NEAREST,
+            )
+        human = (prev_skin > 0) | (skin > 0)
+        if np.any(human):
+            prev_gray = prev_gray.copy()
+            gray = gray.copy()
+            # Identical neutral pixels make skin movement invisible to SSIM.
+            prev_gray[human] = 127
+            gray[human] = 127
+        return self._compute_ssim(prev_gray, gray)
 
     # ------------------------------------------------------------------
     # Step 1: Layout Detection
@@ -96,14 +261,19 @@ class SlideDetectionService:
     # ------------------------------------------------------------------
 
     def ssim_transition_scan(
-        self, video_path: str, fps: float, layout: str
+        self,
+        video_path: str,
+        fps: float,
+        layout: str,
+        *,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Tuple[List[Dict], int]:
-        """
-        Compare consecutive frames at `fps` rate using SSIM.
+        """Scan dynamically selected slide regions at ``fps``.
 
-        Returns tuple of (transitions, frames_sampled):
-            transitions: list of {"frame_index": int, "timestamp": float, "ssim": float, "classification": str}
-            frames_sampled: actual number of frames compared
+        Layout is re-evaluated per sampled frame and debounced into temporal
+        segments. Speaker-only periods emit ``slide_end``/``slide_start``
+        boundaries instead of becoming false slide transitions.
         """
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -111,20 +281,18 @@ class SlideDetectionService:
 
         video_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         frame_skip = max(1, int(video_fps / fps))
+        total_frames = max(0, int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0))
+        estimated_samples = max(1, (total_frames + frame_skip - 1) // frame_skip)
 
-        prev_gray: Optional[np.ndarray] = None
         transitions: List[Dict] = []
         frame_idx = 0
         frames_sampled = 0
-
-        if layout == "pip_speaker":
-            threshold = self.slide_settings.pip_speaker_ssim_threshold
-            ambig_low = self.slide_settings.pip_speaker_ssim_ambiguous_low
-            ambig_high = self.slide_settings.pip_speaker_ssim_ambiguous_high
-        else:
-            threshold = self.slide_settings.ssim_threshold
-            ambig_low = self.slide_settings.ssim_ambiguous_low
-            ambig_high = self.slide_settings.ssim_ambiguous_high
+        confirm_samples = int(self._setting("layout_confirm_samples", 2))
+        active_observation: Optional[Dict] = None
+        pending_key: Optional[str] = None
+        pending_count = 0
+        pending_since = 0.0
+        previous_content: Optional[Tuple[np.ndarray, np.ndarray]] = None
 
         while True:
             ret, frame = cap.read()
@@ -132,37 +300,117 @@ class SlideDetectionService:
                 break
 
             if frame_idx % frame_skip == 0:
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                if cancel_check and cancel_check():
+                    from app.services.llm import CancelledException
 
-                # Optionally crop content region based on layout
-                gray = self._crop_content_region(gray, layout)
+                    cap.release()
+                    raise CancelledException()
 
-                if prev_gray is not None:
-                    ssim_val = self._compute_ssim(prev_gray, gray)
-                    timestamp = frame_idx / video_fps
+                timestamp = frame_idx / video_fps
+                observed = self._slide_region_observation(frame)
+                observed_key = observed["layout"]
 
-                    if ssim_val < threshold:
-                        classification = "transition"
-                    elif ambig_low <= ssim_val <= ambig_high:
-                        classification = "ambiguous"
-                    else:
-                        classification = "same"
-
-                    if classification in ("transition", "ambiguous"):
+                if active_observation is None:
+                    active_observation = observed
+                    if observed["slide_present"]:
                         transitions.append({
                             "frame_index": frame_idx,
                             "timestamp": timestamp,
-                            "ssim": ssim_val,
-                            "classification": classification,
+                            "ssim": 1.0,
+                            "classification": "slide_start",
+                            "layout_type": observed["layout"],
+                            "content_region": observed["region"],
                         })
+                        previous_content = self._prepare_content_frame(frame, observed["region"])
+                elif observed_key != active_observation["layout"]:
+                    if pending_key == observed_key:
+                        pending_count += 1
+                    else:
+                        pending_key = observed_key
+                        pending_count = 1
+                        pending_since = timestamp
 
-                prev_gray = gray
+                    if pending_count >= confirm_samples:
+                        if active_observation["slide_present"]:
+                            transitions.append({
+                                "frame_index": frame_idx,
+                                "timestamp": pending_since,
+                                "ssim": 1.0,
+                                "classification": "slide_end",
+                                "layout_type": active_observation["layout"],
+                                "content_region": active_observation["region"],
+                            })
+                        active_observation = observed
+                        previous_content = None
+                        if observed["slide_present"]:
+                            transitions.append({
+                                "frame_index": frame_idx,
+                                "timestamp": pending_since,
+                                "ssim": 1.0,
+                                "classification": "slide_start",
+                                "layout_type": observed["layout"],
+                                "content_region": observed["region"],
+                            })
+                            previous_content = self._prepare_content_frame(frame, observed["region"])
+                        pending_key = None
+                        pending_count = 0
+                    # A suspected layout boundary is not a content transition.
+                else:
+                    pending_key = None
+                    pending_count = 0
+                    if active_observation["slide_present"]:
+                        current_content = self._prepare_content_frame(
+                            frame,
+                            active_observation["region"],
+                        )
+                        if previous_content is not None:
+                            ssim_val = self._masked_content_ssim(previous_content, current_content)
+                            if layout == "pip_speaker":
+                                threshold = self.slide_settings.pip_speaker_ssim_threshold
+                                ambig_low = self.slide_settings.pip_speaker_ssim_ambiguous_low
+                                ambig_high = self.slide_settings.pip_speaker_ssim_ambiguous_high
+                            else:
+                                threshold = self.slide_settings.ssim_threshold
+                                ambig_low = self.slide_settings.ssim_ambiguous_low
+                                ambig_high = self.slide_settings.ssim_ambiguous_high
+
+                            if ssim_val < threshold:
+                                classification = "transition"
+                            elif ambig_low <= ssim_val <= ambig_high:
+                                classification = "ambiguous"
+                            else:
+                                classification = "same"
+
+                            if classification in ("transition", "ambiguous"):
+                                transitions.append({
+                                    "frame_index": frame_idx,
+                                    "timestamp": timestamp,
+                                    "ssim": ssim_val,
+                                    "classification": classification,
+                                    "layout_type": active_observation["layout"],
+                                    "content_region": active_observation["region"],
+                                })
+                        previous_content = current_content
+
                 frames_sampled += 1
+                if progress_callback:
+                    progress_callback(frames_sampled, estimated_samples)
 
             frame_idx += 1
 
         cap.release()
-        logger.info(f"SSIM scan: {frames_sampled} frames sampled, {len(transitions)} transitions found")
+        content_transitions = sum(
+            1
+            for item in transitions
+            if item.get("classification") in ("transition", "ambiguous")
+        )
+        logger.info(
+            "Dynamic SSIM scan: %d frames sampled, %d transitions, %d temporal boundaries (initial=%s)",
+            frames_sampled,
+            content_transitions,
+            len(transitions) - content_transitions,
+            layout,
+        )
         return transitions, frames_sampled
 
     # ------------------------------------------------------------------
@@ -459,6 +707,12 @@ class SlideDetectionService:
              "ssim_transition_score": float, "is_incremental_build": bool,
              "parent_slide_number": Optional[int]}
         """
+        if any(
+            item.get("classification") in ("slide_start", "slide_end")
+            for item in transitions
+        ):
+            return self._segmented_slide_grouping(transitions, video_duration, layout)
+
         if layout == "pip_speaker":
             min_duration = self.slide_settings.pip_speaker_min_slide_duration
         else:
@@ -551,6 +805,118 @@ class SlideDetectionService:
         logger.info(f"Grouped into {len(slides)} slides ({non_incr} non-incremental, {len(incremental_transitions)} incremental)")
         return slides
 
+    def _segmented_slide_grouping(
+        self,
+        transitions: List[Dict],
+        video_duration: float,
+        default_layout: str,
+    ) -> List[Dict]:
+        """Build slides only inside dynamically detected slide-present segments."""
+        segments: List[Dict] = []
+        active: Optional[Dict] = None
+
+        for item in sorted(transitions, key=lambda row: row["timestamp"]):
+            classification = item.get("classification")
+            timestamp = max(0.0, min(video_duration, float(item["timestamp"])))
+            if classification == "slide_start":
+                if active is not None and timestamp > active["start"]:
+                    active["end"] = timestamp
+                    segments.append(active)
+                active = {
+                    "start": timestamp,
+                    "end": video_duration,
+                    "layout_type": item.get("layout_type") or default_layout,
+                    "content_region": item.get("content_region"),
+                    "events": [],
+                }
+            elif classification == "slide_end":
+                if active is not None and timestamp > active["start"]:
+                    active["end"] = timestamp
+                    segments.append(active)
+                active = None
+            elif active is not None and classification in ("transition", "ambiguous"):
+                active["events"].append(item)
+
+        if active is not None and video_duration > active["start"]:
+            active["end"] = video_duration
+            segments.append(active)
+
+        slides: List[Dict] = []
+        incremental_events: List[Tuple[Dict, Dict]] = []
+        for segment in segments:
+            min_duration = (
+                self.slide_settings.pip_speaker_min_slide_duration
+                if default_layout == "pip_speaker" or segment["layout_type"] == "pip_speaker"
+                else self.slide_settings.min_slide_duration
+            )
+            real_events: List[Dict] = []
+            previous_start = segment["start"]
+            for event in sorted(segment["events"], key=lambda row: row["timestamp"]):
+                if self._final_classification(event) == "incremental":
+                    incremental_events.append((event, segment))
+                    continue
+                if event["timestamp"] - previous_start < min_duration:
+                    continue
+                real_events.append(event)
+                previous_start = event["timestamp"]
+
+            starts = [segment["start"]] + [float(event["timestamp"]) for event in real_events]
+            sources = [None] + real_events
+            for index, start in enumerate(starts):
+                end = starts[index + 1] if index + 1 < len(starts) else segment["end"]
+                if end <= start:
+                    continue
+                source = sources[index]
+                slides.append({
+                    "slide_number": 0,
+                    "start_timestamp": start,
+                    "end_timestamp": end,
+                    "ssim_transition_score": source.get("ssim", 0.0) if source else 0.0,
+                    "is_incremental_build": False,
+                    "parent_slide_number": None,
+                    "layout_type": (source or {}).get("layout_type") or segment["layout_type"],
+                    "content_region": (source or {}).get("content_region") or segment["content_region"],
+                })
+
+        slides.sort(key=lambda row: row["start_timestamp"])
+        for index, slide in enumerate(slides, start=1):
+            slide["slide_number"] = index
+
+        child_num = len(slides) + 1
+        for event, segment in sorted(incremental_events, key=lambda pair: pair[0]["timestamp"]):
+            timestamp = float(event["timestamp"])
+            parent = next(
+                (
+                    slide
+                    for slide in reversed(slides)
+                    if not slide["is_incremental_build"]
+                    and slide["start_timestamp"] <= timestamp < slide["end_timestamp"]
+                ),
+                None,
+            )
+            if parent is None:
+                continue
+            slides.append({
+                "slide_number": child_num,
+                "start_timestamp": timestamp,
+                "end_timestamp": parent["end_timestamp"],
+                "ssim_transition_score": event.get("ssim", 0.0),
+                "is_incremental_build": True,
+                "parent_slide_number": parent["slide_number"],
+                "layout_type": event.get("layout_type") or segment["layout_type"],
+                "content_region": event.get("content_region") or segment["content_region"],
+            })
+            child_num += 1
+
+        non_incremental = sum(1 for slide in slides if not slide["is_incremental_build"])
+        logger.info(
+            "Segmented grouping produced %d slides in %d slide-present segments (%d non-incremental)",
+            len(slides),
+            len(segments),
+            non_incremental,
+        )
+        return slides
+
     # ------------------------------------------------------------------
     # Step 5: Final State Capture
     # ------------------------------------------------------------------
@@ -604,7 +970,11 @@ class SlideDetectionService:
                 if frame_ocr_cache is not None and frame_idx in frame_ocr_cache:
                     slide["ocr_text"] = frame_ocr_cache[frame_idx]
                 else:
-                    slide["ocr_text"] = self._extract_ocr_text(frame)
+                    ocr_frame = self._prepare_ocr_frame(
+                        frame,
+                        slide.get("content_region"),
+                    )
+                    slide["ocr_text"] = self._extract_ocr_text(ocr_frame)
 
         cap.release()
         return slides
@@ -713,11 +1083,35 @@ class SlideDetectionService:
         _add_log("Scanning for slide transitions (SSIM)...", "info", "slide_ssim")
         if cancel_check and cancel_check():
             raise CancelledException()
+
+        scan_progress = {"percent": 0}
+
+        def _scan_progress(done: int, total: int) -> None:
+            percent = max(1, min(14, int(done / max(total, 1) * 14)))
+            if percent > scan_progress["percent"]:
+                scan_progress["percent"] = percent
+                _progress(percent)
+
         transitions, total_frames_sampled = self.ssim_transition_scan(
-            video_path, self.slide_settings.sampling_fps, layout
+            video_path,
+            self.slide_settings.sampling_fps,
+            layout,
+            progress_callback=_scan_progress,
+            cancel_check=cancel_check,
         )
         _progress(15)
-        _add_log(f"Found {len(transitions)} potential transitions", "info", "slide_ssim")
+        content_transition_count = sum(
+            1
+            for item in transitions
+            if item.get("classification") in ("transition", "ambiguous")
+        )
+        boundary_count = len(transitions) - content_transition_count
+        _add_log(
+            f"Found {content_transition_count} potential transitions across "
+            f"{boundary_count} slide-presence boundaries",
+            "info",
+            "slide_ssim",
+        )
 
         # 4. LLM classification for ambiguous transitions
         ambiguous_count = sum(1 for t in transitions if t.get("classification") == "ambiguous")
@@ -768,7 +1162,7 @@ class SlideDetectionService:
                 final_frame_path=sd.get("final_frame_path"),
                 ocr_text=sd.get("ocr_text"),
                 transcript_text=sd.get("transcript_text"),
-                layout_type=layout,
+                layout_type=sd.get("layout_type", layout),
                 ssim_transition_score=sd.get("ssim_transition_score"),
                 is_incremental_build=sd.get("is_incremental_build", False),
                 image_width=sd.get("image_width"),
@@ -786,6 +1180,18 @@ class SlideDetectionService:
                 slide_models[sd["slide_number"]].parent_slide_id = slide_models[parent_num].id
 
         # 9. Persist metadata
+        observed_layouts = {
+            item.get("layout_type")
+            for item in transitions
+            if item.get("layout_type") and item.get("classification") != "slide_end"
+        }
+        metadata_layout = (
+            next(iter(observed_layouts))
+            if len(observed_layouts) == 1
+            else "dynamic"
+            if observed_layouts
+            else layout
+        )
         metadata = SlideDetectionMetadata(
             job_id=job.id,
             total_frames_sampled=total_frames_sampled,
@@ -793,9 +1199,9 @@ class SlideDetectionService:
             ssim_threshold=self.slide_settings.ssim_threshold,
             ssim_ambiguous_low=self.slide_settings.ssim_ambiguous_low,
             ssim_ambiguous_high=self.slide_settings.ssim_ambiguous_high,
-            layout_type_detected=layout,
+            layout_type_detected=metadata_layout,
             total_slides=len(slide_dicts),
-            total_transitions=len(transitions),
+            total_transitions=content_transition_count,
             llm_classifications_count=llm_classifications,
             ocr_enabled=self.slide_settings.ocr_enabled,
             processing_time_seconds=time.time() - start_time,
@@ -835,9 +1241,14 @@ class SlideDetectionService:
         if layout == "pip_speaker":
             # Crop out bottom-right 20% where speaker usually is
             return gray[:int(h * 0.8), :int(w * 0.8)]
+        elif layout == "content_right":
+            return gray[:, int(w * 0.22):]
+        elif layout == "content_left":
+            return gray[:, :int(w * 0.78)]
         elif layout == "split_panel":
-            # Use left half (usually the slides)
-            return gray[:, :int(w * 0.5)]
+            # Legacy fallback only. Dynamic scans choose content_left or
+            # content_right from evidence instead of assuming a side.
+            return gray
 
         return gray
 
@@ -911,13 +1322,20 @@ class SlideDetectionService:
                 continue
 
             frame_idx = t["frame_index"]
+            content_region = t.get("content_region")
 
             # Get frame before transition (deduplicated via cache)
             before_idx = max(0, frame_idx - int(video_fps / self.slide_settings.sampling_fps))
             if before_idx not in frame_ocr_cache:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, before_idx)
                 ret, before_frame = cap.read()
-                ocr = self._extract_ocr_text(before_frame) if ret else None
+                ocr = (
+                    self._extract_ocr_text(
+                        self._prepare_ocr_frame(before_frame, content_region)
+                    )
+                    if ret
+                    else None
+                )
                 frame_ocr_cache[before_idx] = ocr
             t["ocr_text_before"] = frame_ocr_cache[before_idx]
 
@@ -925,7 +1343,13 @@ class SlideDetectionService:
             if frame_idx not in frame_ocr_cache:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
                 ret, after_frame = cap.read()
-                ocr = self._extract_ocr_text(after_frame) if ret else None
+                ocr = (
+                    self._extract_ocr_text(
+                        self._prepare_ocr_frame(after_frame, content_region)
+                    )
+                    if ret
+                    else None
+                )
                 frame_ocr_cache[frame_idx] = ocr
             t["ocr_text_after"] = frame_ocr_cache[frame_idx]
 

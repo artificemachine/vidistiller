@@ -470,6 +470,13 @@ class AdmissionSettings(BaseSettings):
     sweep_interval_seconds: int = Field(default=30, validation_alias="ADMISSION_SWEEP_INTERVAL_SECONDS")
     # Number of slots per sidecar (capacity lane).
     slots_per_sidecar: int = Field(default=1, validation_alias="SIDECAR_SLOTS")
+    # Sidecar telemetry shared by API and Celery processes through Redis.
+    telemetry_redis_ttl_seconds: int = Field(
+        default=120, validation_alias="TELEMETRY_REDIS_TTL_SECONDS"
+    )
+    local_telemetry_cache_ttl_seconds: int = Field(
+        default=5, validation_alias="LOCAL_TELEMETRY_CACHE_TTL_SECONDS"
+    )
 
     model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
 
@@ -500,6 +507,12 @@ class SlideDetectionSettings(BaseSettings):
     # under the sidecar lease (Review Round 1 Finding 8).
     llm_batch_size: int = Field(default=20, validation_alias="SLIDE_LLM_BATCH_SIZE")
     llm_batch_concurrency: int = Field(default=1, validation_alias="SLIDE_LLM_BATCH_CONCURRENCY")
+
+    # Fast dynamic content-region analysis for videos that switch layouts.
+    scan_max_width: int = Field(default=640, ge=160, le=1920, validation_alias="SLIDE_SCAN_MAX_WIDTH")
+    layout_analysis_width: int = Field(default=320, ge=160, le=960, validation_alias="SLIDE_LAYOUT_ANALYSIS_WIDTH")
+    layout_confirm_samples: int = Field(default=2, ge=1, le=10, validation_alias="SLIDE_LAYOUT_CONFIRM_SAMPLES")
+    slide_presence_score: float = Field(default=0.45, ge=0.0, le=1.0, validation_alias="SLIDE_PRESENCE_SCORE")
 
     # pip_speaker (screencasting) tuning: screen motion scores 0.80-0.90 naturally,
     # so real transitions need a lower floor and slides need a longer minimum duration.

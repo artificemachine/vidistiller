@@ -55,6 +55,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [slideMode, setSlideMode] = useState(false);
+  const [extractSnapshots, setExtractSnapshots] = useState(true);
   const [captionLang, setCaptionLang] = useState('');
   const [captionTracks, setCaptionTracks] = useState<CaptionTrack[]>([]);
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -108,7 +109,7 @@ export default function Home() {
         {
           video_url: url,
           output_format: 'markdown',
-          extract_snapshots: true,
+          extract_snapshots: slideMode ? false : extractSnapshots,
           is_slide_mode: slideMode,
           ...(captionLang ? { caption_language: captionLang } : {}),
         }
@@ -190,21 +191,38 @@ export default function Home() {
               />
             </div>
 
-            <div className="flex rounded-lg bg-card-light dark:bg-input-bg h-14 p-1">
-              <button
-                type="button"
-                onClick={() => setSlideMode(true)}
-                className={`flex-1 flex items-center justify-center rounded-md text-[13px] font-semibold transition-colors ${slideMode ? 'bg-primary text-bg-dark' : 'text-text-muted'}`}
-              >
-                presentation mode
-              </button>
-              <button
-                type="button"
-                onClick={() => setSlideMode(false)}
-                className={`flex-1 flex items-center justify-center rounded-md text-[13px] font-semibold transition-colors ${!slideMode ? 'bg-primary text-bg-dark' : 'text-text-muted'}`}
-              >
-                transcript mode
-              </button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="flex h-14 flex-1 rounded-lg bg-card-light p-1 dark:bg-input-bg">
+                <button
+                  type="button"
+                  onClick={() => setSlideMode(true)}
+                  className={`flex flex-1 items-center justify-center rounded-md text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${slideMode ? 'bg-primary text-bg-dark' : 'text-text-muted'}`}
+                >
+                  presentation mode
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSlideMode(false)}
+                  className={`flex flex-1 items-center justify-center rounded-md text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${!slideMode ? 'bg-primary text-bg-dark' : 'text-text-muted'}`}
+                >
+                  transcript mode
+                </button>
+              </div>
+              {!slideMode && (
+                <button
+                  type="button"
+                  aria-label={`automatic snapshots ${extractSnapshots ? 'on' : 'off'}`}
+                  aria-pressed={extractSnapshots}
+                  onClick={() => setExtractSnapshots((enabled) => !enabled)}
+                  className={`flex h-14 items-center justify-center gap-2 rounded-lg border px-4 text-[12px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${extractSnapshots ? 'border-primary/60 bg-primary/10 text-primary' : 'border-border-light bg-card-light text-text-muted dark:border-border-dark dark:bg-input-bg'}`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`h-2 w-2 rounded-full ${extractSnapshots ? 'bg-primary' : 'bg-text-muted'}`}
+                  />
+                  snapshots {extractSnapshots ? 'on' : 'off'}
+                </button>
+              )}
             </div>
 
             {captionTracks.length > 0 && (

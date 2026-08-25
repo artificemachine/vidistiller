@@ -753,3 +753,17 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - chore(deps): migrate the frontend to tailwindcss 4.3.3. v4 moved its PostCSS plugin into the separate `@tailwindcss/postcss` package, which is exactly why dependabot PR #166 (a bare version bump) broke the build ("It looks like you're trying to use tailwindcss directly as a PostCSS plugin"). postcss.config.js now loads the single `@tailwindcss/postcss` plugin and drops autoprefixer (vendor prefixing is built into v4); globals.css replaces the three `@tailwind base/components/utilities` directives with `@import 'tailwindcss'` plus `@config` pointing at the existing tailwind.config.js, so the CSS-variable theme palette (default/monokai/nord) and class-based dark mode carry over unchanged. Verified: `npm run build` green, all 279 frontend tests pass, lint unchanged. Supersedes and closes #166.
 - chore(release): bump `pyproject.toml` version from 1.16.3 to 1.16.4 and record the entry above.
+
+## [1.17.0] — 2026-08-25
+
+### Added
+- feat(snapshots): add an accessible automatic-snapshots toggle for transcript jobs, enabled by default and disabled for Presentation Mode.
+
+### Fixed
+- fix(reliability): share sidecar telemetry across API and Celery workers, retry and cleanly terminalize video downloads, correct progress/ETA handling, and improve dynamic slide-layout detection and OCR cropping.
+
+### Changed
+- chore(release): bump project and frontend versions to 1.17.0.
+
+### Security
+- security(video): treat extractor source IDs as literal filename prefixes, preventing glob metacharacters from changing downloaded-file selection or partial-file cleanup.

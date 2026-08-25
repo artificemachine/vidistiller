@@ -126,8 +126,9 @@ async def capture_snapshot(
         except Exception as e:
             logger.error(f"On-demand video download failed: {e}")
             raise HTTPException(
-                status_code=400,
-                detail=f"Could not download video for snapshot: {e}",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Video source is temporarily unavailable after retries; try capture again shortly",
+                headers={"Retry-After": "30"},
             )
 
     try:

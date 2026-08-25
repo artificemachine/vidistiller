@@ -188,6 +188,71 @@ describe('Home — slide mode toggle', () => {
       );
     });
   });
+
+  it('enables automatic snapshots by default in transcript mode', async () => {
+    const user = userEvent.setup();
+    mockPost.mockResolvedValue({ data: { job_id: 'snapshots-on-job' } });
+
+    render(<Home />);
+
+    const snapshotsToggle = screen.getByRole('button', { name: /automatic snapshots on/i });
+    expect(snapshotsToggle).toHaveAttribute('aria-pressed', 'true');
+
+    const urlInput = document.querySelector('input[type="url"]') as HTMLInputElement;
+    await user.type(urlInput, 'https://youtube.com/watch?v=snapshots-on');
+    await user.click(screen.getByRole('button', { name: /create document/i }));
+
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith(
+        '/jobs',
+        expect.objectContaining({ extract_snapshots: true }),
+      );
+    });
+  });
+
+  it('lets transcript mode turn automatic snapshots off', async () => {
+    const user = userEvent.setup();
+    mockPost.mockResolvedValue({ data: { job_id: 'snapshots-off-job' } });
+
+    render(<Home />);
+
+    await user.click(screen.getByRole('button', { name: /automatic snapshots on/i }));
+    const snapshotsToggle = screen.getByRole('button', { name: /automatic snapshots off/i });
+    expect(snapshotsToggle).toHaveAttribute('aria-pressed', 'false');
+
+    const urlInput = document.querySelector('input[type="url"]') as HTMLInputElement;
+    await user.type(urlInput, 'https://youtube.com/watch?v=snapshots-off');
+    await user.click(screen.getByRole('button', { name: /create document/i }));
+
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith(
+        '/jobs',
+        expect.objectContaining({ extract_snapshots: false }),
+      );
+    });
+  });
+
+  it('does not request regular snapshots in presentation mode', async () => {
+    const user = userEvent.setup();
+    mockPost.mockResolvedValue({ data: { job_id: 'slides-only-job' } });
+
+    render(<Home />);
+
+    const urlInput = document.querySelector('input[type="url"]') as HTMLInputElement;
+    await user.type(urlInput, 'https://youtube.com/watch?v=slides-only');
+    await user.click(screen.getByRole('button', { name: /presentation mode/i }));
+    await user.click(screen.getByRole('button', { name: /create document/i }));
+
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith(
+        '/jobs',
+        expect.objectContaining({
+          extract_snapshots: false,
+          is_slide_mode: true,
+        }),
+      );
+    });
+  });
 });
 
 describe('Home — caption language', () => {
