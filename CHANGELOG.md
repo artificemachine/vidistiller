@@ -778,3 +778,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump project and frontend versions to 1.17.1.
+
+## [1.17.2] — 2026-08-26
+
+### Fixed
+- fix(video): add the `bgutil-ytdlp-pot-provider` client plugin so yt-dlp can actually use the running PO Token sidecar (`tutorial_bgutil_provider`) for YouTube's `mweb` client; without it every YouTube video download failed with "Requested format is not available", breaking video download, on-demand snapshot capture, and slide detection.
+
+### Changed
+- chore(release): bump project and frontend versions to 1.17.2.
