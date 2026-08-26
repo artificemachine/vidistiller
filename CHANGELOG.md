@@ -786,3 +786,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump project and frontend versions to 1.17.2.
+
+## [1.17.3] — 2026-08-26
+
+### Fixed
+- fix(video): install a pinned, checksum-verified Deno binary in the backend runtime image so yt-dlp can run YouTube's signature/n-parameter challenge solver (its `ejs:github` remote component). The v1.17.2 PO Token plugin fix alone was not sufficient — without a JS runtime, yt-dlp still logged "Signature solving failed" / "n challenge solving failed" and fell back to images-only, so every YouTube video download still failed.
+
+### Changed
+- chore(release): bump project and frontend versions to 1.17.3.
