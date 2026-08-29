@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "commit_sha": "00a68057c8bf685dca16ad2a5a2ed06ff26ad125",
+  "images": {
+    "backend": "example-org/vidistiller-backend@sha256:4c85c5a737da483efce8481b23d64d55de58f633dd68a39bcbd03c81eed6a7b3",
+    "frontend": "example-org/vidistiller-frontend@sha256:e594325b2e62e3293ea19439c0d94932dd3a65955d31fb6f5cb6211db8668990"
+  },
+  "config": {
+    "compose": "00a68057c8bf685dca16ad2a5a2ed06ff26ad125",
+    "alembic": "00a68057c8bf685dca16ad2a5a2ed06ff26ad125",
+    "migrations_tree": "00a68057c8bf685dca16ad2a5a2ed06ff26ad125"
+  },
+  "build": {
+    "run_id": "17153000000",
+    "attestation_uri": "example-org/vidistiller-backend@sha256:4c85c5a737da483efce8481b23d64d55de58f633dd68a39bcbd03c81eed6a7b3"
+  }
+}

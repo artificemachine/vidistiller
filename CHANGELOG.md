@@ -794,3 +794,5 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump project and frontend versions to 1.17.3.
+
+- 2026-08-29: feat(release): promote vidistiller candidate digests without rebuilding
