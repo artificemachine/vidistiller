@@ -156,7 +156,14 @@ jobs:
                 "^https://github.com/${{ github.repository }}/.github/workflows/deploy\\.yml@.*$" \
               --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
               "${image}" > /dev/null
+            # --type slsaprovenance: deploy.yml's "Attest candidate digests"
+            # step signs with `cosign attest --type slsaprovenance`. Without
+            # a matching --type here, cosign defaults to "custom" and fails
+            # with "none of the attestations matched the predicate type:
+            # custom, found: ...slsa.dev/provenance/v0.2" even though the
+            # attestation is valid. Confirmed empirically 2026-09-03.
             cosign verify-attestation \
+              --type slsaprovenance \
               --certificate-identity-regexp \
                 "^https://github.com/${{ github.repository }}/.github/workflows/deploy\\.yml@.*$" \
               --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
