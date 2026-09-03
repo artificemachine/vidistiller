@@ -1,0 +1,24 @@
+# Staging immutable-digest overlay — pins api, celery_worker and web to the
+# signed image digests from an approved candidate manifest, mirroring how
+# docker-compose.prod.yml consumes VIDISTILLER_*_IMAGE_REF. Unlike prod,
+# the base docker-compose.yml builds api/celery_worker/web from source on
+# the staging host; stacking this overlay replaces that mutable path with
+# the exact digests the candidate build signed:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.staging.yml \
+#     -f docker-compose.staging-images.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.staging.yml \
+#     -f docker-compose.staging-images.yml up -d --remove-orphans
+#
+# Both refs must be full digest references produced by the candidate build
+# in deploy.yml (tag references are rejected by the manifest verifier in
+# scripts/release_candidate.py). Stacking this overlay is mandatory before
+# promoting a candidate through promote-release.yml.
+
+services:
+  api:
+    image: ${VIDISTILLER_BACKEND_IMAGE_REF:?Set VIDISTILLER_BACKEND_IMAGE_REF to a signed immutable digest}
+  celery_worker:
+    image: ${VIDISTILLER_BACKEND_IMAGE_REF:?Set VIDISTILLER_BACKEND_IMAGE_REF to a signed immutable digest}
+  web:
+    image: ${VIDISTILLER_FRONTEND_IMAGE_REF:?Set VIDISTILLER_FRONTEND_IMAGE_REF to a signed immutable digest}

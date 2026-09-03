@@ -20,9 +20,13 @@ WORKDIR /app
 # tesseract-ocr for slide OCR (presentation mode) — pytesseract in
 # requirements.txt needs the system binary + English language data.
 # unzip is needed to install the pinned Deno binary below.
+# ffmpeg: required by yt-dlp's audio-extraction postprocessor and by
+# ffprobe-based duration lookups (transcript.py, video.py) — both already
+# shelled out to it before this image ever installed the binary.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     unzip \
+    ffmpeg \
     libxcb1 \
     libx11-6 \
     libglib2.0-0 \

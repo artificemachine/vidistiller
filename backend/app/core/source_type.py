@@ -10,4 +10,5 @@ class SourceType(str, Enum):
     REDDIT = "reddit"
     RUMBLE = "rumble"
     DIRECT = "direct"
+    UPLOAD = "upload"
     UNKNOWN = "unknown"

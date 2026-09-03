@@ -442,6 +442,10 @@ class StorageSettings(BaseSettings):
         default=100 * 1024 * 1024,  # 100 MB
         validation_alias="MAX_IMPORT_SIZE_BYTES",
     )
+    max_video_upload_size_bytes: int = Field(
+        default=4 * 1024 * 1024 * 1024,  # 4 GB
+        validation_alias="MAX_VIDEO_UPLOAD_SIZE_BYTES",
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -84,18 +84,34 @@ jobs:
           print(f"Security gate passed. {len(findings)} findings, 0 blockers.")
           EOF
 
-  # ── 4. Docker Hub publish (cloud runner) ───────────────────────────────────
+  # ── 4. Candidate build & signing (cloud runner) ────────────────────────────
   #
-  # Runs before deploy-production so the server always pulls the fresh image.
-  # docker-publish.yml handles tag-based publishes; this job owns main-branch.
-  publish:
-    name: Publish images
+  # A main build is a CANDIDATE, not a release. Images are tagged only as
+  # sha-<full SHA>; both digests are cosign-signed and cosign-attested, and
+  # one candidate-manifest.json binds the two digests plus the compose,
+  # alembic and migrations identity to the exact same commit (verified by
+  # scripts/release_candidate.py). The manifest, SHA256SUMS, SBOMs and the
+  # provenance reference are uploaded as assets to a GitHub DRAFT release
+  # named candidate-<full SHA> with target_commitish set to that SHA — the
+  # durable candidate store. Promotion is a separate, human-approved step
+  # (promote-release.yml) that consumes only the draft's numeric release ID
+  # and never rebuilds. Candidate drafts are retained for at least 30 days;
+  # nothing in the release tooling deletes them before their promotion
+  # decision.
+  build-candidate:
+    name: Build & sign release candidate
     runs-on: ubuntu-latest
     needs: [test-backend, test-frontend, security]
     if: github.ref == 'refs/heads/main'
     permissions:
-      contents: read
-      id-token: write
+      contents: write   # create the candidate draft release
+      id-token: write   # keyless cosign sign/attest
+    concurrency:
+      group: build-candidate
+      cancel-in-progress: false
+    outputs:
+      candidate_release_id: ${{ steps.candidate.outputs.candidate_release_id }}
+      commit_sha: ${{ steps.identity.outputs.commit_sha }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -121,180 +137,151 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-      - name: Build and push backend
+      - name: Record candidate identity
+        id: identity
+        run: |
+          if ! echo "${GITHUB_SHA}" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "::error::GITHUB_SHA (${GITHUB_SHA}) is not a full 40-character commit SHA" >&2
+            exit 1
+          fi
+          echo "commit_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      # Candidates are tagged ONLY as sha-<full SHA> — no latest/main drift.
+      # The promotion path consumes the digest, never the tag.
+      - name: Build and push backend candidate
         id: build-backend
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: backend/Dockerfile
           push: true
-          tags: ${{ vars.DOCKER_IMAGE_NAMESPACE }}/vidistiller-backend:latest,${{ vars.DOCKER_IMAGE_NAMESPACE }}/vidistiller-backend:main
+          tags: ${{ vars.DOCKER_IMAGE_NAMESPACE }}/vidistiller-backend:sha-${{ steps.identity.outputs.commit_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Sign backend image
-        env:
-          TAGS: ${{ vars.DOCKER_IMAGE_NAMESPACE }}/vidistiller-backend:latest ${{ vars.DOCKER_IMAGE_NAMESPACE }}/vidistiller-backend:main
-          DIGEST: ${{ steps.build-backend.outputs.digest }}
-        run: for image in $TAGS; do cosign sign --yes "${image}@${DIGEST}"; done
-
-      - name: Build and push frontend
+      - name: Build and push frontend candidate
         id: build-frontend
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./frontend
           file: frontend/Dockerfile
           push: true
-          tags: ${{ vars.DOCKER_IMAGE_NAMESPACE }}/vidistiller-frontend:latest,${{ vars.DOCKER_IMAGE_NAMESPACE }}/vidistiller-frontend:main
+          tags: ${{ vars.DOCKER_IMAGE_NAMESPACE }}/vidistiller-frontend:sha-${{ steps.identity.outputs.commit_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Sign frontend image
+      - name: Sign candidate digests
         env:
-          TAGS: ${{ vars.DOCKER_IMAGE_NAMESPACE }}/vidistiller-frontend:latest ${{ vars.DOCKER_IMAGE_NAMESPACE }}/vidistiller-frontend:main
-          DIGEST: ${{ steps.build-frontend.outputs.digest }}
-        run: for image in $TAGS; do cosign sign --yes "${image}@${DIGEST}"; done
-
-  # ── 5. Deploy to production (self-hosted runner on the prod VM) ───────────
-  #
-  # Runs directly on the prod VM — no SSH tunnel needed. The runner has direct
-  # access to Docker and the project directory.
-  deploy-production:
-    name: Deploy → production
-    runs-on: [self-hosted, linux, vidistiller-host]
-    needs: [test-backend, test-frontend, security, publish]
-    if: github.ref == 'refs/heads/main'
-    environment: production
-    concurrency:
-      group: deploy-production
-      cancel-in-progress: false
-
-    steps:
-      - name: Sync compose and config files
+          NAMESPACE: ${{ vars.DOCKER_IMAGE_NAMESPACE }}
+          BACKEND_DIGEST: ${{ steps.build-backend.outputs.digest }}
+          FRONTEND_DIGEST: ${{ steps.build-frontend.outputs.digest }}
         run: |
-          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
-          curl -fsSL \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.raw" \
-            "https://api.github.com/repos/${{ github.repository }}/contents/docker-compose.prod.yml?ref=${{ github.sha }}" \
-            -o docker-compose.prod.yml
+          cosign sign --yes "${NAMESPACE}/vidistiller-backend@${BACKEND_DIGEST}"
+          cosign sign --yes "${NAMESPACE}/vidistiller-frontend@${FRONTEND_DIGEST}"
 
-      # docker-compose.prod.yml bind-mounts ./alembic.ini and ./migrations
-      # from this directory (not baked into the image at runtime — the bind
-      # mount shadows what the Dockerfile COPYs in). The step above only ever
-      # synced docker-compose.prod.yml, so these two silently drifted from
-      # what the deployed image expects: `alembic upgrade head` reported
-      # success while doing nothing, because the VM's migrations/ was still
-      # the 2026-07-22 baseline squash weeks after new revisions had been
-      # added and released (see incident_log.md 2026-08-10, caught mid-deploy
-      # of PR #198). Unlike VIDISTILLER_IMAGE_TAG (deliberately pinned, a
-      # human bumps it for a reason), there's no legitimate case for these to
-      # lag the deployed image — sync them unconditionally every deploy.
-      - name: Sync alembic config and migrations
+      - name: Write provenance predicate
+        env:
+          COMMIT_SHA: ${{ steps.identity.outputs.commit_sha }}
         run: |
-          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
-          curl -fsSL \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.raw" \
-            "https://api.github.com/repos/${{ github.repository }}/contents/alembic.ini?ref=${{ github.sha }}" \
-            -o alembic.ini
+          jq -n \
+            --arg commit "${COMMIT_SHA}" \
+            --arg run_id "${{ github.run_id }}" \
+            --arg repo "${{ github.repository }}" \
+            '{
+              builder: {id: ("https://github.com/" + $repo + "/actions/runs/" + $run_id)},
+              buildType: ("https://github.com/" + $repo + "/.github/workflows/deploy.yml@refs/heads/main"),
+              invocation: {
+                configSource: {
+                  uri: ("git+https://github.com/" + $repo),
+                  digest: {sha1: $commit},
+                  entryPoint: "deploy.yml"
+                }
+              },
+              metadata: {
+                buildInvocationId: ("https://github.com/" + $repo + "/actions/runs/" + $run_id),
+                completeness: {parameters: true, environment: false, materials: true},
+                reproducible: false
+              }
+            }' > provenance.json
 
-          mkdir -p migrations/versions
-          for f in migrations/env.py migrations/script.py.mako; do
-            curl -fsSL \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.raw" \
-              "https://api.github.com/repos/${{ github.repository }}/contents/${f}?ref=${{ github.sha }}" \
-              -o "$f"
-          done
-
-          # migrations/versions/ has an unknown, growing number of revision
-          # files -- list what exists at this commit, then pull each one.
-          curl -fsSL \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/contents/migrations/versions?ref=${{ github.sha }}" \
-            | jq -r '.[] | select(.type=="file") | .name' \
-            | while read -r fname; do
-                curl -fsSL \
-                  -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                  -H "Accept: application/vnd.github.raw" \
-                  "https://api.github.com/repos/${{ github.repository }}/contents/migrations/versions/${fname}?ref=${{ github.sha }}" \
-                  -o "migrations/versions/${fname}"
-              done
-
-          echo "Synced migrations/versions/:"
-          ls -la migrations/versions/
-
-      # A human records signed, immutable image digests in the VM .env before
-      # this job can pull or restart anything. Verify their CI provenance.
-      - name: Verify signed immutable image references
+      - name: Attest candidate digests
+        env:
+          NAMESPACE: ${{ vars.DOCKER_IMAGE_NAMESPACE }}
+          BACKEND_DIGEST: ${{ steps.build-backend.outputs.digest }}
+          FRONTEND_DIGEST: ${{ steps.build-frontend.outputs.digest }}
         run: |
-          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
-          command -v cosign >/dev/null || {
-            echo "::error::cosign must be installed on the deployment runner"
+          cosign attest --yes --type slsaprovenance \
+            --predicate provenance.json \
+            "${NAMESPACE}/vidistiller-backend@${BACKEND_DIGEST}"
+          cosign attest --yes --type slsaprovenance \
+            --predicate provenance.json \
+            "${NAMESPACE}/vidistiller-frontend@${FRONTEND_DIGEST}"
+
+      - name: Generate SBOMs
+        env:
+          NAMESPACE: ${{ vars.DOCKER_IMAGE_NAMESPACE }}
+          BACKEND_DIGEST: ${{ steps.build-backend.outputs.digest }}
+          FRONTEND_DIGEST: ${{ steps.build-frontend.outputs.digest }}
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.51.1
+          syft "${NAMESPACE}/vidistiller-backend@${BACKEND_DIGEST}" -o spdx-json > sbom-backend.json
+          syft "${NAMESPACE}/vidistiller-frontend@${FRONTEND_DIGEST}" -o spdx-json > sbom-frontend.json
+
+      - name: Create candidate manifest
+        env:
+          COMMIT_SHA: ${{ steps.identity.outputs.commit_sha }}
+          NAMESPACE: ${{ vars.DOCKER_IMAGE_NAMESPACE }}
+          BACKEND_DIGEST: ${{ steps.build-backend.outputs.digest }}
+          FRONTEND_DIGEST: ${{ steps.build-frontend.outputs.digest }}
+        run: |
+          python3 scripts/release_candidate.py create \
+            --commit "${COMMIT_SHA}" \
+            --backend-ref "${NAMESPACE}/vidistiller-backend@${BACKEND_DIGEST}" \
+            --frontend-ref "${NAMESPACE}/vidistiller-frontend@${FRONTEND_DIGEST}" \
+            --run-id "${{ github.run_id }}" \
+            --attestation-uri "${NAMESPACE}/vidistiller-backend@${BACKEND_DIGEST}" \
+            --output candidate-manifest.json
+          cat candidate-manifest.json
+
+      - name: Sum candidate assets
+        run: |
+          sha256sum candidate-manifest.json provenance.json sbom-backend.json sbom-frontend.json > SHA256SUMS
+
+      - name: Create candidate draft release
+        id: candidate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ steps.identity.outputs.commit_sha }}
+        run: |
+          tag="candidate-${COMMIT_SHA}"
+          existing="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq \
+            ".[] | select(.tag_name == \"${tag}\") | .id" | head -n1)"
+          if [ -n "${existing}" ]; then
+            echo "::error::candidate release ${tag} already exists (id ${existing}); refusing to overwrite" >&2
+            exit 1
+          fi
+          # --draft keeps the tag unpublished until promotion; --target sets
+          # target_commitish to the exact commit the manifest binds.
+          gh release create "${tag}" --draft --target "${COMMIT_SHA}" \
+            --title "${tag}" \
+            --notes "Signed release candidate for ${COMMIT_SHA}. Promote via promote-release.yml using this draft's numeric release ID."
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq \
+            ".[] | select(.tag_name == \"${tag}\") | .id" | head -n1)"
+          test -n "${release_id}" || {
+            echo "::error::could not resolve candidate release id for ${tag}" >&2
             exit 1
           }
-          backend_ref=$(sed -n 's/^VIDISTILLER_BACKEND_IMAGE_REF=//p' .env | tail -1)
-          frontend_ref=$(sed -n 's/^VIDISTILLER_FRONTEND_IMAGE_REF=//p' .env | tail -1)
-          for image in "$backend_ref" "$frontend_ref"; do
-            case "$image" in
-              *@sha256:*) ;;
-              *)
-                echo "::error::Deployment requires signed immutable image digests"
-                exit 1
-                ;;
-            esac
-            cosign verify --certificate-identity-regexp \
-              "^https://github.com/${{ github.repository }}/.github/workflows/(docker-publish|deploy)\\.yml@.*$" \
-              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-              "$image" >/dev/null
-          done
+          gh release upload "${tag}" \
+            candidate-manifest.json SHA256SUMS provenance.json sbom-backend.json sbom-frontend.json
+          echo "candidate_release_id=${release_id}" >> "$GITHUB_OUTPUT"
 
-      - name: Enable Sentry if DSN is configured
-        if: env.SENTRY_DSN != ''
-        env:
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-        run: |
-          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
-          sed -i "s|^SENTRY_DSN=.*|SENTRY_DSN=${SENTRY_DSN}|" .env
-          sed -i "s|^SENTRY_ENABLED=.*|SENTRY_ENABLED=true|" .env
-          grep -q "^NEXT_PUBLIC_SENTRY_DSN=" .env \
-            && sed -i "s|^NEXT_PUBLIC_SENTRY_DSN=.*|NEXT_PUBLIC_SENTRY_DSN=${SENTRY_DSN}|" .env \
-            || echo "NEXT_PUBLIC_SENTRY_DSN=${SENTRY_DSN}" >> .env
-
-      - name: Pull latest images
-        run: |
-          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
-          docker compose -f docker-compose.prod.yml pull
-
-      - name: Ensure app-data ownership matches container uid
-        run: |
-          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
-          sudo mkdir -p app-data/videos app-data/snapshots app-data/slides
-          sudo chown -R 1001:1001 app-data
-
-      - name: Deploy
-        run: |
-          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
-          docker compose -f docker-compose.prod.yml down --remove-orphans
-          docker compose -f docker-compose.prod.yml up -d --remove-orphans
-
-      - name: Run migrations
-        if: ${{ github.event.inputs.run_migrations != 'false' }}
-        run: |
-          cd "${VIDISTILLER_DIR:-/opt/vidistiller}"
-          sleep 8
-          echo "Running alembic upgrade head..."
-          docker compose -f docker-compose.prod.yml exec -T api sh -c 'cd /app && python -m alembic upgrade head'
-          echo "Migrations complete."
-
-      - name: Health check
-        run: |
-          sleep 12
-          curl -sf "${{ vars.PROD_API_BASE_URL }}/health" || { echo "API health check failed"; exit 1; }
-          echo "Deploy successful"
-
-  # ── 6. Deploy to staging (self-hosted runner on staging LXC) ───────────────
+  # ── 5. Deploy to staging (self-hosted runner on staging LXC) ───────────────
+  #
+  # Production is NOT deployed from this workflow: releases are promoted from
+  # the approved candidate draft by promote-release.yml, which passes the
+  # manifest's commit SHA to the production deployment. To pin staging to the
+  # same signed digests, stack docker-compose.staging-images.yml (see its
+  # header) — the base compose still builds from source without it.
   deploy-staging:
     name: Deploy → staging
     runs-on: [self-hosted, linux, vidistiller-staging]

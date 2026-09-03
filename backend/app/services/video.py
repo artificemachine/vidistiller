@@ -8,6 +8,7 @@ Supports any platform yt-dlp handles: YouTube, Vimeo, Twitch, Twitter/X, TikTok,
 import json
 import logging
 import os
+import subprocess
 import tempfile
 import time
 from datetime import datetime
@@ -60,6 +61,10 @@ class VideoService:
         duration, channel, upload_date, view_count, thumbnail_url, chapters.
         """
         source_type, source_id = VideoSourceResolver.resolve(url)
+
+        if source_type == SourceType.UPLOAD:
+            return self._local_metadata(url, source_id)
+
         cache_key = f"video_metadata:{source_type.value}:{source_id}"
 
         if self.cache:
@@ -103,6 +108,9 @@ class VideoService:
         if output_path is None:
             output_path = str(Path(tempfile.gettempdir()) / "video-audio")
         Path(output_path).mkdir(parents=True, exist_ok=True)
+
+        if source_type == SourceType.UPLOAD:
+            return self._extract_local_audio(url, output_path, source_id)
 
         ydl_opts = {
             "format": "bestaudio/best",
@@ -152,6 +160,9 @@ class VideoService:
         Returns ``(file_path, file_size_bytes)``.
         """
         source_type, source_id = VideoSourceResolver.resolve(url)
+
+        if source_type == SourceType.UPLOAD:
+            return self._local_video_file(url)
 
         if output_path is None:
             output_path = str(Path(tempfile.gettempdir()) / "video-dl")
@@ -255,6 +266,82 @@ class VideoService:
         for candidate in VideoService._source_download_files(output_path, source_id):
             if candidate.name.endswith((".part", ".ytdl", ".temp")):
                 candidate.unlink(missing_ok=True)
+
+    def _local_video_file(self, url: str) -> Tuple[str, int]:
+        """Return the already-saved upload as-is — no download needed."""
+        local_path = Path(VideoSourceResolver.upload_local_path(url))
+        if not local_path.is_file():
+            raise VideoProcessingException(f"Uploaded file not found: {local_path}")
+        return str(local_path), local_path.stat().st_size
+
+    def _extract_local_audio(
+        self, url: str, output_path: str, source_id: str
+    ) -> Tuple[str, int]:
+        """Extract/convert the uploaded file's audio track to MP3 via ffmpeg."""
+        local_path = Path(VideoSourceResolver.upload_local_path(url))
+        if not local_path.is_file():
+            raise VideoProcessingException(f"Uploaded file not found: {local_path}")
+
+        dest = Path(output_path) / f"{source_id}.mp3"
+        try:
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-y", "-i", str(local_path),
+                    "-vn", "-acodec", "libmp3lame", "-q:a", "2",
+                    str(dest),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=self.settings.service_timeouts.whisper_timeout,
+            )
+        except FileNotFoundError as e:
+            raise VideoProcessingException(f"ffmpeg is not installed: {e}")
+        except subprocess.TimeoutExpired as e:
+            raise VideoProcessingException(f"Audio extraction timed out: {e}")
+
+        if result.returncode != 0 or not dest.exists():
+            raise VideoProcessingException(
+                f"Failed to extract audio from upload: {result.stderr.strip()[-500:]}"
+            )
+
+        logger.info(f"✓ Audio extracted from upload: {dest} ({dest.stat().st_size} bytes)")
+        return str(dest), dest.stat().st_size
+
+    def _local_metadata(self, url: str, source_id: str) -> Dict:
+        """Build metadata for an uploaded file without any network call."""
+        local_path = Path(VideoSourceResolver.upload_local_path(url))
+        display_name = VideoSourceResolver.upload_display_name(url)
+        return {
+            "video_id": source_id,
+            "source_type": SourceType.UPLOAD.value,
+            "title": display_name or local_path.name,
+            "description": "",
+            "duration": self._ffprobe_duration(local_path),
+            "channel": "Local upload",
+            "upload_date": None,
+            "view_count": 0,
+            "thumbnail_url": "",
+            "chapters": [],
+        }
+
+    @staticmethod
+    def _ffprobe_duration(path: Path) -> int:
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                    "-of", "json", str(path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode != 0:
+                return 0
+            return int(float(json.loads(result.stdout)["format"]["duration"]))
+        except Exception as e:
+            logger.warning(f"ffprobe duration lookup failed for {path}: {e}")
+            return 0
 
     def _parse_date(self, date_str: Optional[str]) -> Optional[str]:
         if not date_str:

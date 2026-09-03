@@ -59,12 +59,36 @@ def test_non_production_database_and_cache_ports_bind_to_loopback():
         assert '"127.0.0.1:' in compose
 
 
-def test_deploy_verifies_immutable_image_references_with_cosign():
+def test_deploy_builds_and_signs_candidate_drafts():
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
+
+    assert "build-candidate" in workflow
+    assert "cosign sign --yes" in workflow
+    assert "cosign attest --yes" in workflow
+    assert "release_candidate.py create" in workflow
+    assert "gh release create" in workflow and "--draft" in workflow
+    assert "--target" in workflow  # draft target_commitish = the candidate commit
+
+
+def test_promotion_verifies_immutable_image_references_with_cosign():
+    workflow = (ROOT / ".github" / "workflows" / "promote-release.yml").read_text(
+        encoding="utf-8"
+    )
 
     assert "VIDISTILLER_BACKEND_IMAGE_REF" in workflow
     assert "VIDISTILLER_FRONTEND_IMAGE_REF" in workflow
     assert "cosign verify --certificate-identity-regexp" in workflow
+    # Promotion reuses the recorded digests; it must never rebuild.
+    assert "docker buildx imagetools create" in workflow
+    assert "build-push-action" not in workflow
+
+
+def test_staging_overlay_pins_immutable_digests():
+    overlay = (ROOT / "docker-compose.staging-images.yml").read_text(encoding="utf-8")
+
+    assert overlay.count("${VIDISTILLER_BACKEND_IMAGE_REF:?") == 2
+    assert overlay.count("${VIDISTILLER_FRONTEND_IMAGE_REF:?") == 1
+    assert "${VIDISTILLER_BACKEND_IMAGE_REF:?" in overlay
 
 
 def test_dockerignore_excludes_test_and_editor_build_context_files():

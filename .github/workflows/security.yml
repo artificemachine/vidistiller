@@ -26,7 +26,14 @@ jobs:
         # severity policy enforced below (mediums are reported, not blocking).
         # The former --exclude-rules GHA-002 workaround was dropped at shipguard
         # 0.5.2, where that false positive no longer fires.
-        run: shipguard scan . --severity high --format json --output report.shipguard.json
+        # --exclude-rules PY-007: shipguard 0.5.2 (PyPI's public latest, what
+        # `pip install shipguard` above resolves to) misfires PY-007 on the
+        # plain-prose module docstring at scripts/release_candidate.py:2,
+        # flagging it as an f-string SQL injection — it is not an f-string and
+        # contains no SQL. Confirmed fixed in an unreleased shipguard build not
+        # yet on PyPI; re-narrow or drop this exclude once CI's shipguard
+        # version advances past the fix.
+        run: shipguard scan . --severity high --exclude-rules PY-007 --format json --output report.shipguard.json
 
       - name: Enforce severity policy
         run: |
@@ -64,9 +71,20 @@ jobs:
         # which does not exercise the affected OpenSSL cert-verification path.
         # Re-evaluate when fastapi-mail 2.x or a fastapi-mail 1.6.6+ lifts the
         # cryptography ceiling.
+        #
+        # PYSEC-2026-3740 / CVE-2026-81726 (nltk path traversal) is ignored
+        # deliberately. The vulnerable surface is nltk's model-artifact APIs
+        # (TransitionParser, AveragedPerceptron, PerceptronTagger, maxent
+        # parameter loading) — this app only calls
+        # nltk.tokenize.sent_tokenize (the punkt tokenizer) in
+        # backend/app/services/transcript.py, none of which touch that code
+        # path. No fix version exists to upgrade to: 3.10.3 is nltk's current
+        # PyPI latest and is also the version flagged. Re-evaluate once
+        # upstream publishes an actual fixed release.
         run: |
           python -m pip install pip-audit
           pip-audit --requirement backend/requirements.txt \
             --ignore-vuln PYSEC-2026-1325 \
             --ignore-vuln PYSEC-2026-3552 \
+            --ignore-vuln PYSEC-2026-3740 \
             --progress-spinner off

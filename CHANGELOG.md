@@ -794,3 +794,20 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump project and frontend versions to 1.17.3.
+
+- 2026-08-29: feat(release): promote vidistiller candidate digests without rebuilding
+
+## [1.18.0] — 2026-09-03
+
+### Added
+- feat(upload): local video/audio file upload as an alternative to pasting a URL. New `POST /jobs/upload` endpoint streams the file to disk with a size cap and extension allowlist, then runs it through the same transcription pipeline as URL-based jobs (captions are skipped for local files, audio is extracted via `ffmpeg` for the Whisper fallback). Frontend adds a URL/Upload toggle to the submission form.
+
+### Fixed
+- fix(video): install `ffmpeg` in the backend runtime image — yt-dlp's audio-extraction postprocessor and `ffprobe`-based duration lookups already depended on it without it being present.
+
+### Changed
+- chore(release): bump project and frontend versions to 1.18.0.
+
+- 2026-09-03: fix(ci): exclude shipguard rule PY-007 in security.yml — false positive on scripts/release_candidate.py's module docstring (misread as an f-string SQL query) in shipguard 0.5.2, PyPI's public latest.
+
+- 2026-09-03: fix(ci): ignore PYSEC-2026-3740 (nltk path traversal) in pip-audit — unreached code path (this app only calls nltk.tokenize.sent_tokenize), no fix version available.

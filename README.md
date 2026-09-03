@@ -4,7 +4,7 @@
 
 **Turn any video into structured documentation.**
 
-Vidistiller is a local-first, source-agnostic video-to-documentation engine. Paste a URL from YouTube, Vimeo, Twitch, X, Reddit, Rumble, or any direct MP4 link — Vidistiller distills the video down to what matters: the spoken words, the slides, the structure. Hours of watching become minutes of reading.
+Vidistiller is a local-first, source-agnostic video-to-documentation engine. Paste a URL from YouTube, Vimeo, Twitch, X, Reddit, Rumble, or any direct MP4 link — or upload a video/audio file straight from your computer — and Vidistiller distills it down to what matters: the spoken words, the slides, the structure. Hours of watching become minutes of reading.
 
 ![Vidistiller — paste a video URL, pick a mode, get a document](docs/assets/vidistiller-home.webp)
 
@@ -84,9 +84,9 @@ The diagram below shows how every component connects at runtime.
 ### Data Flow (step by step)
 
 ```
-1. User pastes a video URL in the frontend
-2. Frontend sends POST request to the API
-3. API validates the URL, creates a ProcessingJob in PostgreSQL, and pushes a task to Redis
+1. User pastes a video URL, or uploads a video/audio file, in the frontend
+2. Frontend sends a POST request to the API (`/jobs` for a URL, `/jobs/upload` for a local file)
+3. API validates the input, creates a ProcessingJob in PostgreSQL, and pushes a task to Redis
 4. Celery worker picks up the task from Redis and runs the pipeline:
    a. Video Service    → downloads the video and extracts metadata
    b. Transcript Service → converts audio to text (via Ollama Whisper)
