@@ -29,7 +29,14 @@ on:
         type: string
 
 permissions:
-  contents: read
+  # contents: write (not read) — GitHub's REST API returns 403 "Resource not
+  # accessible by integration" fetching a DRAFT release with only
+  # contents: read; a draft is treated like any other unpublished/private
+  # object and needs push-level repo access to view, even though this job
+  # never writes anything itself. Confirmed empirically 2026-09-03: the
+  # first-ever run of this workflow failed at "Fetch candidate draft release
+  # by ID" with contents: read.
+  contents: write
   id-token: write
 
 env:
