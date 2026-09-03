@@ -270,8 +270,17 @@ jobs:
           gh release create "${tag}" --draft --target "${COMMIT_SHA}" \
             --title "${tag}" \
             --notes "Signed release candidate for ${COMMIT_SHA}. Promote via promote-release.yml using this draft's numeric release ID."
-          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq \
-            ".[] | select(.tag_name == \"${tag}\") | .id" | head -n1)"
+          # The releases-list endpoint can lag a freshly created release by a
+          # second or two (read-after-write is not guaranteed here), so an
+          # immediate single lookup can spuriously fail even though the
+          # release exists — retry briefly before giving up.
+          release_id=""
+          for attempt in 1 2 3 4 5; do
+            release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq \
+              ".[] | select(.tag_name == \"${tag}\") | .id" | head -n1)"
+            [ -n "${release_id}" ] && break
+            sleep 2
+          done
           test -n "${release_id}" || {
             echo "::error::could not resolve candidate release id for ${tag}" >&2
             exit 1
