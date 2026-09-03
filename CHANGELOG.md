@@ -813,3 +813,5 @@ All notable changes to this project will be documented in this file.
 - 2026-09-03: fix(ci): ignore PYSEC-2026-3740 (nltk path traversal) in pip-audit — unreached code path (this app only calls nltk.tokenize.sent_tokenize), no fix version available.
 
 - 2026-09-03: fix(ci): exclude shipguard rule PY-007 in deploy.yml's SAST scan too — same false positive as security.yml, different workflow's independent shipguard invocation.
+
+- 2026-09-03: fix(ci): retry the candidate-release-id lookup in deploy.yml's "Create candidate draft release" step — the releases-list API can lag a just-created release by a second or two, and the prior single-shot lookup failed the whole job even though the release existed. Also deleted an orphaned draft release left behind by the earlier failure.
