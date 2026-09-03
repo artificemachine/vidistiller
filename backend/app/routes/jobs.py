@@ -13,15 +13,19 @@ All routes require authentication via JWT Bearer token or X-API-Key header.
 import base64
 import json
 import logging
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter, Body, Depends, File, Form, HTTPException, Query, Request,
+    UploadFile, status,
+)
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, or_, text
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Optional
 
 import os
 from app.core.config import get_settings
@@ -202,83 +206,226 @@ def create_job(
                     },
                 )
 
-        processing_mode = ProcessingMode.SLIDE_AWARE.value if job_data.is_slide_mode else ProcessingMode.STANDARD.value
-        from app.services.sidecar import validate_sidecar_preference
-        sidecar_pref = validate_sidecar_preference(db, job_data.sidecar_preference)
-        new_job = ProcessingJob(
-            job_id=str(uuid.uuid4()),
-            status=ProcessingStatus.PENDING,
-            video_url=job_data.video_url,
-            source_type=source_type.value,
-            processing_mode=processing_mode,
-            caption_language=job_data.caption_language,
-            sidecar_preference=sidecar_pref,
-            user_id=current_user.id,
-        )
-
-        db.add(new_job)
-        from app.services.job_steps import seed_job_steps
-
-        seed_job_steps(
+        new_job = _create_and_dispatch_job(
             db,
-            new_job,
+            current_user=current_user,
+            video_url=job_data.video_url,
+            source_type=source_type,
+            caption_language=job_data.caption_language,
+            sidecar_preference=job_data.sidecar_preference,
             extract_snapshots=job_data.extract_snapshots,
             is_slide_mode=job_data.is_slide_mode,
         )
-        # WP2: admit or queue atomically in the same transaction that creates
-        # the job. A job that cannot start is queued with a visible reason —
-        # it is never overcommitted nor failed ambiguously. When admitted, an
-        # outbox dispatch row is written; it is published to Redis only after
-        # commit (durable at-least-once, Review Round 1 Finding 7).
-        from app.services.admission import admit_or_queue_job
-        from app.services.sidecar import prefetch_sidecar_telemetry
-
-        # WP3-hotfix: warm the telemetry snapshot BEFORE the admission
-        # transaction takes any lock — the preference check inside
-        # admit_or_queue_job reads ONLY the local snapshot (no Redis I/O
-        # under counter/job locks, Review Round 2 F7 invariant).
-        prefetch_sidecar_telemetry(db)
-        outcome = admit_or_queue_job(
-            db, new_job, preferred_sidecar=sidecar_pref
-        )
-        db.commit()
-        db.refresh(new_job)
-
-        if outcome.state == "admitted":
-            from app.services.admission import (
-                mark_outbox_delivered,
-                pending_outbox_rows,
-            )
-            from app.services.dispatch import publish_outbox
-
-            published = publish_outbox(db, job_id=new_job.id)
-            if published:
-                db.commit()
-            # Legacy safety: if nothing was published (no outbox row or Redis
-            # unavailable), fall back to the direct .delay() path so a
-            # pre-outbox deployment never silently drops jobs. The task
-            # itself remains idempotent via claim_step. A Redis outage here
-            # must not fail the already-committed job creation.
-            if not published:
-                try:
-                    from app.tasks import process_transcript
-                    process_transcript.delay(new_job.id)
-                except Exception as _delay_exc:
-                    logger.warning(
-                        "Job %s committed but dispatch failed (Redis down?): %s — outbox sweep will retry",
-                        new_job.job_id, _delay_exc,
-                    )
-        else:
-            logger.info(
-                "Job %s queued (admission): %s", new_job.job_id, outcome.queue_reason
-            )
-
         return JobResponse.model_validate(new_job)
 
     except DuplicateResourceException:
         raise
     except Exception as e:
         db.rollback()
+        raise ValidationException("Failed to create job: " + str(e))
+
+
+def _create_and_dispatch_job(
+    db: Session,
+    *,
+    current_user: User,
+    video_url: str,
+    source_type,
+    caption_language: Optional[str],
+    sidecar_preference: Optional[str],
+    extract_snapshots: bool,
+    is_slide_mode: bool,
+    job_id: Optional[str] = None,
+) -> ProcessingJob:
+    """Create a ProcessingJob, seed its steps, and admit/dispatch it.
+
+    Shared by the URL-based create endpoint and the local file upload
+    endpoint — everything past URL resolution and the duplicate check is
+    identical for both sources. ``job_id`` lets a caller that already needs
+    the UUID up front (the upload endpoint names its storage directory after
+    it) pass the same one through instead of minting a second, mismatched id.
+    """
+    processing_mode = ProcessingMode.SLIDE_AWARE.value if is_slide_mode else ProcessingMode.STANDARD.value
+    from app.services.sidecar import validate_sidecar_preference
+    sidecar_pref = validate_sidecar_preference(db, sidecar_preference)
+    new_job = ProcessingJob(
+        job_id=job_id or str(uuid.uuid4()),
+        status=ProcessingStatus.PENDING,
+        video_url=video_url,
+        source_type=source_type.value,
+        processing_mode=processing_mode,
+        caption_language=caption_language,
+        sidecar_preference=sidecar_pref,
+        user_id=current_user.id,
+    )
+
+    db.add(new_job)
+    from app.services.job_steps import seed_job_steps
+
+    seed_job_steps(
+        db,
+        new_job,
+        extract_snapshots=extract_snapshots,
+        is_slide_mode=is_slide_mode,
+    )
+    # WP2: admit or queue atomically in the same transaction that creates
+    # the job. A job that cannot start is queued with a visible reason —
+    # it is never overcommitted nor failed ambiguously. When admitted, an
+    # outbox dispatch row is written; it is published to Redis only after
+    # commit (durable at-least-once, Review Round 1 Finding 7).
+    from app.services.admission import admit_or_queue_job
+    from app.services.sidecar import prefetch_sidecar_telemetry
+
+    # WP3-hotfix: warm the telemetry snapshot BEFORE the admission
+    # transaction takes any lock — the preference check inside
+    # admit_or_queue_job reads ONLY the local snapshot (no Redis I/O
+    # under counter/job locks, Review Round 2 F7 invariant).
+    prefetch_sidecar_telemetry(db)
+    outcome = admit_or_queue_job(
+        db, new_job, preferred_sidecar=sidecar_pref
+    )
+    db.commit()
+    db.refresh(new_job)
+
+    if outcome.state == "admitted":
+        from app.services.dispatch import publish_outbox
+
+        published = publish_outbox(db, job_id=new_job.id)
+        if published:
+            db.commit()
+        # Legacy safety: if nothing was published (no outbox row or Redis
+        # unavailable), fall back to the direct .delay() path so a
+        # pre-outbox deployment never silently drops jobs. The task
+        # itself remains idempotent via claim_step. A Redis outage here
+        # must not fail the already-committed job creation.
+        if not published:
+            try:
+                from app.tasks import process_transcript
+                process_transcript.delay(new_job.id)
+            except Exception as _delay_exc:
+                logger.warning(
+                    "Job %s committed but dispatch failed (Redis down?): %s — outbox sweep will retry",
+                    new_job.job_id, _delay_exc,
+                )
+    else:
+        logger.info(
+            "Job %s queued (admission): %s", new_job.job_id, outcome.queue_reason
+        )
+
+    return new_job
+
+
+# ==============================================================================
+# UPLOAD JOB - POST /jobs/upload
+# ==============================================================================
+
+UPLOAD_VIDEO_EXTENSIONS = {"mp4", "webm", "mov", "mkv", "avi", "m4v", "ogv"}
+UPLOAD_AUDIO_EXTENSIONS = {"mp3", "wav", "m4a", "aac", "flac", "ogg", "opus"}
+UPLOAD_ALLOWED_EXTENSIONS = UPLOAD_VIDEO_EXTENSIONS | UPLOAD_AUDIO_EXTENSIONS
+_UPLOAD_CHUNK_SIZE = 4 * 1024 * 1024
+_CAPTION_LANGUAGE_RE = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$")
+
+
+@router.post(
+    "/upload",
+    response_model=JobResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new processing job from a local file",
+    description="Upload a video or audio file from disk and convert it into documentation",
+)
+async def upload_job(
+    file: UploadFile = File(...),
+    extract_snapshots: bool = Form(True),
+    is_slide_mode: bool = Form(False),
+    caption_language: Optional[str] = Form(None),
+    sidecar_preference: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _rate_limit: None = Depends(job_submit_rate_limit),
+) -> JobResponse:
+    """
+    Create a new processing job from a locally uploaded video or audio file.
+
+    **Form fields:**
+    - `file`: the video or audio file (mp4, webm, mov, mkv, avi, m4v, ogv,
+      mp3, wav, m4a, aac, flac, ogg, opus)
+    - `extract_snapshots`, `is_slide_mode`, `caption_language`,
+      `sidecar_preference`: same meaning as `POST /jobs`
+
+    Uploaded captions never exist for a local file, so transcription always
+    falls back to local Whisper. Audio-only uploads always skip snapshot and
+    slide extraction, regardless of the requested flags.
+
+    **Status codes:**
+    - 201: Job created successfully
+    - 422: Missing/unsupported file, or upload exceeds the size limit
+    """
+    # Only ever used for its extension and as a display label — never joined
+    # into a filesystem path, so directory components in a crafted filename
+    # cannot escape the upload directory. Capped so the encoded video_url
+    # (which carries it) always fits the 512-char video_url column.
+    original_name = Path(file.filename or "upload").name[:150]
+    ext = Path(original_name).suffix.lower().lstrip(".")
+    if ext not in UPLOAD_ALLOWED_EXTENSIONS:
+        raise ValidationException(
+            f"Unsupported file type '.{ext}'. Allowed: "
+            + ", ".join(sorted(UPLOAD_ALLOWED_EXTENSIONS))
+        )
+    if caption_language and not _CAPTION_LANGUAGE_RE.match(caption_language):
+        raise ValidationException("caption_language must be an ISO 639-1 code, e.g. 'en' or 'fr'")
+    is_audio_only = ext in UPLOAD_AUDIO_EXTENSIONS
+
+    settings = get_settings()
+    data_dir = settings.storage.data_dir or str(
+        Path(__file__).resolve().parent.parent.parent / "data"
+    )
+    job_uuid = str(uuid.uuid4())
+    video_dir = Path(data_dir) / "videos" / job_uuid
+    video_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = video_dir / f"{job_uuid}.{ext}"
+
+    max_bytes = settings.storage.max_video_upload_size_bytes
+    bytes_written = 0
+    try:
+        with dest_path.open("wb") as out:
+            while chunk := await file.read(_UPLOAD_CHUNK_SIZE):
+                bytes_written += len(chunk)
+                if bytes_written > max_bytes:
+                    raise ValidationException(
+                        f"Upload exceeds maximum size of {max_bytes // (1024 * 1024)} MB"
+                    )
+                out.write(chunk)
+        if bytes_written == 0:
+            raise ValidationException("Uploaded file is empty")
+    except ValidationException:
+        dest_path.unlink(missing_ok=True)
+        if not any(video_dir.iterdir()):
+            video_dir.rmdir()
+        raise
+    finally:
+        await file.close()
+
+    try:
+        from app.core.source_type import SourceType
+        from app.services.source_resolver import build_upload_url
+
+        video_url = build_upload_url(str(dest_path), original_name)
+
+        new_job = _create_and_dispatch_job(
+            db,
+            current_user=current_user,
+            video_url=video_url,
+            source_type=SourceType.UPLOAD,
+            caption_language=caption_language,
+            sidecar_preference=sidecar_preference,
+            extract_snapshots=False if is_audio_only else extract_snapshots,
+            is_slide_mode=False if is_audio_only else is_slide_mode,
+            job_id=job_uuid,
+        )
+        return JobResponse.model_validate(new_job)
+    except Exception as e:
+        db.rollback()
+        dest_path.unlink(missing_ok=True)
         raise ValidationException("Failed to create job: " + str(e))
 
 

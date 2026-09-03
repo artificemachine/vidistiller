@@ -8,7 +8,9 @@ Used as the single entry point for URL parsing across all video sources.
 import hashlib
 import logging
 import re
+from pathlib import Path
 from typing import Tuple
+from urllib.parse import quote, unquote
 
 from app.core.source_type import SourceType
 
@@ -48,9 +50,24 @@ _DIRECT_EXTENSIONS = re.compile(
     r'\.(mp4|webm|mov|mkv|avi|m3u8|m4v|ogv)(\?|$)', re.IGNORECASE
 )
 
+# Locally uploaded files are addressed as upload://<absolute-path>, never a
+# real network URL — the path is always one this service wrote itself
+# (see routes/jobs.py upload endpoint), never taken verbatim from user input.
+UPLOAD_SCHEME = "upload://"
+
 
 def _url_hash(url: str) -> str:
     return hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()[:16]
+
+
+def build_upload_url(local_path: str, display_name: str) -> str:
+    """Build the synthetic video_url for an uploaded file.
+
+    The display name (the user's original filename) rides in the fragment so
+    it survives being threaded through video_url everywhere without ever
+    becoming part of a filesystem path.
+    """
+    return f"{UPLOAD_SCHEME}{local_path}#{quote(display_name)}"
 
 
 class VideoSourceResolver:
@@ -62,6 +79,9 @@ class VideoSourceResolver:
         matches no known platform (caller should fall back to comparing the
         raw URL string in that case).
         """
+        if url.startswith(UPLOAD_SCHEME):
+            return SourceType.UPLOAD, Path(cls.upload_local_path(url)).stem
+
         for source_type, patterns in _PATTERNS:
             for pattern in patterns:
                 match = re.search(pattern, url)
@@ -104,3 +124,17 @@ class VideoSourceResolver:
             logger.debug(f"yt-dlp extractor probe failed for {url}: {e}")
 
         return SourceType.UNKNOWN, _url_hash(url)
+
+    @staticmethod
+    def upload_local_path(url: str) -> str:
+        """Strip the upload:// scheme and #display-name fragment, leaving the on-disk path."""
+        without_scheme = url[len(UPLOAD_SCHEME):] if url.startswith(UPLOAD_SCHEME) else url
+        return without_scheme.split("#", 1)[0]
+
+    @staticmethod
+    def upload_display_name(url: str) -> str:
+        """Return the original filename recorded for an upload:// video_url."""
+        without_scheme = url[len(UPLOAD_SCHEME):] if url.startswith(UPLOAD_SCHEME) else url
+        if "#" in without_scheme:
+            return unquote(without_scheme.split("#", 1)[1])
+        return Path(without_scheme).name

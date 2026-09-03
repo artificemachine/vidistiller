@@ -116,4 +116,55 @@ describe('VideoSubmission', () => {
     expect(mockPush).toHaveBeenCalledWith('/jobs/job-existing');
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
+
+  describe('upload file mode', () => {
+    const switchToUploadAndPickFile = async (
+      user: ReturnType<typeof userEvent.setup>,
+      filename = 'clip.mp4'
+    ) => {
+      render(<VideoSubmission />);
+      await user.click(screen.getByRole('button', { name: /upload file/i }));
+      const fileInput = screen.getByLabelText(/video or audio file/i) as HTMLInputElement;
+      const file = new File(['fake-bytes'], filename, { type: 'video/mp4' });
+      await user.upload(fileInput, file);
+      return fileInput;
+    };
+
+    it('uploads the selected file to /jobs/upload and navigates to the job', async () => {
+      (global.fetch as any).mockResolvedValue(
+        jsonResponse(201, { job_id: 'job-upload-1', status: 'pending' })
+      );
+
+      const user = userEvent.setup();
+      await switchToUploadAndPickFile(user);
+      await user.click(screen.getByRole('button', { name: /convert to documentation/i }));
+
+      expect(mockPush).toHaveBeenCalledWith('/jobs/job-upload-1');
+      const [calledUrl, calledOptions] = (global.fetch as any).mock.calls[0];
+      expect(calledUrl).toMatch(/\/jobs\/upload$/);
+      expect(calledOptions.body).toBeInstanceOf(FormData);
+      expect(calledOptions.headers).toBeUndefined();
+    });
+
+    it('disables submit until a file is chosen', async () => {
+      render(<VideoSubmission />);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole('button', { name: /upload file/i }));
+
+      expect(screen.getByRole('button', { name: /convert to documentation/i })).toBeDisabled();
+    });
+
+    it('shows an error message when the upload fails', async () => {
+      (global.fetch as any).mockResolvedValue(
+        jsonResponse(422, { message: 'Unsupported file type' })
+      );
+
+      const user = userEvent.setup();
+      await switchToUploadAndPickFile(user);
+      await user.click(screen.getByRole('button', { name: /convert to documentation/i }));
+
+      expect(await screen.findByText(/Unsupported file type/)).toBeInTheDocument();
+      expect(mockPush).not.toHaveBeenCalled();
+    });
+  });
 });
