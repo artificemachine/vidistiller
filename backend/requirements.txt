@@ -24,7 +24,7 @@ httpx>=0.25.0
 
 # Video Processing
 opencv-python>=5.0.0.93
-pillow>=12.2.0  # >=12.2.0 fixes PYSEC-2026-165; moviepy removed 2026-08-20 (never imported, blocked this bump)
+pillow>=12.3.0  # >=12.2.0 fixes PYSEC-2026-165; moviepy removed 2026-08-20 (never imported, blocked this bump)
 ffmpeg-python>=0.2.0
 scikit-image>=0.26.0
 pytesseract>=0.3.13
