@@ -807,3 +807,5 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - chore(release): bump project and frontend versions to 1.18.0.
+
+- 2026-09-03: fix(ci): exclude shipguard rule PY-007 in security.yml — false positive on scripts/release_candidate.py's module docstring (misread as an f-string SQL query) in shipguard 0.5.2, PyPI's public latest.
