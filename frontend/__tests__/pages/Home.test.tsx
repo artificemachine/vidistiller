@@ -325,3 +325,67 @@ describe('Home — caption language', () => {
     });
   });
 });
+
+describe('Home — local file upload', () => {
+  it('offers an upload mode with a video or audio file picker', async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(screen.getByRole('button', { name: /upload file/i }));
+
+    const picker = screen.getByLabelText(/video or audio file/i) as HTMLInputElement;
+    expect(picker.type).toBe('file');
+    expect(picker.accept).toContain('.mov');
+    expect(document.querySelector('input[type="url"]')).toBeNull();
+  });
+
+  it('keeps create document disabled until a file is chosen', async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(screen.getByRole('button', { name: /upload file/i }));
+
+    expect(screen.getByRole('button', { name: /create document/i })).toBeDisabled();
+  });
+
+  it('posts the file as multipart to /jobs/upload and opens the job', async () => {
+    const user = userEvent.setup();
+    mockPost.mockResolvedValue({ data: { job_id: 'upload-job-1' } });
+    render(<Home />);
+
+    await user.click(screen.getByRole('button', { name: /upload file/i }));
+    const file = new File(['fake video bytes'], 'talk.mov', { type: 'video/quicktime' });
+    await user.upload(screen.getByLabelText(/video or audio file/i), file);
+    await user.click(screen.getByRole('button', { name: /create document/i }));
+
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith(
+        '/jobs/upload',
+        expect.any(FormData),
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'Content-Type': 'multipart/form-data' }),
+        }),
+      );
+    });
+    const body = mockPost.mock.calls.find(([path]) => path === '/jobs/upload')![1] as FormData;
+    expect((body.get('file') as File).name).toBe('talk.mov');
+    expect(body.get('extract_snapshots')).toBe('true');
+    expect(body.get('is_slide_mode')).toBe('false');
+    expect(mockPush).toHaveBeenCalledWith('/jobs/upload-job-1');
+  });
+
+  it('shows the API error when the upload is rejected', async () => {
+    const user = userEvent.setup();
+    mockPost.mockRejectedValue({ response: { data: { detail: 'Unsupported file type' } } });
+    render(<Home />);
+
+    await user.click(screen.getByRole('button', { name: /upload file/i }));
+    await user.upload(
+      screen.getByLabelText(/video or audio file/i),
+      new File(['x'], 'talk.mov', { type: 'video/quicktime' }),
+    );
+    await user.click(screen.getByRole('button', { name: /create document/i }));
+
+    expect(await screen.findByText('Unsupported file type')).toBeInTheDocument();
+  });
+});

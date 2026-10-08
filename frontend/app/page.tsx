@@ -49,9 +49,16 @@ function timeAgo(dateString: string): string {
   return `${months}mo ago`;
 }
 
+// Mirrors UPLOAD_ALLOWED_EXTENSIONS in backend/app/routes/jobs.py.
+const UPLOAD_ACCEPT = '.mp4,.webm,.mov,.mkv,.avi,.m4v,.ogv,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus';
+
+type SourceMode = 'url' | 'upload';
+
 export default function Home() {
   const router = useRouter();
+  const [sourceMode, setSourceMode] = useState<SourceMode>('url');
   const [url, setUrl] = useState('');
+  const [videoFile, setVideoFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [slideMode, setSlideMode] = useState(false);
@@ -104,21 +111,40 @@ export default function Home() {
     setLoading(true);
 
     try {
-      const response = await apiClient.post(
-        '/jobs',
-        {
-          video_url: url,
-          output_format: 'markdown',
-          extract_snapshots: slideMode ? false : extractSnapshots,
-          is_slide_mode: slideMode,
-          ...(captionLang ? { caption_language: captionLang } : {}),
-        }
-      );
+      const response = sourceMode === 'upload' ? await submitUpload() : await submitUrl();
       router.push(`/jobs/${response.data.job_id}`);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to create job');
+      const detail = err.response?.data?.detail;
+      setError(
+        (typeof detail === 'string' ? detail : '') ||
+          err.response?.data?.message ||
+          (sourceMode === 'upload' ? 'Failed to upload file' : 'Failed to create job'),
+      );
       setLoading(false);
     }
+  };
+
+  const submitUrl = () =>
+    apiClient.post('/jobs', {
+      video_url: url,
+      output_format: 'markdown',
+      extract_snapshots: slideMode ? false : extractSnapshots,
+      is_slide_mode: slideMode,
+      ...(captionLang ? { caption_language: captionLang } : {}),
+    });
+
+  const submitUpload = () => {
+    if (!videoFile) throw new Error('no file selected');
+    const formData = new FormData();
+    formData.append('file', videoFile);
+    formData.append('extract_snapshots', String(slideMode ? false : extractSnapshots));
+    formData.append('is_slide_mode', String(slideMode));
+    // The client default is application/json, under which axios serialises
+    // FormData to JSON; multipart makes it send the body as-is (the browser
+    // then adds the boundary).
+    return apiClient.post('/jobs/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
   };
 
   const handleImportJob = async (e: React.FormEvent) => {
@@ -176,20 +202,49 @@ export default function Home() {
 
         <div className="bg-card-light dark:bg-surface rounded-16 shadow-lg dark:shadow-gray-900 p-6 mb-8 max-w-[600px] mx-auto">
           <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-            <div>
-              <label htmlFor="url" className="block text-[14px] font-semibold text-text-dark dark:text-text-light mb-2">
-                video url
-              </label>
-              <input
-                type="url"
-                id="url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="YouTube, Vimeo, Twitch, X.com, TikTok, Reddit, Rumble or direct .mp4..."
-                className="w-full px-4 h-12 rounded-lg bg-card-light dark:bg-input-bg text-text-dark dark:text-text-light placeholder-text-muted focus:ring-2 focus:ring-primary focus:outline-none"
-                required
-              />
+            <div className="flex h-11 rounded-lg bg-card-light p-1 dark:bg-input-bg">
+              {(['url', 'upload'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={sourceMode === mode}
+                  onClick={() => setSourceMode(mode)}
+                  className={`flex flex-1 items-center justify-center rounded-md text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${sourceMode === mode ? 'bg-primary text-bg-dark' : 'text-text-muted'}`}
+                >
+                  {mode === 'url' ? 'video url' : 'upload file'}
+                </button>
+              ))}
             </div>
+
+            {sourceMode === 'url' ? (
+              <div>
+                <label htmlFor="url" className="block text-[14px] font-semibold text-text-dark dark:text-text-light mb-2">
+                  video url
+                </label>
+                <input
+                  type="url"
+                  id="url"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="YouTube, Vimeo, Twitch, X.com, TikTok, Reddit, Rumble or direct .mp4..."
+                  className="w-full px-4 h-12 rounded-lg bg-card-light dark:bg-input-bg text-text-dark dark:text-text-light placeholder-text-muted focus:ring-2 focus:ring-primary focus:outline-none"
+                  required
+                />
+              </div>
+            ) : (
+              <div>
+                <label htmlFor="videoFile" className="block text-[14px] font-semibold text-text-dark dark:text-text-light mb-2">
+                  video or audio file
+                </label>
+                <input
+                  type="file"
+                  id="videoFile"
+                  accept={UPLOAD_ACCEPT}
+                  onChange={(e) => setVideoFile(e.target.files?.[0] || null)}
+                  className="w-full rounded-lg bg-card-light px-4 py-3 text-sm text-text-dark file:mr-3 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-primary dark:bg-input-bg dark:text-text-light"
+                />
+              </div>
+            )}
 
             <div className="flex flex-col gap-2 sm:flex-row">
               <div className="flex h-14 flex-1 rounded-lg bg-card-light p-1 dark:bg-input-bg">
@@ -225,7 +280,7 @@ export default function Home() {
               )}
             </div>
 
-            {captionTracks.length > 0 && (
+            {sourceMode === 'url' && captionTracks.length > 0 && (
               <div>
                 <label htmlFor="captionLang" className="block text-[14px] font-semibold text-text-dark dark:text-text-light mb-2">
                   caption language
@@ -255,7 +310,7 @@ export default function Home() {
 
             <button
               type="submit"
-              disabled={loading || authLoading}
+              disabled={loading || authLoading || (sourceMode === 'upload' && !videoFile)}
               className="w-full bg-accent-submit hover:opacity-90 disabled:bg-gray-400 dark:disabled:bg-gray-600 text-white font-semibold h-12 px-4 rounded-lg transition"
             >
               {authLoading ? 'loading...' : loading ? 'loading job page...' : 'create document'}
