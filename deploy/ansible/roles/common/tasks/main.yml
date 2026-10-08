@@ -23,6 +23,8 @@
       - ufw
       - htop
       - jq
+      # deploy-production re-verifies the candidate draft with gh on this host
+      - gh
       - unzip
       - python3
       - python3-pip

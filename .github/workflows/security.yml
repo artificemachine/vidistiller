@@ -81,10 +81,21 @@ jobs:
         # path. No fix version exists to upgrade to: 3.10.3 is nltk's current
         # PyPI latest and is also the version flagged. Re-evaluate once
         # upstream publishes an actual fixed release.
+        #
+        # CVE-2026-85394 / CVE-2024-33663 (python-jose algorithm confusion:
+        # a DER-encoded public key accepted as an HMAC secret) is ignored
+        # deliberately. The attack needs a verifier configured with an
+        # asymmetric public key; backend/app/services/auth.py signs and
+        # decodes with a symmetric secret and pins
+        # algorithms=[settings.jwt.algorithm] (HS256) on every jwt.decode.
+        # No fix version exists: 3.5.0 is python-jose's current PyPI latest
+        # and is also the version flagged. Remove this ignore by migrating
+        # auth to PyJWT.
         run: |
           python -m pip install pip-audit
           pip-audit --requirement backend/requirements.txt \
             --ignore-vuln PYSEC-2026-1325 \
             --ignore-vuln PYSEC-2026-3552 \
             --ignore-vuln PYSEC-2026-3740 \
+            --ignore-vuln CVE-2026-85394 \
             --progress-spinner off
