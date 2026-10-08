@@ -15,7 +15,7 @@ psycopg2-binary>=2.9.12
 # APIs and External Services
 google-api-python-client>=2.100.0
 openai>=1.0.0
-anthropic>=0.25.0
+anthropic>=1.2.0
 yt-dlp>=2024.0.0
 bgutil-ytdlp-pot-provider>=1.3.0  # client plugin for tutorial_bgutil_provider sidecar; PO Token required for YouTube mweb client
 youtube-transcript-api>=0.6.0
