@@ -819,3 +819,5 @@ All notable changes to this project will be documented in this file.
 - 2026-09-03: fix(ci): promote-release.yml needs contents: write, not read, to fetch a draft release via the GitHub API — GitHub returns 403 "Resource not accessible by integration" for a draft with read-only contents permission, even though the job never writes anything. First-ever run of this workflow failed here.
 
 - 2026-09-03: fix(ci): pass --type slsaprovenance to cosign verify-attestation in promote-release.yml — deploy.yml attests with `cosign attest --type slsaprovenance`, but the verification step omitted --type and defaulted to "custom", failing with "none of the attestations matched the predicate type" even though the attestation was valid.
+
+- 2026-10-08: fix(deploy): provision gh on the production host via the common Ansible role (and the manual VM guide) — promote-release.yml's deploy-production job re-verifies the candidate draft with gh on the self-hosted runner, and the first complete v1.18.0 promotion failed with "gh CLI not found on production host". New contract test ties every CLI the job calls to the role's base packages.

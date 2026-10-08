@@ -113,7 +113,9 @@ apt install -y \
     curl \
     gnupg \
     lsb-release \
-    software-properties-common
+    software-properties-common \
+    jq \
+    gh  # promote-release.yml's deploy-production job calls gh and jq on this host
 
 # Add Docker GPG key
 install -m 0755 -d /etc/apt/keyrings

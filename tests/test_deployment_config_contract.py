@@ -83,6 +83,30 @@ def test_promotion_verifies_immutable_image_references_with_cosign():
     assert "build-push-action" not in workflow
 
 
+def test_ansible_provisions_every_cli_the_self_hosted_deploy_job_runs():
+    """The production host must carry the CLIs deploy-production calls.
+
+    Regression: deploy-production re-verifies the candidate draft with `gh`
+    on the self-hosted runner, but the common role never installed `gh`, so
+    the first complete promotion (v1.18.0) failed with "gh CLI not found on
+    production host" after every earlier job had passed.
+    """
+    workflow = (ROOT / ".github" / "workflows" / "promote-release.yml").read_text(
+        encoding="utf-8"
+    )
+    deploy_job = workflow.split("  deploy-production:", 1)[1]
+    base_packages = (
+        ROOT / "deploy" / "ansible" / "roles" / "common" / "tasks" / "main.yml"
+    ).read_text(encoding="utf-8")
+
+    for cli in ("gh", "jq"):
+        assert f"{cli} " in deploy_job, f"deploy-production no longer calls {cli}"
+        assert f"      - {cli}\n" in base_packages, (
+            f"{cli} is called by deploy-production but not installed by the "
+            "common Ansible role"
+        )
+
+
 def test_staging_overlay_pins_immutable_digests():
     overlay = (ROOT / "docker-compose.staging-images.yml").read_text(encoding="utf-8")
 
