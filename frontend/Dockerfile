@@ -44,6 +44,9 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
+# `next start` reads this at startup; without it runtime-only settings such
+# as the proxy body-size limit fall back to Next's defaults.
+COPY --from=builder /app/next.config.js ./next.config.js
 
 USER nextjs
 
