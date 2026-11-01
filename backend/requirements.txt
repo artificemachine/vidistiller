@@ -40,7 +40,7 @@ pytest-cov>=4.1.0
 PyYAML>=6.0.2
 
 # Email
-fastapi-mail>=1.4.0
+fastapi-mail>=1.6.8
 
 # Utilities
 python-dotenv>=1.2.2
