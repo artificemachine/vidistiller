@@ -14,6 +14,12 @@ WORKFLOW = ROOT / ".github/workflows/gitleaks.yml"
 FIXTURE_MARKER = "test_marker_fixture_abcdef0123456789"
 
 
+def _isolated_git_env() -> dict[str, str]:
+    return {
+        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+    }
+
+
 def _gitleaks_binary() -> str:
     binary = os.environ.get("GITLEAKS_BIN") or shutil.which("gitleaks")
     if not binary:
@@ -30,7 +36,10 @@ def _gitleaks_binary() -> str:
 
 def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        env=_isolated_git_env(),
     )
     assert result.returncode == 0, result.stderr
     return result.stdout.strip()
@@ -39,7 +48,7 @@ def _git(repo: Path, *args: str) -> str:
 def _create_commit(repo: Path, message: str, parent: str | None = None) -> str:
     tree = _git(repo, "write-tree")
     env = {
-        **os.environ,
+        **_isolated_git_env(),
         "GIT_AUTHOR_NAME": "Synthetic Test",
         "GIT_AUTHOR_EMAIL": "synthetic@example.invalid",
         "GIT_COMMITTER_NAME": "Synthetic Test",
@@ -100,9 +109,21 @@ def _event_range(
             base_ref,
         ],
         cwd=repo,
+        env=_isolated_git_env(),
         capture_output=True,
         text=True,
     )
+
+
+def test_synthetic_repository_ignores_parent_hook_git_environment(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "parent.git"))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(tmp_path / "parent-index"))
+    repo, baseline = _repository(tmp_path)
+    assert _git(repo, "rev-parse", "HEAD") == baseline
+    assert not (tmp_path / "parent.git").exists()
+    assert not (tmp_path / "parent-index").exists()
 
 
 def _add_and_remove_marker(repo: Path) -> tuple[str, str]:
@@ -130,6 +151,7 @@ def _scan_history(repo: Path, log_options: str) -> subprocess.CompletedProcess[s
             log_options,
             str(repo),
         ],
+        env=_isolated_git_env(),
         capture_output=True,
         text=True,
     )

@@ -1,6 +1,6 @@
 {
   "name": "vidistiller",
-  "version": "1.18.4-rc.1",
+  "version": "1.18.4",
   "description": "Turn YouTube videos into structured documentation",
   "private": true,
   "scripts": {
@@ -15,10 +15,10 @@
     "test:e2e:ui": "NODE_PATH=./node_modules playwright test --config=../e2e/playwright.config.ts --ui"
   },
   "dependencies": {
-    "@sentry/nextjs": "^10.49.0",
+    "@sentry/nextjs": "^10.75.2",
     "axios": "^1.18.1",
     "jszip": "^3.10.1",
-    "next": "^15.5.15",
+    "next": "^15.5.28",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-player": "^3.4.0",

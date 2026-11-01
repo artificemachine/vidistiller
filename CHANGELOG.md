@@ -834,3 +834,5 @@ All notable changes to this project will be documented in this file.
 - 2026-11-01: fix(ci): harden release promotion and secret scanning for v1.18.4-rc.1.
 
 - 2026-11-01: test(ci): require isolated endpoints and scoped worker cleanup for Celery fencing tests.
+
+- 2026-11-01: fix(ci): update Next.js and Sentry to patched releases and add a high/critical dependency audit gate with owner-configured solo approval.

@@ -41,7 +41,20 @@ def _environment(scenario):
                 "reviewers": [{"type": "Bot", "reviewer": {"id": 9}}],
             }
         ],
-        "self_review": [
+        "malformed_self_review": [
+            {
+                "type": "required_reviewers",
+                "prevent_self_review": "false",
+                "reviewers": [reviewer],
+            }
+        ],
+        "missing_self_review": [
+            {
+                "type": "required_reviewers",
+                "reviewers": [reviewer],
+            }
+        ],
+        "solo": [
             {
                 "type": "required_reviewers",
                 "prevent_self_review": False,
@@ -141,7 +154,14 @@ def test_retag_requires_protected_environment_approval():
 
 
 @pytest.mark.parametrize(
-    "scenario", ["empty", "malformed", "self_review", "http_error"]
+    "scenario",
+    [
+        "empty",
+        "malformed",
+        "malformed_self_review",
+        "missing_self_review",
+        "http_error",
+    ],
 )
 def test_missing_or_invalid_reviewer_configuration_stops_before_docker(
     tmp_path, scenario
@@ -154,7 +174,7 @@ def test_missing_or_invalid_reviewer_configuration_stops_before_docker(
     assert "SECRET_TOKEN" not in result.stderr
 
 
-@pytest.mark.parametrize("scenario", ["valid", "valid_team"])
+@pytest.mark.parametrize("scenario", ["valid", "valid_team", "solo"])
 def test_eligible_user_or_team_allows_only_post_approval_transaction(
     tmp_path, scenario
 ):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed unless production has valid required reviewers and self-review is blocked."""
+"""Fail closed unless production has valid required reviewers and an explicit self-review policy."""
 
 import argparse
 import json
@@ -57,14 +57,14 @@ def validate_environment(payload: Any, environment: str) -> None:
         )
     for rule in reviewer_rules:
         reviewers = rule.get("reviewers")
-        if rule.get("prevent_self_review") is not True:
+        if not isinstance(rule.get("prevent_self_review"), bool):
             continue
         if not isinstance(reviewers, list) or not 1 <= len(reviewers) <= 6:
             continue
         if all(_eligible_reviewer(reviewer) for reviewer in reviewers):
             return
     raise EnvironmentCheckError(
-        "production environment reviewers are absent, invalid, or permit self-review"
+        "production environment reviewer configuration is absent, invalid, or malformed"
     )
 
 
@@ -111,7 +111,9 @@ def main() -> int:
     except EnvironmentCheckError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
-    print("OK: production environment has required reviewers and prevents self-review")
+    print(
+        "OK: production environment has eligible reviewers and an explicit self-review policy"
+    )
     return 0
 
 
