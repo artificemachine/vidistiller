@@ -23,11 +23,12 @@ recovering by hand.
 2. [VM Provisioning](#vm-provisioning)
 3. [System Dependencies](#system-dependencies)
 4. [Application Deployment](#application-deployment)
-5. [Service Configuration](#service-configuration)
-6. [Network Configuration](#network-configuration)
-7. [Health Checks & Monitoring](#health-checks--monitoring)
-8. [Troubleshooting](#troubleshooting)
-9. [Maintenance & Updates](#maintenance--updates)
+5. [Release Promotion Approval](#release-promotion-approval)
+6. [Service Configuration](#service-configuration)
+7. [Network Configuration](#network-configuration)
+8. [Health Checks & Monitoring](#health-checks--monitoring)
+9. [Troubleshooting](#troubleshooting)
+10. [Maintenance & Updates](#maintenance--updates)
 
 ---
 
@@ -377,6 +378,16 @@ Expected tables:
  public | users                 | table | tutorial_user
  public | videos                | table | tutorial_user
 ```
+
+---
+
+## Release Promotion Approval
+
+The `promote-release.yml` workflow checks the GitHub `production` environment before it can log in to Docker Hub or publish image tags. Its approval job references that environment, so GitHub pauses the job for an eligible reviewer before its validation step runs. The step then reads the environment through the GitHub API using the job token's `Actions: read` permission and fails closed unless the response contains a required-reviewers rule with one to six valid users or teams and `prevent_self_review` enabled.
+
+Before enabling promotion, the repository owner must configure the `production` environment with an eligible user or team reviewer and enable **Prevent self-review** where the setting is supported. Required reviewers must have at least read access to the repository. The owner must verify the saved environment configuration in repository settings; this implementation does not configure GitHub. Until that external configuration exists, promotion fails before Docker login and image publication.
+
+The existing `deploy-production` job also references the `production` environment. GitHub therefore requests a second approval after image tags are published and before the VM deployment begins. The first approval gates registry publication; the second gates deployment.
 
 ---
 

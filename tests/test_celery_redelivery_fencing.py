@@ -8,7 +8,8 @@ submits a task that blocks on a file barrier, kills the worker mid-execution
    exec_uuid fencing), and
 2. no duplicate sidecar-style work happens (the step claim is the fence).
 
-Requires Redis at REDIS_URL and the real Postgres at TEST_DATABASE_URL.
+Requires explicit TEST_DATABASE_URL and TEST_REDIS_URL values, with DATABASE_URL
+matching TEST_DATABASE_URL.
 """
 
 import os
@@ -23,11 +24,22 @@ import requests
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
 
-DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL",
-    "postgresql://tutorial_user:tutorial_password@localhost:5432/tutorial_db",
-)
-REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://localhost:6379/0")
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
+TEST_REDIS_URL = os.environ.get("TEST_REDIS_URL")
+DATABASE_URL = os.environ.get("DATABASE_URL")
+REDIS_URL = os.environ.get("REDIS_URL")
+
+
+def _endpoint_configuration_error() -> str | None:
+    if not TEST_DATABASE_URL:
+        return "requires explicit TEST_DATABASE_URL"
+    if not TEST_REDIS_URL:
+        return "requires explicit TEST_REDIS_URL"
+    if DATABASE_URL != TEST_DATABASE_URL:
+        return "DATABASE_URL must match TEST_DATABASE_URL"
+    if REDIS_URL != TEST_REDIS_URL:
+        return "REDIS_URL must match TEST_REDIS_URL"
+    return None
 
 
 def _postgres_reachable(url: str) -> bool:
@@ -52,16 +64,49 @@ def _redis_reachable(url: str) -> bool:
         return False
 
 
+def _integration_skip_reason() -> str | None:
+    configuration_error = _endpoint_configuration_error()
+    if configuration_error:
+        return configuration_error
+    if not _postgres_reachable(DATABASE_URL):
+        return "requires reachable isolated Postgres at TEST_DATABASE_URL"
+    if not _redis_reachable(REDIS_URL):
+        return "requires reachable isolated Redis at TEST_REDIS_URL"
+    return None
+
+
+INTEGRATION_SKIP_REASON = _integration_skip_reason()
 pytestmark = pytest.mark.skipif(
-    not (_postgres_reachable(DATABASE_URL) and _redis_reachable(REDIS_URL)),
-    reason="requires real Postgres + Redis (docker-compose.test.yml)",
+    INTEGRATION_SKIP_REASON is not None,
+    reason=INTEGRATION_SKIP_REASON or "integration endpoints are not isolated",
 )
+
+
+def _stop_worker(proc: subprocess.Popen) -> None:
+    if proc.poll() is None:
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+        proc.wait(timeout=10)
 
 
 @pytest.fixture(scope="module")
 def celery_env(tmp_path_factory):
     """Migrated DB, seeded job, and a real worker process with a short
     visibility timeout so redelivery happens quickly."""
+    configuration_error = _endpoint_configuration_error()
+    if configuration_error:
+        pytest.skip(configuration_error)
+
     from alembic import command
     from alembic.config import Config
 
@@ -137,16 +182,22 @@ def celery_env(tmp_path_factory):
 
     db.close()
 
-    yield {"env": env, "make_job": make_job, "barrier_dir": str(barrier_dir)}
+    owned_workers = []
 
-    # Cleanup worker if still running.
-    try:
-        subprocess.run(["pkill", "-f", "celery -A app.tasks worker"], check=False)
-    except Exception:
-        pass
+    def start_worker():
+        return _start_worker(env, owned_workers)
+
+    yield {
+        "make_job": make_job,
+        "barrier_dir": str(barrier_dir),
+        "start_worker": start_worker,
+    }
+
+    for proc in owned_workers:
+        _stop_worker(proc)
 
 
-def _start_worker(env):
+def _start_worker(env, owned_workers):
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -164,6 +215,7 @@ def _start_worker(env):
         stdout=open("/tmp/celery-worker.log", "w"),
         stderr=subprocess.STDOUT,
     )
+    owned_workers.append(proc)
     return proc
 
 
@@ -172,7 +224,6 @@ def test_late_ack_redelivery_cannot_duplicate_work(celery_env):
     incarnation must NOT re-claim the step (exec_uuid fencing)."""
     from app.services.job_steps import claim_step
 
-    env = celery_env["env"]
     job_id = celery_env["make_job"]()
     barrier_dir = Path(celery_env["barrier_dir"])
 
@@ -220,7 +271,6 @@ def test_worker_process_redelivery_real(celery_env):
     marker (Review Round 2 F12)."""
     import redis as _redis
 
-    env = celery_env["env"]
     job_id = celery_env["make_job"]()
     barrier_dir = Path(celery_env["barrier_dir"])
     marker = barrier_dir / f"claimed-{job_id}-transcribe"
@@ -231,7 +281,7 @@ def test_worker_process_redelivery_real(celery_env):
     client = _redis.from_url(REDIS_URL, decode_responses=True)
     client.flushdb()
 
-    worker1 = _start_worker(env)
+    worker1 = celery_env["start_worker"]()
     try:
         time.sleep(3)
         result = process_transcript.delay(job_id)
@@ -254,7 +304,7 @@ def test_worker_process_redelivery_real(celery_env):
         # out by the durable RUNNING claim — the marker is NOT rewritten and
         # the task completes as "skipped".
         time.sleep(10)
-        worker2 = _start_worker(env)
+        worker2 = celery_env["start_worker"]()
         try:
             time.sleep(2)
             # Give the redelivery time to be picked up and fenced out.
@@ -270,8 +320,7 @@ def test_worker_process_redelivery_real(celery_env):
                 "redelivered incarnation re-claimed the step (fencing violated)"
             )
         finally:
-            worker2.terminate()
-            worker2.wait(timeout=10)
+            _stop_worker(worker2)
 
         # The durable claim is untouched: attempt == 1, token unchanged,
         # status still RUNNING (owned by the dead incarnation; the orphan
@@ -292,7 +341,4 @@ def test_worker_process_redelivery_real(celery_env):
         finally:
             db.close()
     finally:
-        for proc in (worker1,):
-            if proc.poll() is None:
-                proc.terminate()
-                proc.wait(timeout=5)
+        _stop_worker(worker1)
