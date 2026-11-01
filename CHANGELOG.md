@@ -830,3 +830,7 @@ All notable changes to this project will be documented in this file.
 - 2026-10-08: fix(frontend): v1.18.2 — raise Next.js middlewareClientMaxBodySize to 4 GiB (the backend's default MAX_VIDEO_UPLOAD_SIZE_BYTES). The /api rewrite proxy cut request bodies at the 10 MB default ("Request body exceeded 10MB for /api/jobs/upload"), so a 300 MB home-page upload reached the API truncated and failed with a 400. Version 1.18.1 -> 1.18.2.
 
 - 2026-10-08: fix(frontend): v1.18.3 — copy next.config.js into the runtime image. v1.18.2 raised middlewareClientMaxBodySize, but the runtime stage shipped only .next, node_modules, public and package.json, so `next start` found no config and kept the 10 MB proxy default; production uploads still failed. Verified on a locally built image: 20 MB proxied intact twice. Version 1.18.2 -> 1.18.3.
+
+- 2026-11-01: fix(ci): harden release promotion and secret scanning for v1.18.4-rc.1.
+
+- 2026-11-01: test(ci): require isolated endpoints and scoped worker cleanup for Celery fencing tests.

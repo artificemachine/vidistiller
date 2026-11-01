@@ -19,14 +19,31 @@ jobs:
           curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.27.2/gitleaks_8.27.2_linux_x64.tar.gz \
             | tar -xz -C /usr/local/bin gitleaks
 
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install Gitleaks range test dependencies
+        run: python -m pip install pytest 'PyYAML>=6.0.2'
+
+      - name: Test Gitleaks range
+        env:
+          GITLEAKS_BIN: /usr/local/bin/gitleaks
+        run: python -m pytest --confcutdir=tests/ci tests/ci/test_gitleaks_range.py -q
+
       - name: Run gitleaks
+        env:
+          GITLEAKS_EVENT: ${{ github.event_name }}
+          GITLEAKS_BEFORE: ${{ github.event.before }}
+          GITLEAKS_AFTER: ${{ github.sha }}
+          GITLEAKS_BASE_REF: ${{ github.base_ref }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            # Scan only commits introduced by this PR
-            gitleaks detect --source . --config .gitleaks.toml --redact --no-banner \
-              --log-opts="origin/${{ github.base_ref }}..HEAD" --exit-code 1
-          else
-            # On push to main, scan only the pushed commit
-            gitleaks detect --source . --config .gitleaks.toml --redact --no-banner \
-              --log-opts="-1" --exit-code 1
-          fi
+          set -euo pipefail
+          LOG_RANGE="$(python scripts/gitleaks_range.py \
+            --event-name "$GITLEAKS_EVENT" \
+            --before "$GITLEAKS_BEFORE" \
+            --after "$GITLEAKS_AFTER" \
+            --base-ref "$GITLEAKS_BASE_REF")"
+          gitleaks git --config .gitleaks.toml --redact --no-banner \
+            --exit-code 1 --log-opts "$LOG_RANGE" .
