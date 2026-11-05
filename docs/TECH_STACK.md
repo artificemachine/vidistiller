@@ -3,107 +3,113 @@
 ## Overview
 This project uses a modern microservices architecture with containerized services orchestrated via Docker Compose.
 
+Dependency ranges come from [frontend/package.json](../frontend/package.json)
+and [backend/requirements.txt](../backend/requirements.txt); frontend resolved
+versions live in `frontend/package-lock.json`. Container runtime versions come
+from [the frontend Dockerfile](../frontend/Dockerfile),
+[the backend Dockerfile](../backend/Dockerfile), and the Compose files.
+The Python package floor in `pyproject.toml` is distinct from the Docker runtime.
+
 ---
 
 ## Frontend Technologies
 
 ### Core Framework
-- **Next.js 14.0.0** - React framework with App Router for server-side rendering and routing
-- **React 18.2.0** - UI library for building component-based interfaces
-- **TypeScript 5.0.0** - Type-safe JavaScript superset
+- **Next.js 15** - React framework with App Router for server-side rendering and routing
+- **React 19** - UI library for building component-based interfaces
+- **TypeScript ^5.0.0** - Type-safe JavaScript superset
 
 ### UI & Styling
-- **Tailwind CSS 3.3.0** - Utility-first CSS framework
-- **PostCSS 8.4.0** - CSS transformation and autoprefixer
-- **react-resizable-panels 4.6.2** - Resizable layout components
+- **Tailwind CSS 4** - Utility-first CSS framework
+- **PostCSS ^8.5.10** - CSS transformation and autoprefixer
+- **react-resizable-panels ^4.12.2** - Resizable layout components
 
 ### State Management & Data Fetching
-- **Zustand 4.4.0** - Lightweight state management
-- **SWR 2.2.0** - React hooks for data fetching with caching
-- **Axios 1.6.0** - HTTP client for API requests
+- **Zustand ^5.0.15** - Lightweight state management
+- **SWR ^2.4.2** - React hooks for data fetching with caching
+- **Axios ^1.18.1** - HTTP client for API requests
 - **JSZip** - ZIP file generation for Obsidian export bundles
 
 ### Testing
-- **Vitest 4.0.18** - Fast unit test framework
-- **@testing-library/react 16.3.2** - React component testing utilities
-- **@testing-library/jest-dom 6.9.1** - Custom Jest matchers for DOM
-- **@testing-library/user-event 14.6.1** - User interaction simulation
-- **jsdom 28.0.0** - DOM implementation for Node.js
+- **Vitest ^4.1.10** - Fast unit test framework
+- **@testing-library/react ^16.3.2** - React component testing utilities
+- **@testing-library/jest-dom ^6.9.1** - Custom Jest matchers for DOM
+- **@testing-library/user-event ^14.6.1** - User interaction simulation
+- **jsdom ^29.1.1** - DOM implementation for Node.js
 
 ### Build Tools
-- **@vitejs/plugin-react 5.1.3** - Vite plugin for React Fast Refresh
-- **Node.js 18** - JavaScript runtime (Alpine Linux variant)
+- **@vitejs/plugin-react ^4.7.0** - Vite plugin for React Fast Refresh
+- **Node.js 26** - Frontend Docker runtime (Alpine Linux variant)
 
 ---
 
 ## Backend Technologies
 
 ### Core Framework
-- **FastAPI 0.104.0+** - Modern Python web framework for building APIs
-- **Uvicorn 0.24.0+** - ASGI server for FastAPI
-- **Python 3.12** - Programming language (slim variant)
+- **FastAPI >=0.141.1** - Modern Python web framework for building APIs
+- **Uvicorn >=0.24.0** - ASGI server for FastAPI
+- **Python 3.12+** - Package minimum; backend/worker Docker runtime is Python 3.14 (slim variant)
 
 ### Data Validation & Settings
-- **Pydantic 2.0.0+** - Data validation using Python type annotations
-- **pydantic-settings 2.0.0+** - Settings management from environment
-- **pydantic[email] 2.0.0+** - Email validation support
-- **email-validator 2.0.0+** - Email address validation
+- **Pydantic >=2.0.0** - Data validation using Python type annotations
+- **pydantic-settings >=2.0.0** - Settings management from environment
+- **pydantic[email] >=2.0.0** - Email validation support
+- **email-validator >=2.3.0** - Email address validation
 
 ### Database & ORM
 - **PostgreSQL 15** - Relational database (Alpine Linux variant)
-- **SQLAlchemy 2.0.23+** - SQL toolkit and ORM
-- **Alembic 1.13.0+** - Database migration tool
-- **psycopg2-binary 2.9.9+** - PostgreSQL adapter for Python
+- **SQLAlchemy >=2.0.23,<2.1** - SQL toolkit and ORM
+- **Alembic >=1.13.0** - Database migration tool
+- **psycopg2-binary >=2.9.12** - PostgreSQL adapter for Python
 
 ### Task Queue & Caching
-- **Celery 5.3.0+** - Distributed task queue
+- **Celery >=5.3.0** - Distributed task queue
 - **Redis 7** - In-memory data store (Alpine Linux variant)
-- **redis 5.0.0+** - Python Redis client
+- **redis >=5.0.0** - Python Redis client
 
 ### External APIs & Services
-- **google-api-python-client 2.100.0+** - Google APIs client library
-- **OpenAI 1.0.0+** - OpenAI API client
+- **google-api-python-client >=2.100.0** - Google APIs client library
+- **OpenAI >=1.0.0** - OpenAI API client
 - **anthropic** - Anthropic Claude API client
-- **yt-dlp 2024.0.0+** - YouTube video downloader
-- **youtube-transcript-api 0.6.0+** - YouTube transcript extraction
-- **requests 2.31.0+** - HTTP library
-- **httpx 0.25.0+** - Async HTTP client
+- **yt-dlp >=2024.0.0** - YouTube video downloader
+- **youtube-transcript-api >=0.6.0** - YouTube transcript extraction
+- **requests >=2.31.0** - HTTP library
+- **httpx >=0.25.0** - Async HTTP client
 
 ### Video & Media Processing
-- **opencv-python 4.8.0+** - Computer vision and image processing
-- **moviepy 1.0.3+** - Video editing library
-- **Pillow 10.0.0+** - Image processing library
-- **ffmpeg-python 0.2.0+** - FFmpeg wrapper
-- **pydub 0.25.1+** - Audio manipulation
+- **opencv-python >=5.0.0.93** - Computer vision and image processing
+- **Pillow >=12.2.0** - Image processing library
+- **ffmpeg-python >=0.2.0** - FFmpeg wrapper
+- **pydub >=0.25.1** - Audio manipulation
 
 ### Natural Language Processing
-- **nltk 3.8+** - Natural Language Toolkit
-- **langdetect 1.0.9+** - Language detection library
+- **nltk >=3.8** - Natural Language Toolkit
+- **langdetect >=1.0.9** - Language detection library
 
 ### Security & Authentication
-- **python-jose 3.3.0+** - JOSE (JWT) implementation
-- **passlib 1.7.4** - Password hashing library
-- **argon2-cffi 21.3.0+** - Argon2 password hasher
+- **python-jose >=3.3.0** - JOSE (JWT) implementation
+- **passlib >=1.7.4,<2.0.0** - Password hashing library
+- **argon2-cffi >=21.3.0** - Argon2 password hasher
 - **cryptography (Fernet)** - Symmetric encryption for per-user API key storage
 
 ### Utilities
-- **python-dotenv 1.0.0+** - Environment variable management
-- **pytz 2023.3+** - Timezone definitions
+- **python-dotenv >=1.2.2** - Environment variable management
+- **pytz >=2023.3** - Timezone definitions
 
 ### Monitoring & Logging
-- **python-json-logger 2.0.7+** - JSON log formatter
-- **sentry-sdk 1.38.0+** - Error tracking and monitoring
+- **python-json-logger >=2.0.7** - JSON log formatter
+- **sentry-sdk >=1.38.0** - Error tracking and monitoring
 
 ### Testing
-- **pytest 7.4.0+** - Testing framework
-- **pytest-asyncio 0.21.0+** - Async test support
-- **pytest-cov 4.1.0+** - Code coverage plugin
+- **pytest >=9.1.1** - Testing framework
+- **pytest-asyncio >=1.4.0** - Async test support
+- **pytest-cov >=4.1.0** - Code coverage plugin
 
 ### Code Quality
-- **black 23.10.0+** - Python code formatter
-- **ruff 0.1.0+** - Fast Python linter
-- **mypy 1.6.0+** - Static type checker
-- **isort 5.12.0+** - Import statement organizer
+- **black >=23.10.0** - Python code formatter
+- **ruff >=0.1.0** - Fast Python linter
+- **mypy >=2.3.0** - Static type checker
+- **isort >=5.12.0** - Import statement organizer
 
 ---
 
@@ -167,7 +173,7 @@ This project uses a modern microservices architecture with containerized service
 ### Communication
 - **REST API** - HTTP/JSON API design
 - **Message Queue** - Redis-backed Celery tasks
-- **Server-Sent Events** - Real-time updates (via SWR polling)
+- **HTTP polling** - Periodic job-status requests from the frontend; see `frontend/hooks/index.ts` and `frontend/app/jobs/[id]/page.tsx`
 
 ### Data Management
 - **ORM** - SQLAlchemy for database abstraction
@@ -182,6 +188,7 @@ This project uses a modern microservices architecture with containerized service
 ### AI/ML Services
 - **Ollama** - Local LLM inference (configurable base URL)
 - **OpenAI API** - Cloud-based AI services
+- **Anthropic API** - Claude provider for document generation
 
 ### Video Services
 - **YouTube API** - Video metadata and information
@@ -193,11 +200,11 @@ This project uses a modern microservices architecture with containerized service
 ## Operating Systems & Base Images
 
 ### Docker Base Images
-- **python:3.12-slim** - Backend/worker containers
-- **node:18-alpine** - Frontend container (multi-stage build)
+- **python:3.14-slim** - Backend/worker containers
+- **node:26-alpine** - Frontend container (multi-stage build)
 - **postgres:15-alpine** - Database container
 - **redis:7-alpine** - Cache/broker container
-- **dpage/pgadmin4:latest** - Database admin container
+- **dpage/pgadmin4:8.14** - Development database admin container
 
 ### Host OS
 - **Ubuntu 24.04 LTS** — base OS for the production Proxmox VM
@@ -208,13 +215,16 @@ This project uses a modern microservices architecture with containerized service
 ## Deployment Configuration
 
 ### Container Orchestration
-- **6 Services in Production**:
+- **6 Services in the Main Development Compose File**:
   1. PostgreSQL (database)
   2. Redis (cache/broker)
   3. FastAPI (REST API)
   4. Celery Worker (background tasks)
   5. Next.js (frontend)
   6. pgAdmin (database admin - dev only)
+
+Production uses `docker-compose.prod.yml` and immutable application image
+references; do not infer its service set from the development Compose file.
 
 ### Resource Management
 - Configurable CPU cores and memory allocation
@@ -251,7 +261,7 @@ This project uses a modern microservices architecture with containerized service
 ## Summary by Category
 
 ### Languages
-- Python 3.12
+- Python 3.12+ package floor; Python 3.14 Docker runtime
 - TypeScript 5.0
 - JavaScript (ES6+)
 - HCL (Terraform)
@@ -260,7 +270,7 @@ This project uses a modern microservices architecture with containerized service
 
 ### Frameworks
 - FastAPI (Python backend)
-- Next.js 14 (React frontend)
+- Next.js 15 with React 19 (frontend)
 - Celery (task queue)
 - SQLAlchemy (ORM)
 - Tailwind CSS (styling)
