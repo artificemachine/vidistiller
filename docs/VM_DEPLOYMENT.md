@@ -47,8 +47,8 @@ recovering by hand.
 - Docker 24.0+
 - Docker Compose 2.20+
 - Git 2.0+
-- Python 3.12+ (for backend)
-- Node.js 20+ (for frontend)
+- Python 3.12+ is the backend package floor; the backend/worker Docker image uses Python 3.14.
+- Node.js 26 is used by the frontend Docker image. Host-side development should match it.
 
 ---
 

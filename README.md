@@ -243,7 +243,7 @@ Sidecar telemetry is published by the API scheduler to Redis and read through by
 
 ### `backend/app/core/config.py` — Settings
 
-Typed settings classes for database, JWT, CORS, logging, and every other configurable piece of the app. Reads from environment variables (see `.env.example`) with validation and sane development defaults, so `docker compose up -d` boots without any required configuration.
+Typed settings classes for database, JWT, CORS, logging, and every other configurable piece of the app. Reads from environment variables with validation. Copy `.env.example` to `.env` and configure it before starting Compose; the services interpolate database and other deployment values from that environment.
 
 ### `scripts/` — Utility Scripts
 
@@ -252,7 +252,7 @@ Automation helpers for common tasks:
 - `push-backend.sh` — build and push the backend image
 - `setup-staging.sh` — bring up a staging environment
 
-### `terraform/` — Infrastructure as Code
+### `deploy/terraform/` — Infrastructure as Code
 
 [Terraform](https://www.terraform.io/) definitions for deploying the application to a self-hosted Proxmox VM. Defines the VM, network, and cloud-init configuration; outputs connection details after `terraform apply`. See `deploy/` for the companion Ansible playbooks.
 
@@ -309,7 +309,7 @@ Automatically merged with `docker-compose.yml` by Docker Compose. Use this for p
 ## Prerequisites
 
 - **Docker** 24+ with Compose v2 (`docker compose version`)
-- **Node.js** 18+ (for running the frontend outside Docker)
+- **Node.js** 26 (matches the frontend Docker image; use the same runtime for host-side development)
 - **Python** 3.12+ (for running the backend outside Docker)
 - **Tesseract OCR** — required for Presentation Mode (`brew install tesseract` on macOS)
 
