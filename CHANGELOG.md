@@ -840,3 +840,5 @@ All notable changes to this project will be documented in this file.
 - 2026-11-05: docs: align dependency ranges, container runtimes, polling behavior and deployment prerequisites with the implementation.
 
 - 2026-11-26: fix(video): pin yt-dlp[default]==2026.11.23 so YouTube downloads and snapshot capture work again — the open floor yt-dlp>=2024.0.0 froze 2026.8.19 in the image, whose n challenge solver crashes on the current YouTube player, leaving only storyboard images (POST /api/snapshots/capture 503). The default extra now ships yt-dlp-ejs. New contract test in tests/test_dependency_contract.py. See docs/BUG-youtube-video-download-20261126.md.
+
+- 2026-11-26: chore(deps): raise the pip Dependabot queue to 15 and raise the floors held in it (alembic 1.20.1, anthropic 2.12.0, celery 5.6.3, fastapi-mail 1.6.8, pillow 13.0.0). Five open pull requests had filled the limit of 5 since 2026-08-27, so no yt-dlp update was proposed; supersedes #230, #233, #285, #288 and #290.
