@@ -13,7 +13,7 @@ email-validator>=2.3.0
 psycopg2-binary>=2.9.12
 
 # APIs and External Services
-google-api-python-client>=2.100.0
+google-api-python-client>=2.202.0
 openai>=1.0.0
 anthropic>=2.12.0
 yt-dlp[default]==2026.11.23  # exact pin + yt-dlp-ejs; YouTube changes break old releases (docs/BUG-youtube-video-download-20261126.md)
