@@ -5,6 +5,7 @@ The canonical project overview lives in the [root README](../README.md). This fo
 ## Deployment & Ops
 - [VM_DEPLOYMENT.md](VM_DEPLOYMENT.md): production VM deployment guide (Proxmox VM 900). Prod was previously hosted in an LXC; that target is deprecated.
 - [ops-runbook.md](ops-runbook.md): operational troubleshooting reference.
+- [BUG-youtube-video-download-20261126.md](BUG-youtube-video-download-20261126.md): YouTube download and snapshot capture failure, how to diagnose and repair it.
 - [TECH_STACK.md](TECH_STACK.md): technology stack overview and architecture summary.
 
 ## Design & Product
