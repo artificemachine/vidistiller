@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import yaml
 from packaging.requirements import Requirement
 from packaging.version import Version
 from sqlalchemy import create_engine
@@ -9,6 +10,9 @@ from sqlalchemy import create_engine
 BACKEND_REQUIREMENTS = Path(__file__).resolve().parents[1] / "backend" / "requirements.txt"
 # First release verified to solve YouTube player b485e332.
 OLDEST_WORKING_YT_DLP = Version("2026.11.23")
+DEPENDABOT_CONFIG = BACKEND_REQUIREMENTS.parents[1] / ".github" / "dependabot.yml"
+# A full queue silently stops new update pull requests, yt-dlp included.
+SMALLEST_PIP_QUEUE = 15
 
 
 def _requirements_named(name: str) -> list[Requirement]:
@@ -53,3 +57,11 @@ def test_plain_postgresql_url_resolves_to_an_installed_driver():
         assert engine.dialect.dbapi is not None
     finally:
         engine.dispose()
+
+
+def test_dependabot_pip_queue_leaves_room_for_downloader_updates():
+    """Five open pip pull requests blocked every yt-dlp proposal for months."""
+    updates = yaml.safe_load(DEPENDABOT_CONFIG.read_text())["updates"]
+    pip_entries = [entry for entry in updates if entry["package-ecosystem"] == "pip"]
+    assert len(pip_entries) == 1
+    assert pip_entries[0]["open-pull-requests-limit"] >= SMALLEST_PIP_QUEUE
